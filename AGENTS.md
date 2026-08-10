@@ -24,8 +24,8 @@ Notas:
   (gitignored, local a la máquina); se fuerza con `SPECIFY_FEATURE_DIRECTORY=<path>`. En monorepos: `SPECIFY_INIT_DIR`.
 - `/speckit.implement` exige `plan.md` y `tasks.md` existentes y checklists completos en
   `specs/<feature>/checklists/`; si faltan, pregunta antes de continuar.
-- `speckit.plan` y `speckit.tasks` leen `.specify/memory/constitution.md`, que hoy sigue siendo
-  **plantilla sin ratificar** → rellénala con `/speckit.constitution` antes de implementar.
+- `speckit.plan` y `speckit.tasks` leen `.specify/memory/constitution.md` (ratificada, v1.0.0).
+  Enmiéndala con `/speckit.constitution` si cambian los principios.
 - Hooks de extensiones se leen de `.specify/extensions.yml` (no existe hoy).
 - Comandos auxiliares: `/speckit.clarify`, `/speckit.checklist`, `/speckit.converge`, `/speckit.analyze`, `/speckit.taskstoissues`.
 

@@ -1,50 +1,85 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: N/A → 1.0.0 (ratificación inicial de la constitución)
+- Añadido: 5 principios fundamentales (I. Español primero, II. Modularidad por providers,
+  III. Trazabilidad de fuentes (NON-NEGOTIABLE), IV. Contratos de error explícitos
+  (Fail Fast, Fail Loud), V. Entrega incremental (MVP first)); secciones Restricciones
+  técnicas, Flujo de desarrollo y Governance.
+- Removido: ninguna sección.
+- Deferred TODOs: ninguno.
+-->
 
-## Core Principles
+# Constitución de mcp-bogota-factibilidad
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+## Principios Fundamentales
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### I. Español primero
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+Toda especificación, documentación, código, comentarios y mensajes DEBE escribirse en
+español. Las tools MCP y los campos de salida JSON DEBEN conservar nombres técnicos en
+inglés donde el contrato lo exige (p. ej. `source_name`, `layer_id`).
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. Modularidad por providers
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+Cada fuente de datos (Mapas Bogotá API, ArcGIS REST temáticas, RAG normativo futuro)
+DEBE ser un provider aislado con una única responsabilidad. Los providers son el límite
+de parsing: exponen modelos tipados (pydantic) y NO DEBEN mezclar responsabilidades
+entre fuentes.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+### III. Trazabilidad de fuentes (NON-NEGOTIABLE)
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+Toda salida para el LLM DEBE incluir trazabilidad por fuente: `source_name`, `layer_id`,
+`service_url`, `data_vigencia`, `query_timestamp`. NO DEBEN mezclarse capas de vigencias
+distintas como una sola fotografía temporal. El `feasibility_score` es heurístico: nunca
+inferir reglas urbanísticas ausentes en la fuente.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+### IV. Contratos de error explícitos (Fail Fast, Fail Loud)
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+Toda tool DEBE distinguir "dato disponible" de "dato no encontrado". DEBE fallar rápido
+con mensaje claro si falta `MAPAS_BOGOTA_APIKEY` en geocodificación. DEBEN manejarse de
+forma explícita los resultados vacíos y los errores 5xx de los servicios.
+
+### V. Entrega incremental (MVP first)
+
+Se avanza por features pequeñas: F1 resolver lote + contexto temático, F2 RAG
+normativo, F3 orquestación unificada. YAGNI: NO DEBE implementarse lo que no exige la
+feature activa.
+
+## Restricciones técnicas
+
+- Stack Python: dependencia `mcp>=1.0.0` (incluye FastMCP), `httpx`, `pydantic`;
+  proyecto con `pyproject.toml`; estructura `app/` modular (`main.py` con FastMCP,
+  `providers/`, `models.py`).
+- Transporte MCP por stdio.
+- Docker Python: imagen multi-etapa razonable; sin requisito de versión específica aún.
+- Sin credenciales embebidas en código: `MAPAS_BOGOTA_APIKEY` solo vía entorno (`.env`),
+  opcional salvo geocodificación (`geocodificar` / `geocodificar_inverso`);
+  `.env.example` documenta la variable.
+- Fuentes públicas de datos: Mapas Bogotá API y servicios ArcGIS REST del catastro de
+  Bogotá.
+
+## Flujo de desarrollo
+
+- Ciclo Spec Kit obligatorio, en este orden: `/speckit.specify` → `/speckit.plan` →
+  `/speckit.tasks` → `/speckit.implement`, con separador `.` (`/speckit.specify`, no
+  `/speckit-specify`).
+- Commit en cada hito ratificado: constitución, spec, plan, tasks, checklist e
+  implementación.
+- Toda spec/plan DEBE revisarse antes de implementar; la constitución y `AGENTS.md` son
+  de lectura obligatoria antes de especificar o planificar.
+- El brief `20260809-01-perplexity.md` es la fuente de verdad del producto; el feature
+  activo se resuelve vía `.specify/feature.json`.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+- La constitución prevalece sobre prácticas ad hoc. Toda enmienda exige justificación
+  escrita, aprobación del usuario y bump semántico de versión:
+  - MAJOR: cambios incompatibles de gobernanza.
+  - MINOR: principio o sección nueva.
+  - PATCH: clarificaciones.
+- Revisión de cumplimiento en cada ciclo de implementación: checklist del feature +
+  revisión por el reviewer.
+- Las convenciones de runtime y datos del dominio se mantienen en `AGENTS.md`; referir
+  a él para detalles operativos.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2026-08-10 | **Last Amended**: 2026-08-10
