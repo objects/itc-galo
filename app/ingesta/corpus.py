@@ -699,7 +699,7 @@ def consultar_corpus(
 
 RUTA_CORPUS = "data/corpus/decreto_555_2021.jsonl"
 RUTA_HASH = "data/corpus/decreto_555_2021.jsonl.sha256"
-DEFAULT_URL = os.getenv("CORPUS_URL", "https://www.sisjur.gov.co/decreto-555-2021")
+DEFAULT_URL = os.getenv("CORPUS_URL", "https://www.alcaldiabogota.gov.co/sisjur/normas/Norma1.jsp?i=119582")
 DEFAULT_INDICE = os.getenv("VECTOR_DB_PATH", ".data/chroma")
 
 

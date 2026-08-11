@@ -19,7 +19,7 @@ remitirse a [contracts/](contracts/) y [data-model.md](data-model.md).
    - `OLLAMA_EMBEDDING_MODEL=bge-m3` (modelo de embeddings, 1024 dims).
    - `OLLAMA_CHAT_MODEL=qwen3:8b` (modelo de chat para generación de respuesta).
    - `VECTOR_DB_PATH=.data/chroma` (directorio del índice vectorial).
-   - `CORPUS_URL=https://www.sisjur.gov.co/decreto-555-2021` (URL sisjur del Decreto 555/2021).
+   - `CORPUS_URL=https://www.alcaldiabogota.gov.co/sisjur/normas/Norma1.jsp?i=119582` (URL sisjur del Decreto 555/2021).
    - `MAPAS_BOGOTA_APIKEY` (opcional): obligatoria solo para `get_upl` por dirección.
 4. **Ollama corriendo localmente** con modelos descargados:
    ```bash
