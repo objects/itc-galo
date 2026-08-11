@@ -151,3 +151,105 @@ class ContextoTematico(BaseModel):
             }
             for nombre, dato in fuentes
         ]
+
+
+# --- Feature 2 (RAG normativo del POT, Decreto 555/2021) ---
+# Entidades nuevas del data-model.md de F2: UPL y Localidad (get_upl) y
+# ArticuloNormativo / Chunk / CorpusInfo (ingesta y RAG normativo). Reutilizan
+# SourceTrace de F1 (5 campos, Principio III NON-NEGOTIABLE).
+
+# Nombre unico de la coleccion ChromaDB del corpus normativo: lo comparten la
+# ingesta (app.ingesta.corpus) y el provider RAG (app.providers.normativa).
+COLECCION_NORMATIVA = "decreto_555_2021"
+
+
+class UPL(BaseModel):
+    """Unidad de Planeamiento Local del POT de Bogota (data-model.md:57-78).
+
+    Entidad territorial de planeamiento definida por el Decreto 555/2021. Se
+    obtiene por join espacial punto-en-poligono del centroide del Lote contra la
+    capa `ordenamientoterritorial/unidadplaneamientolocal` (research D2). La
+    `localidad_derivada` se obtiene por mapeo `NOMBRE -> localidad` (research
+    D3): nunca se lee de la capa UPL. Los campos de acto administrativo,
+    normativa y vocacion provienen de los atributos de la capa.
+
+    Estados de dato (FR-007): `disponible` (UPL encontrada) o `no_encontrado`
+    (en get_upl se reporta como LOTE_SIN_UPL, no como un objeto con ceros).
+    """
+
+    codigo_upl: str
+    nombre: str
+    localidad_derivada: str | None = None
+    acto_administrativo: str | None = None
+    numero_acto_administrativo: str | None = None
+    fecha_acto_administrativo: str | None = None
+    normativa: str | None = None
+    vocacion: str | None = None
+    observacion: str | None = None
+    area_ha: float | None = None
+    estado: EstadoDato | None = None
+    source_trace: SourceTrace | None = None
+
+
+class Localidad(BaseModel):
+    """Division administrativa de Bogota (data-model.md:80-88).
+
+    Contiene una o mas UPL; cada UPL se ubica dentro de una unica localidad
+    (relacion normativa del POT).
+    """
+
+    codigo: str
+    nombre: str
+
+
+class ArticuloNormativo(BaseModel):
+    """Articulo del Decreto 555/2021 con su texto literal y ubicacion en el
+    documento (data-model.md:90-104).
+
+    Unidad de recuperacion del RAG normativo. `texto` es el texto literal de la
+    fuente oficial (FR-003) y `parte` (`general` | `urbano` | `rural`, o
+    `None` para "sin parte") es la base del filtro estricto por UPL (FR-002).
+    `upls_mencionadas` registra las UPLs que el articulo menciona
+    explicitamente (mencion explicita del mismo filtro).
+    """
+
+    numero: int
+    titulo: str
+    texto: str
+    libro: str
+    parte: str | None = None
+    seccion: str | None = None
+    upls_mencionadas: list[str] = []
+    articulos_derogados: list[int] = []
+
+
+class Chunk(BaseModel):
+    """Pieza indexada en el vector store, derivada de un ArticuloNormativo
+    (data-model.md:128-143).
+
+    Chunking boundary-aware (research D6): 1 chunk = 1 articulo; los articulos
+    largos se parten por paragrafos con overlap y heredan los metadatos del
+    articulo. `texto` es el fragmento literal que se cita (FR-003).
+    """
+
+    id: str
+    articulo: int
+    titulo: str
+    libro: str
+    parte: str | None = None
+    seccion: str | None = None
+    texto: str
+
+
+class CorpusInfo(BaseModel):
+    """Coleccion de articulos del Decreto 555/2021 indexada (data-model.md:106-126).
+
+    El corpus parseado es la fuente de verdad versionada en git (FR-009); el
+    indice vectorial es un dato derivado regenerable. `hash_sha256` es la huella
+    del corpus que permite verificar integridad y actualidad del indice.
+    """
+
+    documento: str
+    vigencia: str
+    hash_sha256: str
+    total_articulos: int

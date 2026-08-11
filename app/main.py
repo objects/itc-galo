@@ -1,4 +1,4 @@
-"""Servidor MCP mcp-bogota-factibilidad (T012): registra exactamente 4 tools.
+"""Servidor MCP mcp-bogota-factibilidad: registra 6 tools (4 F1 + 2 F2).
 
 Transporte por stdio (constitucion, Restricciones tecnicas; research.md D8). Los
 providers son la frontera de parsing (Principio II); las tools aplican las
@@ -22,7 +22,7 @@ no mezclar vigencias (FR-008). No se anade ningun campo a la respuesta: el schem
 del contrato es additionalProperties=false.
 
 Ciclo de vida (decision A1 punto 3): el servidor instanciado a nivel de modulo se
-cierra con un lifespan de FastMCP/MCPServer (shutdown -> aclose de ambos
+cierra con un lifespan de FastMCP/MCPServer (shutdown -> aclose de todos
 providers). Los tests construyen servidores con MockTransport y los cierran
 manualmente via servidor.aclose(); el lifespan solo corre cuando mcp.run() arranca.
 """
@@ -36,15 +36,20 @@ from typing import Any
 
 from app.errores import (
     CodigoError,
+    CorpusNoIngestadoError,
     CredencialFaltanteError,
     Fuente4xxError,
     Fuente5xxError,
     FuenteDatosInvalidosError,
+    OllamaNoDisponibleError,
+    UplNoEncontradaError,
     construir_error,
 )
 from app.models import Centroide, Lote
 from app.providers.arcgis import ArcGISProvider
 from app.providers.mapas_bogota import CandidatoDireccion, MapasBogotaProvider
+from app.providers.normativa import NormativaProvider
+from app.providers.upl import UPLProvider
 
 try:  # mcp >= 1.x: FastMCP
     from mcp.server.fastmcp import FastMCP as _ClaseServidorMCP
@@ -58,17 +63,25 @@ CAMPOS_TRAZA = {"source_name", "layer_id", "service_url", "data_vigencia", "quer
 
 
 class ServidorLotes:
-    """Logica de dominio de las 4 tools MCP sobre los providers tipados."""
+    """Logica de dominio de las 6 tools MCP (4 F1 + 2 F2) sobre los providers tipados."""
 
     def __init__(
-        self, provider_mapas: MapasBogotaProvider, provider_arcgis: ArcGISProvider
+        self,
+        provider_mapas: MapasBogotaProvider,
+        provider_arcgis: ArcGISProvider,
+        provider_upl: UPLProvider,
+        provider_normativa: NormativaProvider,
     ) -> None:
         self._mapas = provider_mapas
         self._arcgis = provider_arcgis
+        self._upl = provider_upl
+        self._normativa = provider_normativa
 
     async def aclose(self) -> None:
         await self._mapas.aclose()
         await self._arcgis.aclose()
+        await self._upl.aclose()
+        await self._normativa.aclose()
 
     async def resolve_lot_by_chip(self, chip: str) -> dict[str, Any]:
         """Resuelve un lote por CHIP y devuelve su identidad, geometria, centroide y contexto tematico con trazabilidad por fuente."""
@@ -102,7 +115,13 @@ class ServidorLotes:
             return construir_error(CodigoError.DIRECCION_NO_LOCALIZADA)
         if len(candidatos) > 1:
             return self._respuesta_multiples_candidatos(candidatos)
-        return await self._resolver_lote_por_candidato(candidatos[0])
+        lote, error = await self._resolver_lote_por_candidato(candidatos[0])
+        if error:
+            return error
+        contexto, error = await self._consultar_contexto_seguro(lote)
+        if error:
+            return error
+        return {"lote": _lote_a_contrato(lote), "contexto_tematico": contexto.a_contexto_contrato()}
 
     async def resolve_lot_by_coordinates(
         self, latitude: float, longitude: float
@@ -141,6 +160,117 @@ class ServidorLotes:
             "identidad": _identidad_a_contrato(lote),
             "contexto_por_fuente": contexto.a_lista_por_fuente(),
         }
+
+    # --- F2: Tools de UPL y Normativa ---
+
+    async def get_upl(
+        self,
+        chip: str | None = None,
+        direccion: str | None = None,
+        coordenadas: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """Resuelve la UPL de un lote por CHIP, direccion o coordenadas (FR-005).
+        Reutiliza el resolver de F1 para obtener el lote y su centroide,
+        luego consulta la capa UPL (join espacial punto-en-poligono).
+        """
+        # Validacion fail-fast: exactamente un criterio (FR-013)
+        criterios = sum(1 for c in (chip, direccion, coordenadas) if c is not None)
+        if criterios != 1:
+            return construir_error(
+                CodigoError.PARAMETROS_INVALIDOS,
+                message="Parámetros inválidos: debe proveer exactamente uno de chip, direccion o coordenadas.",
+            )
+
+        lote, error = None, None
+
+        if chip is not None:
+            error = _validar_chip(chip)
+            if error:
+                return error
+            lote, error = await self._resolver_lote_por_chip(chip)
+            if error:
+                return error
+
+        elif direccion is not None:
+            if not isinstance(direccion, str) or not direccion.strip():
+                return construir_error(
+                    CodigoError.PARAMETROS_INVALIDOS,
+                    message="Parámetros inválidos: la dirección no puede estar vacía.",
+                )
+            if not self._mapas.tiene_api_key():
+                return construir_error(CodigoError.CREDENCIAL_FALTANTE)
+            try:
+                candidatos = await self._mapas.geocodificar(direccion.strip())
+            except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError, CredencialFaltanteError) as exc:
+                if isinstance(exc, CredencialFaltanteError):
+                    return construir_error(CodigoError.CREDENCIAL_FALTANTE)
+                return _error_de_fuente(exc)
+            if not candidatos:
+                return construir_error(CodigoError.DIRECCION_NO_LOCALIZADA)
+            if len(candidatos) > 1:
+                return self._respuesta_multiples_candidatos(candidatos)
+            res = await self._resolver_lote_por_candidato(candidatos[0])
+            if isinstance(res, dict) and "error" in res:
+                return res
+            lote, error = res
+            if error:
+                return error
+
+        elif coordenadas is not None:
+            lat = coordenadas.get("lat")
+            lng = coordenadas.get("lon")
+            error = _validar_coordenadas(lat, lng)
+            if error:
+                return error
+            lote, error = await self._resolver_lote_por_punto(lng, lat)
+            if error:
+                return error
+            if lote is None:
+                return construir_error(
+                    CodigoError.FUERA_DE_COBERTURA,
+                    message="El punto ({lat}, {lng}) está fuera del área de cobertura (Bogotá).",
+                    lat=lat,
+                    lng=lng,
+                )
+
+        if lote is None:
+            return construir_error(CodigoError.LOTE_NO_ENCONTRADO)
+
+        # Consulta UPL por centroide del lote
+        try:
+            upl = await self._upl.consultar_upl_por_punto(lote.centroid.lng, lote.centroid.lat)
+        except Exception as exc:
+            return _error_de_fuente(exc)
+
+        return {
+            "upl": {
+                "codigo": upl.codigo_upl,
+                "nombre": upl.nombre,
+                "localidad": upl.localidad_derivada,
+            },
+            "trazabilidad": upl.source_trace.model_dump() if upl.source_trace else None,
+        }
+
+    async def consultar_normativa(
+        self,
+        consulta: str,
+        upl: str | None = None,
+        top_k: int = 3,
+    ) -> dict[str, Any]:
+        """Consulta la normativa del POT (Decreto 555/2021) con RAG (FR-001, FR-003, Historia 1).
+
+        Filtro estricto por UPL opcional (FR-002, Historia 3).
+        """
+        # Validaciones fail-fast (FR-013) - el provider valida internamente
+        try:
+            resultado = await self._normativa.consultar(consulta=consulta, upl=upl, top_k=top_k)
+        except ValueError as exc:
+            return construir_error(CodigoError.PARAMETROS_INVALIDOS, message=f"Parámetros inválidos: {exc}.")
+        except Exception as exc:
+            # CorpusNoIngestadoError, OllamaNoDisponibleError, Fuente5xxError, etc.
+            return _error_de_fuente(exc)
+
+        return resultado
 
     # --- Flujos internos ---
 
@@ -184,12 +314,12 @@ class ServidorLotes:
 
     async def _resolver_lote_por_candidato(
         self, candidato: CandidatoDireccion
-    ) -> dict[str, Any]:
+    ) -> tuple[Lote | None, dict | None]:
         lote, error = await self._resolver_lote_por_punto(candidato.lng, candidato.lat)
         if error:
-            return error
+            return None, error
         if lote is None:
-            return construir_error(
+            return None, construir_error(
                 CodigoError.LOTE_NO_ENCONTRADO,
                 message="No se encontró un lote único para el punto ({lat}, {lng}).",
                 lat=candidato.lat,
@@ -207,11 +337,8 @@ class ServidorLotes:
         )
         contexto, error = await self._consultar_contexto_seguro(lote_con_direccion)
         if error:
-            return error
-        return {
-            "lote": _lote_a_contrato(lote_con_direccion),
-            "contexto_tematico": contexto.a_contexto_contrato(),
-        }
+            return None, error
+        return lote_con_direccion, None
 
     async def _resolver_lote_por_punto(
         self, lng: float, lat: float
@@ -312,6 +439,12 @@ def _error_de_fuente(exc: Exception) -> dict[str, Any]:
         return construir_error(
             CodigoError.FUENTE_5XX, source_name=exc.source_name, status=exc.status
         )
+    if isinstance(exc, UplNoEncontradaError):
+        return construir_error(
+            CodigoError.LOTE_SIN_UPL,
+            source_name=exc.source_name,
+            codigo_catastral=exc.codigo_catastral,
+        )
     if isinstance(exc, FuenteDatosInvalidosError):
         return construir_error(
             CodigoError.FUENTE_5XX,
@@ -330,6 +463,19 @@ def _error_de_fuente(exc: Exception) -> dict[str, Any]:
             source_name=exc.source_name,
             status=exc.status,
             detalle=detalle,
+        )
+    if isinstance(exc, CorpusNoIngestadoError):
+        # Estado de infraestructura (data-model.md:247): no es "sin resultados" ni
+        # un fallo de la fuente; se reporta CORPUS_NO_INGESTADO con mensaje accionable.
+        return construir_error(
+            CodigoError.CORPUS_NO_INGESTADO,
+            source_name=exc.source_name,
+        )
+    if isinstance(exc, OllamaNoDisponibleError):
+        return construir_error(
+            CodigoError.OLLAMA_NO_DISPONIBLE,
+            source_name=exc.source_name,
+            modelo=exc.modelo if exc.modelo else "requerido",
         )
     raise exc  # error inesperado: fail loud, no se enmascara
 
@@ -394,11 +540,13 @@ def _construir_servidor_lotes() -> ServidorLotes:
     return ServidorLotes(
         MapasBogotaProvider(api_key=api_key),
         ArcGISProvider(),
+        UPLProvider(),
+        NormativaProvider(),
     )
 
 
 def crear_servidor_mcp(servidor_lotes: ServidorLotes | None = None) -> _ClaseServidorMCP:
-    """Construye el servidor MCP registrando EXACTAMENTE las 4 tools del contrato.
+    """Construye el servidor MCP registrando EXACTAMENTE las 6 tools del contrato (4 F1 + 2 F2).
 
     Registra un lifespan que cierra los providers (httpx.AsyncClient) al terminar
     el ciclo de vida del servidor MCP (decision A1 punto 3). El lifespan solo
@@ -419,6 +567,8 @@ def crear_servidor_mcp(servidor_lotes: ServidorLotes | None = None) -> _ClaseSer
     mcp.tool()(servidor_lotes.resolve_lot_by_address)
     mcp.tool()(servidor_lotes.resolve_lot_by_coordinates)
     mcp.tool()(servidor_lotes.get_lot_summary_by_chip)
+    mcp.tool()(servidor_lotes.get_upl)
+    mcp.tool()(servidor_lotes.consultar_normativa)
     return mcp
 
 

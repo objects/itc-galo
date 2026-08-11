@@ -10,6 +10,8 @@ import httpx
 from app.main import ServidorLotes
 from app.providers.arcgis import ArcGISProvider
 from app.providers.mapas_bogota import MapasBogotaProvider
+from app.providers.normativa import NormativaProvider
+from app.providers.upl import UPLProvider
 
 
 # --- Respuestas simuladas de las fuentes ---
@@ -183,4 +185,6 @@ def construir_servidor(mapas=None, arcgis=None):
     return ServidorLotes(
         mapas if mapas is not None else provider_mapas_estandar(),
         arcgis if arcgis is not None else provider_arcgis_estandar(),
+        UPLProvider(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"type": "FeatureCollection", "features": []}))),
+        NormativaProvider(),
     )

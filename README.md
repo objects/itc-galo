@@ -3,12 +3,13 @@
 Servidor MCP (Model Context Protocol) en Python que permite consultar un **lote
 catastral de Bogotá** por CHIP, por dirección o por coordenadas, enriquecerlo con
 **contexto temático** (valor de referencia catastral, destino económico, reservas
-viales y obras públicas) y obtener un **resumen consolidado** con trazabilidad por
-fuente.
+viales y obras públicas), resolver su **UPL (Unidad de Planeamiento Local)** y
+consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
+(ChromaDB + Ollama), todo con trazabilidad por fuente.
 
-Es la Feature 1 (MVP) del producto de factibilidad de lotes para construcción en
-Bogotá. Fuera de alcance en esta versión: consulta de UPL, RAG normativo del POT
-(Decreto 555 de 2021) y el reporte consolidado de factibilidad.
+- **Feature 1** (MVP): resolución de lote + contexto temático (4 tools).
+- **Feature 2**: RAG normativo del POT + consulta de UPL (2 tools nuevas).
+- Fuera de alcance: el reporte consolidado de factibilidad (Feature 3).
 
 ## Requisitos
 
@@ -16,6 +17,13 @@ Bogotá. Fuera de alcance en esta versión: consulta de UPL, RAG normativo del P
 - Acceso de red a las fuentes públicas:
   - `https://mapas.bogota.gov.co/api/` (API de búsqueda de Mapas Bogotá)
   - `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/` (ArcGIS REST del catastro)
+- **Ollama local** (solo Feature 2: `get_upl` y `consultar_normativa`) con los
+  modelos de embeddings y de chat descargados:
+  ```bash
+  ollama pull bge-m3
+  ollama pull qwen3:8b
+  ```
+  El RAG normativo es 100 % local: sin llamadas a APIs de pago ni nube.
 
 ## Instalación
 
@@ -27,7 +35,7 @@ pip install -e ".[dev]"
 
 ## Configuración
 
-Copia `.env.example` a `.env` si deseas configurar la credencial opcional:
+Copia `.env.example` a `.env` y ajusta los valores:
 
 ```bash
 cp .env.example .env
@@ -35,10 +43,37 @@ cp .env.example .env
 
 | Variable | Obligatoria | Descripción |
 |----------|-------------|-------------|
-| `MAPAS_BOGOTA_APIKEY` | Solo para consulta por dirección | API key de Mapas Bogotá para `geocodificar`. Sin ella, `resolve_lot_by_address` falla rápido con `CREDENCIAL_FALTANTE`; las consultas por CHIP y por coordenadas siguen funcionando. |
+| `MAPAS_BOGOTA_APIKEY` | Solo consulta por dirección | API key de Mapas Bogotá para `geocodificar`. Sin ella, `resolve_lot_by_address` y `get_upl` por dirección fallan rápido con `CREDENCIAL_FALTANTE`; las consultas por CHIP y por coordenadas siguen funcionando. |
+| `OLLAMA_BASE_URL` | Solo F2 | Endpoint de Ollama (default `http://192.168.40.91:11434`; ChromaDB usa el legado `/api/embeddings`). |
+| `OLLAMA_EMBEDDING_MODEL` | Solo F2 | Modelo de embeddings (default `bge-m3`, 1024 dims). |
+| `OLLAMA_CHAT_MODEL` | Solo F2 | Modelo de chat para la generación de respuesta (default `qwen3:8b`). |
+| `CORPUS_URL` | Ingesta | URL oficial del articulado en sisjur (default `Norma1.jsp?i=119582`). |
+| `VECTOR_DB_PATH` | Solo F2 | Directorio del índice ChromaDB (default `.data/chroma`, gitignored, regenerable). |
+| `EMBEDDING_DIM` | Solo F2 | Dimensión del embedding (default `1024`, debe coincidir con el modelo). |
 
 Las variables de entorno se leen directamente del entorno; el proyecto no carga `.env`
 automáticamente.
+
+## Ingesta del corpus normativo (Feature 2)
+
+Antes de usar `consultar_normativa` hay que ingerir el corpus del Decreto 555/2021:
+
+```bash
+# Pipeline completo: descarga sisjur → parsea 608 artículos → versiona JSONL + .sha256 → indexa en ChromaDB
+python -m app.ingesta.corpus full
+
+# Solo descargar y versionar (no requiere Ollama; genera data/corpus/decreto_555_2021.jsonl + .sha256)
+python -m app.ingesta.corpus descargar
+
+# Solo indexar el corpus ya versionado (requiere Ollama con bge-m3)
+python -m app.ingesta.corpus indexar
+
+# Consulta directa al índice (debugging)
+python -m app.ingesta.corpus consultar "usos del suelo" --top-k 5 --umbral 0.35 --upl UPL17
+```
+
+El JSONL versionado (`data/corpus/`) es la fuente de verdad versionada en git
+(FR-009); el índice vectorial (`.data/chroma/`) es un dato derivado regenerable.
 
 ## Ejecución del servidor MCP
 
@@ -54,7 +89,7 @@ O bien, con la entrada de consola instalada:
 mcp-bogota-factibilidad
 ```
 
-### Tools expuestas
+### Tools expuestas (6)
 
 | Tool | Descripción |
 |------|-------------|
@@ -62,9 +97,12 @@ mcp-bogota-factibilidad
 | `resolve_lot_by_address` | Geocodifica una dirección y resuelve el lote asociado (requiere `MAPAS_BOGOTA_APIKEY`). |
 | `resolve_lot_by_coordinates` | Resuelve el lote que contiene un punto (`latitud`, `longitud` en WGS84). |
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo del lote por CHIP (identidad + contexto por fuente). |
+| `get_upl` | Resuelve la UPL del lote por CHIP, dirección o coordenadas (join espacial punto-en-polígono contra la capa UPL; localidad derivada por mapeo nombre → localidad). |
+| `consultar_normativa` | Consulta en lenguaje natural sobre el POT con citas literales de artículos (RAG local); filtro estricto opcional por UPL. |
 
 Los contratos exactos (JSON Schema de entrada/salida) están en
-`specs/001-resolver-lote-contexto/contracts/`.
+`specs/001-resolver-lote-contexto/contracts/` (F1) y
+`specs/002-rag-normativo-upl/contracts/` (F2).
 
 ## Pruebas
 
@@ -72,11 +110,13 @@ Los contratos exactos (JSON Schema de entrada/salida) están en
 python -m pytest -q
 ```
 
-- `tests/smoke/`: el servidor arranca y las 4 tools quedan registradas.
+- `tests/smoke/`: el servidor arranca y las 6 tools quedan registradas.
 - `tests/contract/`: contratos de las tools, taxonomía de errores, validación
-  FR-012, trazabilidad (5 campos por dato), estados `disponible`/`no_encontrado`
-  y escenarios del quickstart. Las pruebas usan respuestas simuladas
-  (`httpx.MockTransport`): **no** hacen llamadas de red reales.
+  FR-013, trazabilidad (5 campos por dato), estados `disponible`/`no_encontrado`,
+  ingesta del corpus (parseo, chunking, hash, indexación idempotente) y escenarios
+  del quickstart. Las pruebas usan respuestas simuladas (`httpx.MockTransport`) y
+  un embedding function determinista: **no** hacen llamadas de red reales ni
+  requieren Ollama.
 
 ## Trazabilidad (Principio III, no negociable)
 
@@ -85,28 +125,36 @@ Cada dato presentado al LLM incluye exactamente 5 campos de origen:
 - `source_name`: nombre canónico de la fuente (`mapas_bogota`,
   `Mapa_Referencia/Mapa_Referencia`, `catastro/valorreferencia`,
   `catastro/destinolt`, `ordenamientoterritorial/reservavial`,
-  `gestionpublica/obraspublicas`).
-- `layer_id`: capa o tema dentro del servicio.
+  `gestionpublica/obraspublicas`, `IDECA Catastro — Unidad de Planeamiento Local`,
+  `Decreto 555 de 2021 (POT Bogotá)`).
+- `layer_id`: capa o tema dentro del servicio (p. ej. `38`, `unidadplaneamientolocal.0`,
+  `Decreto_555_2021`).
 - `service_url`: URL del servicio consultado.
 - `data_vigencia`: vigencia del dato en la fuente.
 - `query_timestamp`: marca de tiempo de la consulta (ISO 8601 UTC).
 
 Los datos de vigencias distintas nunca se presentan como una sola fotografía
-temporal: cada dato conserva su vigencia.
+temporal: cada dato conserva su vigencia (FR-014).
 
 ## Estructura del proyecto
 
 ```text
 app/
-├── main.py              # FastMCP: registra las 4 tools
-├── models.py            # Modelos pydantic (Lote, contexto temático, trazabilidad)
-├── errores.py           # Taxonomía de errores del contrato
-└── providers/           # Un provider por fuente
-    ├── mapas_bogota.py  # Mapas Bogotá API (direccion_chip, geocodificar)
-    └── arcgis.py        # ArcGIS REST (Lote=38 + temáticas)
-tests/
-├── contract/            # Contratos de las tools y de error
-└── smoke/               # Smoke test de arranque
+├── main.py              # FastMCP: registra las 6 tools (4 F1 + 2 F2)
+├── models.py            # Modelos pydantic (Lote, contexto, UPL, ArticuloNormativo, Chunk, CorpusInfo)
+├── errores.py           # Taxonomía de errores del contrato (10 códigos)
+├── providers/           # Un provider por fuente (Principio II)
+│   ├── mapas_bogota.py  # Mapas Bogotá API (direccion_chip, geocodificar)
+│   ├── arcgis.py        # ArcGIS REST (Lote=38 + temáticas)
+│   ├── arcgis_utils.py  # Utilidades compartidas (params por punto, consultar_query, CapaConfig)
+│   ├── upl.py           # Capa UPL (unidadplaneamientolocal.0) + mapeo nombre → localidad
+│   └── normativa.py     # RAG: ChromaDB + embeddings Ollama + chat LLM con citation forcing
+├── ingesta/             # Pipeline de ingesta del corpus normativo (F2)
+│   └── corpus.py        # Parseo sisjur, chunking, hash SHA-256, indexación ChromaDB, CLI
+├── data/corpus/         # Corpus versionado en git (JSONL + .sha256) — FR-009
+└── tests/
+    ├── contract/        # Contratos de las tools, errores, validación, trazabilidad, ingesta
+    └── smoke/           # Smoke test de arranque (6 tools)
 ```
 
 ## Docker
@@ -117,4 +165,6 @@ docker run --rm -i mcp-bogota-factibilidad
 ```
 
 El contenedor ejecuta el servidor MCP por stdio; conéctalo como subproceso desde
-un cliente MCP (p. ej. el Inspector de MCP).
+un cliente MCP (p. ej. el Inspector de MCP). Para Feature 2, el contenedor necesita
+acceso al servicio Ollama (p. ej. `--add-host` o red compartida) y el volumen del
+índice vectorial ya ingerido.

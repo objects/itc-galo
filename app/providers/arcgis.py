@@ -21,6 +21,12 @@ Fuente5xxError y nunca "no encontrado"; un 4xx es Fuente4xxError; un payload no
 utilizable es FuenteDatosInvalidosError. ArcGIS REST reporta errores con HTTP 200
 + body {"error": {code, ...}}; verificar_body_sin_error los detecta (hallazgo A2).
 
+Utilidades compartidas (plan.md:303-312): la construccion de params por punto
+(construir_params_punto), el clasificador de consulta (consultar_query) y
+CapaConfig viven en arcgis_utils.py; este modulo delega en ellas para no duplicar
+la semantica espacial. El refactor no cambia el comportamiento de F1 (garantia de
+no-regresion de los 33 tests).
+
 Fail-fast del contexto tematico: asyncio.gather corre SIN return_exceptions de
 forma deliberada. Si una tematica falla (5xx), toda la respuesta es FUENTE_5XX y
 no se "rescata" parcialmente el contexto: el shape de salida no tiene canal de
@@ -32,7 +38,6 @@ tematica reporta no_encontrado por separado (FR-007).
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -40,12 +45,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
-from app.errores import (
-    Fuente4xxError,
-    Fuente5xxError,
-    FuenteDatosInvalidosError,
-    verificar_body_sin_error,
-)
+from app.errores import Fuente4xxError, FuenteDatosInvalidosError
 from app.models import (
     ContextoTematico,
     DestinoEconomico,
@@ -54,8 +54,12 @@ from app.models import (
     SourceTrace,
     ValorReferencia,
 )
-
-RAIZ_ARCGIS = "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services"
+from app.providers.arcgis_utils import (
+    RAIZ_ARCGIS,
+    CapaConfig,
+    construir_params_punto,
+    consultar_query,
+)
 
 # Vigencias declaradas por capa (research.md D5 y brief 20260809-01-perplexity.md):
 # - Mapa de Referencia: ano 2019.
@@ -71,20 +75,6 @@ VIGENCIAS_DEFAULT: dict[str, str] = {
     "reservavial": "2019-08-15",
     "obraspublicas": "2025",
 }
-
-
-class CapaConfig(BaseModel):
-    """Configuracion canonica de una capa del servicio ArcGIS."""
-
-    clave: str
-    source_name: str
-    service_url: str
-    layer_id: str
-    data_vigencia: str
-
-    @property
-    def ruta_consulta(self) -> str:
-        return f"{self.service_url.replace(RAIZ_ARCGIS, '').lstrip('/')}/{self.layer_id}/query"
 
 
 def _configuracion_capas(vigencias_por_tema: dict[str, str] | None) -> dict[str, CapaConfig]:
@@ -295,43 +285,29 @@ class ArcGISProvider:
         )
 
     async def _consultar(self, capa: CapaConfig, params: dict[str, Any]) -> dict[str, Any]:
-        """GET a la capa ArcGIS con clasificacion de errores de fuente tipada.
+        """Consulta la capa ArcGIS delegando en las utilidades compartidas.
 
-        - HTTP/body 5xx -> Fuente5xxError (FR-009).
-        - HTTP/body 4xx -> Fuente4xxError (peticion rechazada).
-        - Payload no utilizable -> FuenteDatosInvalidosError.
-        - Errores con HTTP 200 + body {"error": {code, ...}} (patron ArcGIS REST)
-          se detectan via verificar_body_sin_error y se clasifican igual.
+        La clasificacion de errores (5xx/4xx/body/payload, FR-009) vive en
+        `arcgis_utils.consultar_query` (plan.md:303-312): este modulo no duplica
+        la semantica espacial ni el clasificador.
         """
-        try:
-            respuesta = await self._client.get(capa.ruta_consulta, params=params)
-        except httpx.TransportError as exc:
-            # Fallo de red: la fuente no esta disponible
-            raise Fuente5xxError(capa.source_name, 503) from exc
-        if respuesta.status_code >= 500:
-            raise Fuente5xxError(capa.source_name, respuesta.status_code)
-        if respuesta.status_code >= 400:
-            raise Fuente4xxError(capa.source_name, respuesta.status_code)
-        try:
-            data = respuesta.json()
-        except json.JSONDecodeError as exc:
-            raise FuenteDatosInvalidosError(
-                capa.source_name, "la respuesta no es JSON válido"
-            ) from exc
-        return verificar_body_sin_error(data, capa.source_name)
+        return await consultar_query(
+            client=self._client,
+            base_url=capa.service_url,
+            layer_id=capa.layer_id,
+            source_name=capa.source_name,
+            params=params,
+        )
 
     @staticmethod
     def _params_punto(lng: float, lat: float) -> dict[str, Any]:
-        return {
-            "f": "geojson",
-            "geometry": f"{lng},{lat}",
-            "geometryType": "esriGeometryPoint",
-            "inSR": "4326",
-            "spatialRel": "esriSpatialRelIntersects",
-            "outSR": "4326",
-            "returnGeometry": "false",
-            "outFields": "*",
-        }
+        """Params de la consulta espacial por punto (patron F1, delegado).
+
+        `construir_params_punto` usa la firma (lat, lon); aqui se conserva el
+        orden historico (lng, lat) de los llamadores de F1 sin cambiar el dict
+        resultante.
+        """
+        return construir_params_punto(lat=lat, lon=lng)
 
     def _parsear_lotes(self, data: dict[str, Any]) -> list[LoteArcgis]:
         capa = self._capas["lote"]

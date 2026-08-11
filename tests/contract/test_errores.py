@@ -1,7 +1,8 @@
 """Contract tests de la taxonomia de errores (T032).
 
 Un 5xx de la fuente se reporta como FUENTE_5XX y NUNCA como no encontrado (FR-009).
-Se verifican los 7 codigos canonicos del contrato (data-model.md:137-149).
+Se verifican los 10 codigos canonicos del contrato (los 7 de F1 + LOTE_SIN_UPL,
+CORPUS_NO_INGESTADO y OLLAMA_NO_DISPONIBLE de F2; data-model.md:219-249).
 """
 
 from __future__ import annotations
@@ -25,10 +26,13 @@ CODIGOS_CANONICOS = {
     "FUENTE_5XX",
     "CREDENCIAL_FALTANTE",
     "PARAMETROS_INVALIDOS",
+    "LOTE_SIN_UPL",
+    "CORPUS_NO_INGESTADO",
+    "OLLAMA_NO_DISPONIBLE",
 }
 
 
-def test_los_7_codigos_canonicos_existen():
+def test_los_10_codigos_canonicos_existen():
     codigos = {c.value for c in CodigoError}
     assert codigos == CODIGOS_CANONICOS
 
