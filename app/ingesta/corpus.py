@@ -22,7 +22,14 @@ from chromadb.errors import NotFoundError
 from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 
 from app.errores import CorpusNoIngestadoError, OllamaNoDisponibleError
-from app.models import ArticuloNormativo, Chunk, COLECCION_NORMATIVA, CorpusInfo
+from app.models import (
+    ArticuloNormativo,
+    Chunk,
+    COLECCION_NORMATIVA,
+    CorpusInfo,
+    METADATA_CORPUS_SHA256,
+    METADATA_EMBEDDING_MODEL,
+)
 
 # Alternativas de numeral romano de mayor a menor longitud: sin ese orden el
 # motor de regex elegiria "I" dentro de "II"/"III"/"IV" y el libro se perderia.
@@ -190,33 +197,59 @@ def deserializar_corpus(ruta: str) -> list[ArticuloNormativo]:
         return [ArticuloNormativo.model_validate_json(linea) for linea in archivo]
 
 
+def _modelo_embedding_env() -> str:
+    """Nombre del modelo de embeddings del env var, normalizado para ChromaDB.
+
+    ChromaDB exige ":" o "@" (tag o digest) en el nombre; si el env var no lo
+    incluye, se añade ":latest". Una variable definida pero vacía (o solo con
+    espacios) se trata como no definida y cae al default. Es el valor que recibe
+    OllamaEmbeddingFunction y el que se persiste como huella del modelo en la
+    metadata de la colección.
+    """
+    model_name = os.getenv("OLLAMA_EMBEDDING_MODEL", "bge-m3").strip()
+    if not model_name:
+        model_name = "bge-m3"
+    if ":" not in model_name and "@" not in model_name:
+        return f"{model_name}:latest"
+    return model_name
+
+
+def _etiqueta_embedding(embedding_function) -> str:
+    """Identidad del modelo de embeddings efectivo para la metadata (FR-008).
+
+    Usa el `model_name` de la EF (OllamaEmbeddingFunction) cuando lo expone; si
+    no lo expone (p. ej. chromadb < 1.4, donde el atributo era `_model_name`),
+    cae al env var actual normalizado para que un cambio de modelo siga
+    detectándose. Dos modelos distintos generan etiquetas distintas y disparan
+    la reconstrucción del índice.
+    """
+    return getattr(embedding_function, "model_name", None) or _modelo_embedding_env()
+
+
 def indexar_corpus(
     corpus: list[ArticuloNormativo], ruta_indice: str, embedding_function=None
 ) -> CorpusInfo:
     """Indexa el corpus en ChromaDB y devuelve metadatos del corpus indexado.
 
     El índice siempre contiene EXACTAMENTE los chunks del corpus actual (FR-008):
-    el hash SHA-256 del corpus se persiste en los metadatos de la colección
-    (`corpus_sha256`) y se usa como criterio para distinguir los tres flujos:
-    crear (colección inexistente), actualizar (mismo corpus, `upsert` idempotente)
-    y reconstruir (corpus distinto: se borra la colección y se re-indexa desde
-    cero para no dejar chunks huérfanos de versiones previas).
+    el hash SHA-256 del corpus y el modelo de embeddings efectivo se persisten en
+    los metadatos de la colección (`corpus_sha256` y `embedding_model`) y se usan
+    como criterio para distinguir los tres flujos: crear (colección inexistente),
+    actualizar (mismo corpus y mismo modelo, `upsert` idempotente) y reconstruir
+    (corpus distinto, modelo de embeddings distinto o índice legado sin la huella
+    del modelo: se borra la colección y se re-indexa desde cero para no mezclar
+    vectores de versiones previas ni de modelos distintos en el mismo HNSW).
     """
     if embedding_function is None:
-        model_name = os.getenv("OLLAMA_EMBEDDING_MODEL", "bge-m3")
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://192.168.40.91:11434")
-        # ChromaDB exige que el nombre del modelo tenga ":" o "@" (tag o digest).
-        # Si no lo tiene, anadimos ":latest" solo para la llamada a OllamaEmbeddingFunction,
-        # conservando el nombre original del env para metadatos/mensajes.
-        if ":" not in model_name and "@" not in model_name:
-            model_name_ef = f"{model_name}:latest"
-        else:
-            model_name_ef = model_name
-        embedding_function = OllamaEmbeddingFunction(
-            model_name=model_name_ef, url=f"{base_url}/api/embeddings"
-        )
+        embedding_function = _crear_embedding_function()
+    embedding_model = _etiqueta_embedding(embedding_function)
 
     hash_actual = hash_documento(corpus)
+    metadata_indice = {
+        "hnsw:space": "cosine",
+        METADATA_CORPUS_SHA256: hash_actual,
+        METADATA_EMBEDDING_MODEL: embedding_model,
+    }
 
     Path(ruta_indice).parent.mkdir(parents=True, exist_ok=True)
     cliente = chromadb.PersistentClient(path=ruta_indice)
@@ -229,27 +262,48 @@ def indexar_corpus(
         coleccion = None
 
     if coleccion is None:
-        # Primera indexación: crear la colección con el hash del corpus actual.
+        # Primera indexación: crear la colección con hash y modelo de embeddings.
         coleccion = cliente.create_collection(
             name=COLECCION_NORMATIVA,
             embedding_function=embedding_function,
-            metadata={"hnsw:space": "cosine", "corpus_sha256": hash_actual},
+            metadata=metadata_indice,
         )
     else:
-        hash_persistido = (coleccion.metadata or {}).get("corpus_sha256")
+        metadata_coleccion = coleccion.metadata or {}
+        hash_persistido = metadata_coleccion.get(METADATA_CORPUS_SHA256)
+
+        motivo = None
         if hash_persistido != hash_actual:
-            # Re-indexación con otra versión del corpus: reconstruir desde cero
-            # para que el índice contenga exactamente los chunks actuales.
             hash_previo = hash_persistido[:16] if hash_persistido else "desconocido"
-            print(
+            motivo = (
                 f"Índice de otra versión del corpus (hash persistido {hash_previo}... "
-                f"!= actual {hash_actual[:16]}...). Reconstruyendo la colección desde cero."
+                f"!= actual {hash_actual[:16]}...)"
+            )
+        elif METADATA_EMBEDDING_MODEL not in metadata_coleccion:
+            motivo = (
+                "Índice legado sin la huella del modelo de embeddings en sus "
+                "metadatos (clave 'embedding_model' ausente)"
+            )
+        else:
+            embedding_model_persistido = metadata_coleccion[METADATA_EMBEDDING_MODEL]
+            if embedding_model_persistido != embedding_model:
+                motivo = (
+                    f"Índice con otro modelo de embeddings "
+                    f"({embedding_model_persistido} != {embedding_model})"
+                )
+
+        if motivo is not None:
+            # Re-indexación con otra versión del corpus o de los embeddings:
+            # reconstruir desde cero para no mezclar vectores (FR-008).
+            print(
+                f"{motivo}. Reconstruyendo la colección desde cero para no mezclar "
+                "vectores de corpus o modelos distintos."
             )
             cliente.delete_collection(COLECCION_NORMATIVA)
             coleccion = cliente.create_collection(
                 name=COLECCION_NORMATIVA,
                 embedding_function=embedding_function,
-                metadata={"hnsw:space": "cosine", "corpus_sha256": hash_actual},
+                metadata=metadata_indice,
             )
 
     chunks = [c for a in corpus for c in chunk_articulo(a)]
@@ -382,14 +436,9 @@ DEFAULT_INDICE = os.getenv("VECTOR_DB_PATH", ".data/chroma")
 
 def _crear_embedding_function() -> OllamaEmbeddingFunction:
     """Crea la embedding function por defecto usando variables de entorno."""
-    model_name = os.getenv("OLLAMA_EMBEDDING_MODEL", "bge-m3")
     base_url = os.getenv("OLLAMA_BASE_URL", "http://192.168.40.91:11434")
-    if ":" not in model_name and "@" not in model_name:
-        model_name_ef = f"{model_name}:latest"
-    else:
-        model_name_ef = model_name
     return OllamaEmbeddingFunction(
-        model_name=model_name_ef, url=f"{base_url}/api/embeddings"
+        model_name=_modelo_embedding_env(), url=f"{base_url}/api/embeddings"
     )
 
 

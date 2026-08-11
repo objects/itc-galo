@@ -26,12 +26,19 @@ remitirse a [contracts/](contracts/) y [data-model.md](data-model.md).
    ollama serve
    ollama pull bge-m3
    ollama pull qwen3:8b
+   # Alternativas de chat: ollama pull gemma4:e4b (8-16 GB RAM) o gemma4:26b (16 GB+ VRAM, 256K ctx)
    ```
 5. **Ingesta del corpus** (genera JSONL versionado + índice ChromaDB):
    ```bash
    python -m app.ingesta.corpus full
    ```
    Esto produce `data/corpus/decreto_555_2021.jsonl` + `.sha256` y el índice en `.data/chroma/`.
+
+   > **Cambiar de modelo de embeddings**: la ingesta persiste el modelo usado en la
+   > metadata de la colección (`embedding_model`). Si cambias `OLLAMA_EMBEDDING_MODEL`,
+   > al re-indexar se detecta el cambio y el índice se reconstruye automáticamente
+   > (no se mezclan vectores de modelos distintos). Con clientes externos, borra
+   > `.data/` manualmente antes de re-indexar.
 
 ## Comandos de verificación automática
 

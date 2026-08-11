@@ -162,6 +162,13 @@ class ContextoTematico(BaseModel):
 # ingesta (app.ingesta.corpus) y el provider RAG (app.providers.normativa).
 COLECCION_NORMATIVA = "decreto_555_2021"
 
+# Claves de metadata de la coleccion ChromaDB (FR-008): identifican la version
+# del corpus indexada y el modelo de embeddings que genero los vectores. Un
+# cambio en cualquiera de las dos obliga a reconstruir el indice para no mezclar
+# vigencias/versiones ni vectores de modelos distintos en el mismo espacio HNSW.
+METADATA_CORPUS_SHA256 = "corpus_sha256"
+METADATA_EMBEDDING_MODEL = "embedding_model"
+
 
 class UPL(BaseModel):
     """Unidad de Planeamiento Local del POT de Bogota (data-model.md:57-78).

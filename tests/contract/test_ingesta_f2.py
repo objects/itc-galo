@@ -14,6 +14,8 @@ import chromadb
 import pytest
 
 from app.ingesta.corpus import (
+    _etiqueta_embedding,
+    _modelo_embedding_env,
     parsear_articulos,
     chunk_articulo,
     hash_documento,
@@ -22,7 +24,14 @@ from app.ingesta.corpus import (
     indexar_corpus,
     consultar_corpus,
 )
-from app.models import ArticuloNormativo, Chunk, COLECCION_NORMATIVA, CorpusInfo
+from app.models import (
+    ArticuloNormativo,
+    Chunk,
+    COLECCION_NORMATIVA,
+    CorpusInfo,
+    METADATA_CORPUS_SHA256,
+    METADATA_EMBEDDING_MODEL,
+)
 
 
 HTML_SINTETICO = """\
@@ -52,10 +61,18 @@ ARTÍCULO 1. Artículo largo.
 
 
 class FakeEmbeddingFunction:
-    """Embedding function determinista 1024 dims para tests."""
+    """Embedding function determinista 1024 dims para tests.
+
+    `model_name` emula el nombre del modelo de embeddings (p. ej. el que recibe
+    OllamaEmbeddingFunction): permite simular el cambio de `OLLAMA_EMBEDDING_MODEL`
+    usando dos fakes con nombres distintos.
+    """
+
+    def __init__(self, model_name: str = "fake"):
+        self.model_name = model_name
 
     def name(self) -> str:
-        return "fake"
+        return self.model_name
 
     def __call__(self, input: list[str]) -> list[list[float]]:
         return self.embed_query(input)
@@ -73,6 +90,17 @@ class FakeEmbeddingFunction:
                 v = [x / norm for x in v]
             vectores.append(v)
         return vectores
+
+
+class EmbeddingFunctionLegacy:
+    """Stub de EF de chromadb < 1.4: sin atributo `model_name`.
+
+    Emula el comportamiento degradado de OllamaEmbeddingFunction en versiones
+    antiguas (el atributo era `_model_name` y `name()` siempre devolvía "ollama").
+    """
+
+    def name(self) -> str:
+        return "ollama"
 
 
 @pytest.fixture
@@ -254,6 +282,101 @@ def test_indexar_corpus_metadatos_chunk_correctos(corpus_base, chroma_tempdir, f
     meta2 = res2["metadatas"][0]
     assert meta2["parte"] == "urbano"
     assert meta2["upls"] == "UPL20"
+
+
+# --- Reconstrucción del índice por cambio de embeddings (FR-008) ---
+
+def test_indexar_reconstruye_al_cambiar_modelo_embedding(corpus_base, chroma_tempdir):
+    ef_a = FakeEmbeddingFunction(model_name="modelo-a")
+    ef_b = FakeEmbeddingFunction(model_name="modelo-b")
+
+    indexar_corpus(corpus_base, str(chroma_tempdir), ef_a)
+
+    cliente_inicial = chromadb.PersistentClient(path=str(chroma_tempdir))
+    col_inicial = cliente_inicial.get_collection(COLECCION_NORMATIVA)
+    assert col_inicial.metadata[METADATA_EMBEDDING_MODEL] == "modelo-a"
+    assert col_inicial.metadata[METADATA_CORPUS_SHA256] == hash_documento(corpus_base)
+    conteo_inicial = col_inicial.count()
+
+    # Mismo corpus, otro modelo de embeddings: la colección se reconstruye.
+    indexar_corpus(corpus_base, str(chroma_tempdir), ef_b)
+
+    cliente_final = chromadb.PersistentClient(path=str(chroma_tempdir))
+    col_final = cliente_final.get_collection(COLECCION_NORMATIVA)
+    assert col_final.metadata[METADATA_EMBEDDING_MODEL] == "modelo-b"
+    assert col_final.count() == conteo_inicial
+    assert col_final.count() == len(corpus_base)
+    # Sin duplicados ni huérfanos: ids exactos de los chunks del corpus actual.
+    ids_esperados = sorted(c.id for a in corpus_base for c in chunk_articulo(a))
+    assert sorted(col_final.get()["ids"]) == ids_esperados
+
+
+def test_indexar_reconstruye_indice_legado_sin_huella_embedding(
+    corpus_base, chroma_tempdir, fake_ef
+):
+    # Colección creada antes del safeguard: metadata sin la clave embedding_model.
+    cliente_legado = chromadb.PersistentClient(path=str(chroma_tempdir))
+    cliente_legado.create_collection(
+        name=COLECCION_NORMATIVA,
+        embedding_function=fake_ef,
+        metadata={
+            "hnsw:space": "cosine",
+            METADATA_CORPUS_SHA256: hash_documento(corpus_base),
+        },
+    )
+
+    # Re-indexar: el índice legado se reconstruye y la metadata gana la huella.
+    indexar_corpus(corpus_base, str(chroma_tempdir), fake_ef)
+
+    cliente_final = chromadb.PersistentClient(path=str(chroma_tempdir))
+    coleccion = cliente_final.get_collection(COLECCION_NORMATIVA)
+    assert coleccion.metadata[METADATA_EMBEDDING_MODEL] == "fake"
+    assert coleccion.metadata[METADATA_CORPUS_SHA256] == hash_documento(corpus_base)
+    assert coleccion.count() == len(corpus_base)
+
+
+# --- Normalización del modelo de embeddings y etiqueta (FR-008) ---
+# Unit tests directos de helpers: sin ChromaDB ni red.
+
+def test_modelo_embedding_env_default_sin_tag(monkeypatch):
+    """Env sin variable: el default se normaliza a 'bge-m3:latest'."""
+    monkeypatch.delenv("OLLAMA_EMBEDDING_MODEL", raising=False)
+    assert _modelo_embedding_env() == "bge-m3:latest"
+
+
+def test_modelo_embedding_env_con_tag_se_preserva(monkeypatch):
+    """Tag explícito 'bge-m3:1.2': se conserva tal cual."""
+    monkeypatch.setenv("OLLAMA_EMBEDDING_MODEL", "bge-m3:1.2")
+    assert _modelo_embedding_env() == "bge-m3:1.2"
+
+
+def test_modelo_embedding_env_con_digest_se_preserva(monkeypatch):
+    """Digest 'sha256:...': se conserva tal cual."""
+    monkeypatch.setenv("OLLAMA_EMBEDDING_MODEL", "sha256:abc123...")
+    assert _modelo_embedding_env() == "sha256:abc123..."
+
+
+def test_modelo_embedding_env_variable_vacia_usa_default(monkeypatch):
+    """Variable definida pero vacía: se trata como no definida (default)."""
+    monkeypatch.setenv("OLLAMA_EMBEDDING_MODEL", "")
+    assert _modelo_embedding_env() == "bge-m3:latest"
+
+
+def test_modelo_embedding_env_con_espacios_se_normaliza(monkeypatch):
+    """Variable con solo espacios alrededor: se normaliza al default."""
+    monkeypatch.setenv("OLLAMA_EMBEDDING_MODEL", "  bge-m3  ")
+    assert _modelo_embedding_env() == "bge-m3:latest"
+
+
+def test_etiqueta_embedding_usa_model_name_de_la_ef():
+    """EF con `model_name`: la etiqueta usa ese nombre, no el env var."""
+    assert _etiqueta_embedding(FakeEmbeddingFunction(model_name="modelo-a")) == "modelo-a"
+
+
+def test_etiqueta_embedding_sin_model_name_cae_al_env_var(monkeypatch):
+    """EF de versión vieja (sin `model_name`): la etiqueta usa el env var actual."""
+    monkeypatch.setenv("OLLAMA_EMBEDDING_MODEL", "modelo-b")
+    assert _etiqueta_embedding(EmbeddingFunctionLegacy()) == "modelo-b:latest"
 
 
 # --- Consulta con top-k, umbral y filtro UPL (FR-002) ---
