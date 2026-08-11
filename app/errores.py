@@ -54,7 +54,7 @@ MENSAJES_ERROR: dict[CodigoError, str] = {
     ),
     CodigoError.PARAMETROS_INVALIDOS: "Parámetros inválidos: {detalle}.",
     CodigoError.LOTE_SIN_UPL: (
-        "El lote {codigo_catastral} no tiene UPL asignada (dato no encontrado)."
+        "El lote no tiene UPL asignada (dato no encontrado)."
     ),
     CodigoError.CORPUS_NO_INGESTADO: (
         "El corpus normativo no está ingestado o está desactualizado. "

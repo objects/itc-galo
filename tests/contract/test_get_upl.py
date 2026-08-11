@@ -79,6 +79,7 @@ async def test_get_upl_por_chip_devuelve_upl_con_localidad():
     assert resp["upl"]["codigo"] == "UPL17"
     assert resp["upl"]["nombre"] == "CHAPINERO"
     assert resp["upl"]["localidad"] == "Chapinero"
+    assert resp["metodo_resolucion"] == "centroide_lote"
     assert "trazabilidad" in resp
     trace = resp["trazabilidad"]
     assert trace["source_name"] == "IDECA Catastro — Unidad de Planeamiento Local"
@@ -126,6 +127,7 @@ async def test_get_upl_por_direccion_devuelve_upl():
 
     assert "error" not in resp
     assert resp["upl"]["codigo"] == "UPL17"
+    assert resp["metodo_resolucion"] == "centroide_lote"
 
 
 @pytest.mark.asyncio
@@ -218,6 +220,7 @@ async def test_get_upl_por_coordenadas_devuelve_upl():
 
     assert "error" not in resp
     assert resp["upl"]["codigo"] == "UPL17"
+    assert resp["metodo_resolucion"] == "centroide_lote"
 
 
 @pytest.mark.asyncio
@@ -231,6 +234,81 @@ async def test_get_upl_coordenadas_fuera_de_bogota_devuelve_fuera_de_cobertura()
         await servidor.aclose()
 
     assert resp["error"]["code"] == "FUERA_DE_COBERTURA"
+
+
+@pytest.mark.asyncio
+async def test_get_upl_coordenadas_lote_sin_chip_fallback_punto_directo():
+    """Lote sin CHIP en la capa 38 -> fallback: UPL consultada por el punto de entrada."""
+    arcgis_sin_chip = provider_arcgis_estandar(lotes=[feature_lote(chip=None)])
+    servidor = _crear_servidor_con_upl(handler_upl_ok, arcgis=arcgis_sin_chip)
+    try:
+        resp = await servidor.get_upl(coordenadas={"lat": 4.65, "lon": -74.07})
+    finally:
+        await servidor.aclose()
+
+    assert "error" not in resp
+    assert resp["metodo_resolucion"] == "punto_directo"
+    assert resp["upl"]["codigo"] == "UPL17"
+    assert resp["trazabilidad"]["layer_id"] == "0"
+
+
+@pytest.mark.asyncio
+async def test_get_upl_coordenadas_punto_ambiguo_fallback_punto_directo():
+    """Punto en limite entre dos lotes -> fallback: UPL por punto de entrada."""
+    arcgis_ambiguo = provider_arcgis_estandar(
+        lotes=[feature_lote(), feature_lote(codigo_catastral="006202003017")]
+    )
+    servidor = _crear_servidor_con_upl(handler_upl_ok, arcgis=arcgis_ambiguo)
+    try:
+        resp = await servidor.get_upl(coordenadas={"lat": 4.65, "lon": -74.07})
+    finally:
+        await servidor.aclose()
+
+    assert "error" not in resp
+    assert resp["metodo_resolucion"] == "punto_directo"
+    assert resp["upl"]["codigo"] == "UPL17"
+
+
+@pytest.mark.asyncio
+async def test_get_upl_coordenadas_fallback_sin_upl_devuelve_lote_sin_upl():
+    """Fallback sin dato en la capa UPL -> LOTE_SIN_UPL (dato no encontrado, FR-007)."""
+    arcgis_sin_chip = provider_arcgis_estandar(lotes=[feature_lote(chip=None)])
+    servidor = _crear_servidor_con_upl(handler_upl_vacio, arcgis=arcgis_sin_chip)
+    try:
+        resp = await servidor.get_upl(coordenadas={"lat": 4.65, "lon": -74.07})
+    finally:
+        await servidor.aclose()
+
+    assert resp["error"]["code"] == "LOTE_SIN_UPL"
+
+
+@pytest.mark.asyncio
+async def test_get_upl_coordenadas_fallback_5xx_devuelve_fuente_5xx():
+    """Fallback con 5xx en la capa UPL -> FUENTE_5XX (nunca LOTE_SIN_UPL, FR-009)."""
+    arcgis_sin_chip = provider_arcgis_estandar(lotes=[feature_lote(chip=None)])
+    servidor = _crear_servidor_con_upl(handler_upl_500, arcgis=arcgis_sin_chip)
+    try:
+        resp = await servidor.get_upl(coordenadas={"lat": 4.65, "lon": -74.07})
+    finally:
+        await servidor.aclose()
+
+    assert resp["error"]["code"] == "FUENTE_5XX"
+
+
+@pytest.mark.asyncio
+async def test_get_upl_coordenadas_5xx_capa38_no_fallback():
+    """5xx de la capa Lote 38 -> FUENTE_5XX de esa fuente, sin fallback (FR-009)."""
+    arcgis_5xx = provider_arcgis_estandar(
+        lotes=({"error": {"code": 500, "message": "boom"}}, 500)
+    )
+    servidor = _crear_servidor_con_upl(handler_upl_ok, arcgis=arcgis_5xx)
+    try:
+        resp = await servidor.get_upl(coordenadas={"lat": 4.65, "lon": -74.07})
+    finally:
+        await servidor.aclose()
+
+    assert resp["error"]["code"] == "FUENTE_5XX"
+    assert resp["error"]["source_name"] == "Mapa_Referencia/Mapa_Referencia"
 
 
 @pytest.mark.asyncio
@@ -297,7 +375,10 @@ async def test_get_upl_sin_upl_devuelve_lote_sin_upl():
         await servidor.aclose()
 
     assert resp["error"]["code"] == "LOTE_SIN_UPL"
-    assert "no tiene UPL asignada" in resp["error"]["message"]
+    assert (
+        resp["error"]["message"]
+        == "El lote no tiene UPL asignada (dato no encontrado)."
+    )
 
 
 # --- Test de mapeo nombre UPL -> localidad ---

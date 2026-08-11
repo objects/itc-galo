@@ -223,6 +223,12 @@ class ServidorLotes:
             if error:
                 return error
             lote, error = await self._resolver_lote_por_punto(lng, lat)
+            if error and error.get("error", {}).get("code") == CodigoError.LOTE_NO_ENCONTRADO.value:
+                # Fix E2E: si el lote no se resuelve por identidad incompleta (capa 38
+                # sin CHIP) o el punto es ambiguo (limite entre lotes), la UPL se
+                # consulta directamente por el punto de entrada: la capa UPL
+                # intersecta por geometria y no depende de la identidad del lote.
+                return await self._consultar_upl_por_punto(lng, lat)
             if error:
                 return error
             if lote is None:
@@ -242,14 +248,7 @@ class ServidorLotes:
         except Exception as exc:
             return _error_de_fuente(exc)
 
-        return {
-            "upl": {
-                "codigo": upl.codigo_upl,
-                "nombre": upl.nombre,
-                "localidad": upl.localidad_derivada,
-            },
-            "trazabilidad": upl.source_trace.model_dump() if upl.source_trace else None,
-        }
+        return _respuesta_upl(upl, metodo="centroide_lote")
 
     async def consultar_normativa(
         self,
@@ -398,6 +397,21 @@ class ServidorLotes:
             return None, _error_de_fuente(exc)
         return contexto, None
 
+    async def _consultar_upl_por_punto(self, lng: float, lat: float) -> dict[str, Any]:
+        """Fallback de get_upl por coordenadas: capa UPL consultada por el punto.
+
+        Se activa cuando el lote no se resuelve por identidad (capa 38 sin CHIP)
+        o el punto es ambiguo (limite entre lotes). La capa UPL intersecta por
+        geometria, sin depender de la identidad del lote. Mismo manejo de errores
+        que el flujo principal: 5xx -> FUENTE_5XX (FR-009); sin dato -> LOTE_SIN_UPL
+        (FR-007).
+        """
+        try:
+            upl = await self._upl.consultar_upl_por_punto(lng, lat)
+        except Exception as exc:
+            return _error_de_fuente(exc)
+        return _respuesta_upl(upl, metodo="punto_directo")
+
     def _respuesta_multiples_candidatos(
         self, candidatos: list[CandidatoDireccion]
     ) -> dict[str, Any]:
@@ -478,6 +492,23 @@ def _error_de_fuente(exc: Exception) -> dict[str, Any]:
             modelo=exc.modelo if exc.modelo else "requerido",
         )
     raise exc  # error inesperado: fail loud, no se enmascara
+
+
+def _respuesta_upl(upl, metodo: str) -> dict[str, Any]:
+    """Respuesta de exito de get_upl con el metodo de resolucion usado.
+
+    `metodo` documenta como se resolvio la UPL: "centroide_lote" (flujo normal,
+    lote resuelto por F1) o "punto_directo" (fallback por punto de entrada).
+    """
+    return {
+        "metodo_resolucion": metodo,
+        "upl": {
+            "codigo": upl.codigo_upl,
+            "nombre": upl.nombre,
+            "localidad": upl.localidad_derivada,
+        },
+        "trazabilidad": upl.source_trace.model_dump() if upl.source_trace else None,
+    }
 
 
 def _validar_chip(chip: Any) -> dict | None:
