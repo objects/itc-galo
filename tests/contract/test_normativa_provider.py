@@ -132,6 +132,56 @@ def test_normativa_provider_upls_validas_cubre_upl01_a_upl33():
     assert "UPL34" not in UPL_VALIDAS
 
 
+# --- Configuración por entorno (FIX 1) ---
+# El __init__ es perezoso (no abre ChromaDB ni red), así que se puede instanciar
+# sin mockear el cliente. Patrón monkeypatch de os.environ, igual que
+# test_ingesta_f2.py para `_modelo_embedding_env`.
+
+def test_provider_modelo_chat_default_cuando_env_no_definida(monkeypatch):
+    """Sin OLLAMA_CHAT_MODEL: el provider usa el default canónico qwen3:8b."""
+    monkeypatch.delenv("OLLAMA_CHAT_MODEL", raising=False)
+    assert NormativaProvider()._chat_model == "qwen3:8b"
+
+
+def test_provider_modelo_chat_lee_env(monkeypatch):
+    """OLLAMA_CHAT_MODEL=gemma4:e4b: el provider usa el modelo del entorno."""
+    monkeypatch.setenv("OLLAMA_CHAT_MODEL", "gemma4:e4b")
+    assert NormativaProvider()._chat_model == "gemma4:e4b"
+
+
+def test_provider_modelo_chat_vacia_o_con_espacios_usa_default(monkeypatch):
+    """Variable vacía o con solo espacios: se trata como no definida (default)."""
+    monkeypatch.setenv("OLLAMA_CHAT_MODEL", "")
+    assert NormativaProvider()._chat_model == "qwen3:8b"
+
+    monkeypatch.setenv("OLLAMA_CHAT_MODEL", "   ")
+    assert NormativaProvider()._chat_model == "qwen3:8b"
+
+
+def test_provider_argumento_explicito_gana_sobre_env(monkeypatch):
+    """Un argumento explícito del constructor siempre gana sobre la env var."""
+    monkeypatch.setenv("OLLAMA_CHAT_MODEL", "gemma4:e4b")
+    assert NormativaProvider(chat_model="mi-modelo")._chat_model == "mi-modelo"
+
+
+def test_provider_lee_base_url_y_ruta_indice_de_env(monkeypatch):
+    """OLLAMA_BASE_URL y VECTOR_DB_PATH se leen del entorno (sin barra final)."""
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.local:11434/")
+    monkeypatch.setenv("VECTOR_DB_PATH", "/tmp/indice_normativo")
+    provider = NormativaProvider()
+    assert provider._base_url == "http://ollama.local:11434"
+    assert provider._ruta_indice == "/tmp/indice_normativo"
+
+
+def test_provider_defaults_base_url_y_ruta_indice(monkeypatch):
+    """Sin env: defaults canónicos documentados en .env.example."""
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("VECTOR_DB_PATH", raising=False)
+    provider = NormativaProvider()
+    assert provider._base_url == "http://192.168.40.91:11434"
+    assert provider._ruta_indice == ".data/chroma"
+
+
 # Tests de integración del pipeline RAG requieren Ollama real (chat model).
 # Se ejecutan en entorno con ollama serve + modelos (bge-m3, qwen3:8b).
 # Ver quickstart.md para instrucciones.

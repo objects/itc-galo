@@ -1,8 +1,9 @@
 """Provider de consulta normativa (RAG) sobre el Decreto 555/2021.
 
-Usa el índice ChromaDB + embeddings Ollama (bge-m3) + chat LLM (qwen3)
-para responder consultas en lenguaje natural con citas literales y trazabilidad
-(FR-001, FR-003, Historia de Usuario 1). Filtro estricto por UPL (FR-002).
+Usa el índice ChromaDB + embeddings Ollama (bge-m3) + chat LLM configurable
+por entorno (OLLAMA_CHAT_MODEL, ver FIX 1) para responder consultas en lenguaje
+natural con citas literales y trazabilidad (FR-001, FR-003, Historia de Usuario
+1). Filtro estricto por UPL (FR-002).
 """
 
 from __future__ import annotations
@@ -47,6 +48,18 @@ CORPUS_VIGENCIA = "2021-12-30"
 # UPLs validas (UPL01–UPL33)
 UPL_VALIDAS = {f"UPL{i:02d}" for i in range(1, 34)}
 
+
+def _leer_var_entorno(nombre: str, default: str) -> str:
+    """Lee una variable de entorno; valor vacío o con espacios → default.
+
+    Misma convención que `app.ingesta.corpus._modelo_embedding_env` (FIX 1):
+    el valor se recorta con `.strip()` y una variable definida pero vacía se
+    trata como no definida, cayendo al default canónico del proyecto.
+    """
+    valor = os.getenv(nombre, default).strip()
+    return valor if valor else default
+
+
 # Citation forcing (FR-003, SC-002): patrón de cita "Artículo N" en la respuesta del LLM.
 PATRON_ARTICULO_CITADO = re.compile(r"\bart[ií]culo\s+(\d+)", re.IGNORECASE)
 
@@ -68,16 +81,31 @@ class NormativaProvider:
 
     def __init__(
         self,
-        ruta_indice: str = VECTOR_DB_PATH_DEFAULT,
+        ruta_indice: str | None = None,
         embedding_model: str = EMBEDDING_MODEL_DEFAULT,
-        chat_model: str = CHAT_MODEL_DEFAULT,
-        base_url: str = OLLAMA_BASE_URL_DEFAULT,
+        chat_model: str | None = None,
+        base_url: str | None = None,
         timeout: float = 60.0,
     ) -> None:
-        self._ruta_indice = ruta_indice
+        # FIX 1: los defaults se resuelven desde el entorno (OLLAMA_BASE_URL,
+        # OLLAMA_CHAT_MODEL, VECTOR_DB_PATH) igual que la ingesta; un argumento
+        # explícito siempre gana sobre la variable de entorno.
+        self._ruta_indice = (
+            ruta_indice
+            if ruta_indice is not None
+            else _leer_var_entorno("VECTOR_DB_PATH", VECTOR_DB_PATH_DEFAULT)
+        )
         self._embedding_model = embedding_model
-        self._chat_model = chat_model
-        self._base_url = base_url.rstrip("/")
+        self._chat_model = (
+            chat_model
+            if chat_model is not None
+            else _leer_var_entorno("OLLAMA_CHAT_MODEL", CHAT_MODEL_DEFAULT)
+        )
+        self._base_url = (
+            base_url
+            if base_url is not None
+            else _leer_var_entorno("OLLAMA_BASE_URL", OLLAMA_BASE_URL_DEFAULT)
+        ).rstrip("/")
         self._timeout = timeout
         self._client_chroma: chromadb.PersistentClient | None = None
         self._embedding_function: OllamaEmbeddingFunction | None = None
