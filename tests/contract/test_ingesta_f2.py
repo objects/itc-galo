@@ -143,6 +143,77 @@ HTML_SISJUR_SIN_TITULO = """\
 </body>
 """
 
+# Encabezado de sección del documento original pegado al final de un cuerpo
+# (caso real art. 300): "SECCIÓN 4\nTRATAMIENTO URBANÍSTICO DE RENOVACIÓN
+# URBANA" quedó entre el art. 300 y el art. 301. La limpieza de encabezados
+# debe recortarlo SOLO del final del cuerpo.
+HTML_SISJUR_SECCION_FINAL = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Tratamiento de renovación urbana.</span></b>
+<span lang="ES">Cuerpo del artículo uno con la sección siguiente pegada.</span>
+</p>
+<h3 align="center"><b><span lang="ES">SECCIÓN</span></b><span class="ancla" id="L.3.C.5.SC.2.S.4"></span>&nbsp;<b><span lang="ES">4</span></b></h3>
+<h3 align="center"><b><span lang="ES">TRATAMIENTO URBANÍSTICO DE RENOVACIÓN URBANA</span></b></h3>
+<p class="MsoNormal" style="text-align:justify">
+<b><span lang="ES" style="color:black">Artículo</span></b>
+<span style="font-size: 12pt;" class="ancla" id="2"></span>
+<b><span lang="ES">2. </span></b>
+<b><span lang="ES">Título del artículo dos.</span></b>
+<span lang="ES">Cuerpo del artículo dos.</span>
+</p>
+</body>
+"""
+
+# Varios encabezados consecutivos al final del cuerpo (fin de capítulo + inicio
+# de sección): "CAPÍTULO 2\nNOMBRE X\nSECCIÓN 4". La limpieza debe recortarlos
+# TODOS de forma iterativa, hasta que el final deje de matchear.
+HTML_SISJUR_CABECERAS_CONSECUTIVAS = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Título del artículo uno.</span></b>
+<span lang="ES">Cuerpo del artículo uno.</span>
+</p>
+<h2><b><span lang="ES">CAPÍTULO</span></b><span class="ancla"></span>&nbsp;<b><span lang="ES">2</span></b></h2>
+<h2><b><span lang="ES">NOMBRE X</span></b></h2>
+<h3 align="center"><b><span lang="ES">SECCIÓN</span></b>&nbsp;<b><span lang="ES">4</span></b></h3>
+<p class="MsoNormal" style="text-align:justify">
+<b><span lang="ES" style="color:black">Artículo</span></b>
+<span style="font-size: 12pt;" class="ancla" id="2"></span>
+<b><span lang="ES">2. </span></b>
+<b><span lang="ES">Título del artículo dos.</span></b>
+<span lang="ES">Cuerpo del artículo dos.</span>
+</p>
+</body>
+"""
+
+# Encabezado compuesto SUBCAPÍTULO pegado al final de un cuerpo (caso real
+# art. 40): "SUBCAPÍTULO 1\nESTRUCTURA ECOLÓGICA PRINCIPAL - EEP". El patrón
+# debe reconocer la forma compuesta (antes de CAPÍTULO) y recortar el bloque.
+HTML_SISJUR_SUBCAPITULO_FINAL = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Título del artículo uno.</span></b>
+<span lang="ES">Cuerpo del artículo uno con el subcapítulo siguiente pegado.</span>
+</p>
+<h3 align="center"><b><span lang="ES">SUBCAPÍTULO</span></b><span class="ancla" id="L.2.C.1.SC.1"></span>&nbsp;<b><span lang="ES">1</span></b></h3>
+<h3 align="center"><b><span lang="ES">ESTRUCTURA ECOLÓGICA PRINCIPAL - EEP</span></b></h3>
+<p class="MsoNormal" style="text-align:justify">
+<b><span lang="ES" style="color:black">Artículo</span></b>
+<span style="font-size: 12pt;" class="ancla" id="2"></span>
+<b><span lang="ES">2. </span></b>
+<b><span lang="ES">Título del artículo dos.</span></b>
+<span lang="ES">Cuerpo del artículo dos.</span>
+</p>
+</body>
+"""
+
 HTML_CHUNKING = """\
 LIBRO II
 ARTÍCULO 1. Artículo largo.
@@ -385,9 +456,95 @@ def test_parsear_articulos_sisjur_upl_un_digito_normaliza_con_cero():
 
 def test_parsear_articulos_sisjur_sin_titulo_raise_valueerror():
     # Ancla detectada pero sin grupo <b> con el número: Fail Fast (FIX 6), no un
-    # título vacío silencioso.
-    with pytest.raises(ValueError, match=r"No se encontró el título del marcador ancla 1"):
+    # título vacío silencioso. El marcador (ancla o inline) existe pero ningún
+    # grupo lleva el número del artículo.
+    with pytest.raises(ValueError, match=r"No se encontró el título del marcador del artículo 1"):
         parsear_articulos(HTML_SISJUR_SIN_TITULO)
+
+
+def test_parsear_articulos_sisjur_recorta_encabezado_seccion_del_final():
+    # El cuerpo del artículo 1 absorbió el encabezado de la sección siguiente
+    # (caso real art. 300): debe quedar sin el sufijo "SECCIÓN 4\nTRATAMIENTO
+    # URBANÍSTICO DE RENOVACIÓN URBANA", sin tocar el artículo 2.
+    corpus = parsear_articulos(HTML_SISJUR_SECCION_FINAL)
+    art1 = next(a for a in corpus if a.numero == 1)
+    assert art1.texto == "Cuerpo del artículo uno con la sección siguiente pegada."
+    assert "SECCIÓN" not in art1.texto
+    assert "TRATAMIENTO URBANÍSTICO DE RENOVACIÓN URBANA" not in art1.texto
+    art2 = next(a for a in corpus if a.numero == 2)
+    assert art2.texto == "Cuerpo del artículo dos."
+
+
+def test_parsear_articulos_sisjur_recorta_encabezados_consecutivos_del_final():
+    # Fin de capítulo + inicio de sección pegados al final del cuerpo
+    # ("CAPÍTULO 2\nNOMBRE X\nSECCIÓN 4"): se recortan ambos de forma iterativa.
+    corpus = parsear_articulos(HTML_SISJUR_CABECERAS_CONSECUTIVAS)
+    art1 = next(a for a in corpus if a.numero == 1)
+    assert art1.texto == "Cuerpo del artículo uno."
+    for marca in ("CAPÍTULO", "SECCIÓN", "NOMBRE X"):
+        assert marca not in art1.texto
+
+
+def test_parsear_articulos_sisjur_no_recorta_referencia_capitulo():
+    # "en el Capítulo 2 del Componente Rural del presente Plan." es una
+    # REFERENCIA normativa, no un encabezado: no abre la línea con el patrón y
+    # debe conservarse intacta (caso real art. 450).
+    html = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Suelo de protección.</span></b>
+<span lang="ES">Su manejo se realizará conforme a lo definido en el Capítulo 2 del Componente Rural del presente Plan.</span>
+</p>
+</body>
+"""
+    corpus = parsear_articulos(html)
+    art1 = corpus[0]
+    assert art1.texto == (
+        "Su manejo se realizará conforme a lo definido en el Capítulo 2 del "
+        "Componente Rural del presente Plan."
+    )
+
+
+def test_parsear_articulos_sisjur_recorta_subcapitulo_del_final():
+    # Caso real art. 40: el cuerpo terminaba en "…Creativa y de Innovación.\n
+    # SUBCAPÍTULO 1\nESTRUCTURA ECOLÓGICA PRINCIPAL - EEP". La alternancia debe
+    # incluir la forma compuesta SUBCAPÍTULO (antes de CAPÍTULO) y recortar el
+    # bloque completo, sin tocar el artículo 2.
+    corpus = parsear_articulos(HTML_SISJUR_SUBCAPITULO_FINAL)
+    art1 = next(a for a in corpus if a.numero == 1)
+    assert art1.texto == "Cuerpo del artículo uno con el subcapítulo siguiente pegado."
+    assert "SUBCAPÍTULO" not in art1.texto
+    assert "ESTRUCTURA ECOLÓGICA PRINCIPAL - EEP" not in art1.texto
+    art2 = next(a for a in corpus if a.numero == 2)
+    assert art2.texto == "Cuerpo del artículo dos."
+
+
+def test_parsear_articulos_sisjur_no_recorta_linea_titulo_del_presente_decreto():
+    # Falso positivo latente (minor 2): bajo re.IGNORECASE, [IVXLCDM]+ matchearía
+    # la "d" inicial de "TÍTULO del presente decreto..." al abrir la línea; el \b
+    # tras la clase romana exige que la letra no continúe dentro de otra palabra,
+    # así que la línea no abre un encabezado y el cuerpo debe conservarse intacto.
+    html = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Título del artículo uno.</span></b>
+<span lang="ES">Cuerpo del artículo uno.</span>
+</p>
+<p class="MsoNormal" style="text-align:justify">
+<span lang="ES">TÍTULO del presente decreto establece las disposiciones generales.</span>
+</p>
+</body>
+"""
+    corpus = parsear_articulos(html)
+    art1 = corpus[0]
+    assert art1.texto == (
+        "Cuerpo del artículo uno.\n"
+        "TÍTULO del presente decreto establece las disposiciones generales."
+    )
 
 
 # --- Chunking (boundary-aware, overlap 1 párrafo) ---

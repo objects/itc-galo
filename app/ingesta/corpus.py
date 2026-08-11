@@ -42,6 +42,26 @@ UPL_PATRON = re.compile(r"UPL\s*(\d{1,2})")
 ARTICULO_DEROGADO_PATRON = re.compile(
     r"deroga[ra]?\s+(?:el\s+)?art[ií]culo\s+(\d+)", re.IGNORECASE
 )
+# Encabezados de sección del documento original (SECCIÓN 4, SECCIÓN 4A,
+# TÍTULO III, LIBRO VIII...) que quedan pegados al final de algunos cuerpos
+# entre artículos (p. ej. el art. 300 termina en "SECCIÓN 4\nTRATAMIENTO
+# URBANÍSTICO DE RENOVACIÓN URBANA"). La alternancia también cubre las formas
+# compuestas SUBSECCIÓN y SUBCAPÍTULO, colocadas ANTES de su forma base
+# (SECCIÓN/CAPÍTULO) por legibilidad: el anclaje (?:\A|\n) ya impide que
+# "SECCIÓN" dentro de "SUBSECCIÓN" matchee (no va precedida de \n). La línea
+# debe EMPEZAR por el encabezado (tras salto de línea o inicio de cadena) y el
+# bloque debe llegar hasta el FINAL absoluto (\Z): las referencias normativas
+# que no abren la línea ("...en el Capítulo 2 del Componente Rural del
+# presente Plan.") nunca matchean. El \b tras la clase romana blinda contra
+# falsos positivos: bajo re.IGNORECASE, [IVXLCDM]+ matchearía la "d" inicial
+# de "TÍTULO del presente decreto..." y \b exige que la letra romana no
+# continúe dentro de otra palabra. El nombre puede ir en la misma línea o en
+# líneas siguientes.
+PATRON_ENCABEZADO_SECCION = re.compile(
+    r"(?:\A|\n)\s*(?:SUBSECCI[OÓ]N|SECCI[OÓ]N|T[IÍ]TULO|SUBCAP[IÍ]TULO|CAP[IÍ]TULO|LIBRO|PARTE)\s+"
+    r"(?:\d+[A-Za-z]?|[IVXLCDM]+\b)\s*\.?[^\n]*(?:\n[^\n]*)*\Z",
+    re.IGNORECASE,
+)
 
 PARTE_POR_LIBRO = {"II": "general", "III": "urbano", "IV": "rural"}
 
@@ -210,7 +230,7 @@ def _extraer_titulo_sisjur(
             # <b> lleva el número del artículo; el título queda incompleto y un
             # fallback silencioso ("", inicio) contaminaría el corpus.
             raise ValueError(
-                f"No se encontró el título del marcador ancla {numero} en el "
+                f"No se encontró el título del marcador del artículo {numero} en el "
                 "HTML del Decreto 555/2021."
             )
         if numero_patron.match(_limpiar_html(grupo.group(1))):
@@ -255,11 +275,14 @@ def _ajustar_fin_cuerpo(html: str, fin_cuerpo: int) -> int:
     En el formato sisjur, el encabezado del artículo siguiente separa la palabra
     "Artículo" en un grupo `<b>` propio situado ANTES de su ancla
     (`class="ancla"`); sin este recorte, esa palabra suelta contamina el final
-    del cuerpo del artículo actual (frase huérfana "Artículo"). Solo se recorta
-    cuando el contenido limpio del último grupo `<b>` anterior a la frontera es
-    exactamente "Artículo" (re.IGNORECASE) y entre ese grupo y el ancla no hay
-    texto visible; los encabezados inline "Artículo N." no cumplen ninguna de
-    las dos condiciones y conservan el fin original.
+    del cuerpo del artículo actual (frase huérfana "Artículo"). Se recorta hasta
+    el inicio del grupo cuando el contenido limpio del último grupo `<b>`
+    anterior a la frontera es exactamente "Artículo" (re.IGNORECASE) y entre ese
+    grupo y el ancla no hay texto visible. En cambio, se conserva el fin original
+    cuando NO se cumplen las condiciones de recorte: cuando el último grupo
+    `<b>` no es exactamente "Artículo" o cuando hay texto visible entre el grupo
+    y el ancla del siguiente artículo (esto también cubre los encabezados inline
+    "Artículo N.", que no cumplen ninguna de las dos condiciones).
     """
     ventana_inicio = max(0, fin_cuerpo - 2000)
     ventana = html[ventana_inicio:fin_cuerpo]
@@ -274,6 +297,31 @@ def _ajustar_fin_cuerpo(html: str, fin_cuerpo: int) -> int:
     if _limpiar_html(grupo_anterior.group(1)).strip().lower() != "artículo":
         return fin_cuerpo
     return inicio_grupo
+
+
+def _recortar_encabezados_seccion(texto: str) -> str:
+    """Recorta SOLO del final del cuerpo los encabezados de sección normativa.
+
+    El documento original (Decreto 555/2021) inserta encabezados de estructura
+    (SECCIÓN, TÍTULO, CAPÍTULO, LIBRO, PARTE) entre artículos; cuando el
+    artículo anterior los absorbe, su cuerpo termina con p. ej. "SECCIÓN 4\n
+    TRATAMIENTO URBANÍSTICO DE RENOVACIÓN URBANA" (art. 300). Es texto real del
+    Decreto pero ensucia la recuperación RAG, por eso se recorta.
+
+    Solo actúa al FINAL del cuerpo: el bloque debe abrir con un encabezado al
+    inicio de línea (tras salto de línea o inicio de cadena) y llegar hasta el
+    final absoluto de la cadena (`\Z`). El nombre del encabezado puede ir en la
+    misma línea o en las líneas siguientes ("SECCIÓN 4" + "TRATAMIENTO...").
+    El recorte es iterativo: varios encabezados consecutivos al final (fin de
+    capítulo + inicio de sección) se eliminan todos. Las referencias normativas
+    que no abren la línea ("...en el Capítulo 2 del Componente Rural del
+    presente Plan.") nunca se tocan.
+    """
+    while True:
+        coincidencia = PATRON_ENCABEZADO_SECCION.search(texto)
+        if coincidencia is None:
+            return texto
+        texto = texto[: coincidencia.start()].rstrip()
 
 
 def _parsear_formato_sisjur(html: str) -> list[ArticuloNormativo]:
@@ -308,6 +356,7 @@ def _parsear_formato_sisjur(html: str) -> list[ArticuloNormativo]:
         texto = _limpiar_html(html[inicio_cuerpo:fin_cuerpo])
         if texto.startswith("."):
             texto = texto[1:].lstrip()
+        texto = _recortar_encabezados_seccion(texto)
 
         libro_vigente = next(
             (m.group(1) for m in reversed(libros) if m.start() < inicio), "I"
