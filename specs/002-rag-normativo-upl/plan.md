@@ -433,7 +433,7 @@ F1** (total 6).
 
 1. **`app/errores.py`**: añadir a `CodigoError`:
    - `LOTE_SIN_UPL` (no fatal, "dato no encontrado", FR-007): mensaje
-     `El lote <codigo_catastral> no tiene UPL asignada (dato no encontrado).`
+     `El lote no tiene UPL asignada (dato no encontrado).`
    - `CORPUS_NO_INGESTADO` (fatal): mensaje
      `El corpus normativo no está ingestado o está desactualizado. Ejecuta el script de ingesta antes de consultar.`
    - `OLLAMA_NO_DISPONIBLE` (fatal): mensaje

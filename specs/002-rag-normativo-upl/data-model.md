@@ -221,7 +221,7 @@ códigos heredados de F1 conservan su semántica; los nuevos (`LOTE_SIN_UPL`,
 | `LOTE_NO_ENCONTRADO` | El CHIP, la dirección o el punto no resuelven a ningún lote. | sí | `No se encontró ningún lote para el criterio consultado.` |
 | `DIRECCION_NO_LOCALIZADA` | La dirección no pudo geocodificarse (no encontrada o ambigua). | sí | `La dirección no pudo localizarse. Refina la dirección o usa CHIP/coordenadas.` |
 | `FUERA_DE_COBERTURA` | El punto está fuera del área de Bogotá. | sí | `El punto está fuera del área de cobertura (Bogotá).` |
-| `LOTE_SIN_UPL` (nuevo) | El lote se resolvió pero **no tiene UPL asignada** (dato no encontrado, FR-007). | no | `El lote <codigo_catastral> no tiene UPL asignada (dato no encontrado).` |
+| `LOTE_SIN_UPL` (nuevo) | El lote se resolvió pero **no tiene UPL asignada** (dato no encontrado, FR-007). | no | `El lote no tiene UPL asignada (dato no encontrado).` |
 | `CORPUS_NO_INGESTADO` (nuevo) | El vector store está vacío o desactualizado (no se ejecutó la ingesta o el índice no corresponde al corpus). | sí | `El corpus normativo no está ingestado o está desactualizado. Ejecuta el script de ingesta antes de consultar.` |
 | `OLLAMA_NO_DISPONIBLE` (nuevo) | El servicio Ollama no es accesible o un modelo requerido (embeddings/chat) no está instalado. | sí | `El servicio Ollama no está disponible o falta el modelo <modelo>. Verifica OLLAMA_HOST/OLLAMA_BASE_URL y ollama pull <modelo>.` |
 | `FUENTE_5XX` | Error del lado del servidor de la fuente (5xx), indicando cuál fuente. | sí | `La fuente <source_name> no está disponible (error <status>). Intenta nuevamente.` |

@@ -136,7 +136,7 @@ Sus contratos completos están en [contracts/](contracts/).
 ### Escenario 8 — get_upl sin UPL asignada → `LOTE_SIN_UPL`
 
 - **Acción**: invocar `get_upl` con coordenadas/lote sin UPL en la capa.
-- **Resultado esperado**: error canónico `LOTE_SIN_UPL` con mensaje "El lote <codigo> no tiene UPL asignada (dato no encontrado)." (FR-007, distinto de `LOTE_NO_ENCONTRADO`).
+- **Resultado esperado**: error canónico `LOTE_SIN_UPL` con mensaje "El lote no tiene UPL asignada (dato no encontrado)." (FR-007, distinto de `LOTE_NO_ENCONTRADO`).
 
 ### Escenario 9 — Validación de parámetros (fail-fast)
 
