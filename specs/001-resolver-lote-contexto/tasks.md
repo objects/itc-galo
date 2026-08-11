@@ -25,11 +25,11 @@
 
 **Propósito**: inicialización del proyecto y estructura básica
 
-- [ ] T001 Crear la estructura del proyecto `app/` modular (`app/`, `app/providers/`, `tests/`, `tests/contract/`, `tests/smoke/`) — plan.md:96
-- [ ] T002 [P] Crear `pyproject.toml` con dependencias `mcp>=1.0.0`, `httpx`, `pydantic` y dev `pytest` — plan.md:28
-- [ ] T003 [P] Crear `.env.example` documentando `MAPAS_BOGOTA_APIKEY` (opcional, salvo consulta por dirección) — plan.md:50
-- [ ] T004 [P] Crear `README.md` en español con instalación, configuración y ejecución del servidor — plan.md:51
-- [ ] T005 [P] Crear `Dockerfile` Python 3.11+ (imagen multi-etapa, transporte MCP por stdio) y entradas de `.gitignore` — plan.md:26, plan.md:37, constitution.md:54 (Docker multi-etapa); `.gitignore` según convenciones del workspace (plan.md:96)
+- [x] T001 Crear la estructura del proyecto `app/` modular (`app/`, `app/providers/`, `tests/`, `tests/contract/`, `tests/smoke/`) — plan.md:96
+- [x] T002 [P] Crear `pyproject.toml` con dependencias `mcp>=1.0.0`, `httpx`, `pydantic` y dev `pytest` — plan.md:28
+- [x] T003 [P] Crear `.env.example` documentando `MAPAS_BOGOTA_APIKEY` (opcional, salvo consulta por dirección) — plan.md:50
+- [x] T004 [P] Crear `README.md` en español con instalación, configuración y ejecución del servidor — plan.md:51
+- [x] T005 [P] Crear `Dockerfile` Python 3.11+ (imagen multi-etapa, transporte MCP por stdio) y entradas de `.gitignore` — plan.md:26, plan.md:37, constitution.md:54 (Docker multi-etapa); `.gitignore` según convenciones del workspace (plan.md:96)
 
 ---
 
@@ -39,13 +39,13 @@
 
 **⚠️ CRITICAL**: ningún trabajo de historias de usuario puede comenzar hasta que esta fase esté completa
 
-- [ ] T006 Definir modelos pydantic v2 en `app/models.py`: `Lote`, `ValorReferencia`, `DestinoEconomico`, `ReservaVial`, `ObraPublica` — spec.md:92
-- [ ] T007 Definir `SourceTrace` en `app/models.py` con los 5 campos obligatorios (`source_name`, `layer_id`, `service_url`, `data_vigencia`, `query_timestamp`) — spec.md:82
-- [ ] T008 Definir el estado por dato (`disponible` | `no_encontrado`) en las entidades temáticas de `app/models.py` — spec.md:83
-- [ ] T009 Definir la taxonomía de errores canónica en `app/models.py` (`LOTE_NO_ENCONTRADO`, `DIRECCION_NO_LOCALIZADA`, `FUERA_DE_COBERTURA`, `DATO_NO_ENCONTRADO_POR_FUENTE`, `FUENTE_5XX`, `CREDENCIAL_FALTANTE`, `PARAMETROS_INVALIDOS`) — spec.md:85, spec.md:88, spec.md:65-71, data-model.md:137-149
-- [ ] T010 [P] Implementar provider `app/providers/mapas_bogota.py`: cliente httpx async para Mapas Bogotá API (`cmd=direccion_chip`, `cmd=geocodificar`) con `raise_for_status` para detectar 5xx — plan.md:100, spec.md:85
-- [ ] T011 [P] Implementar provider `app/providers/arcgis.py`: cliente httpx async para ArcGIS REST con query por punto (`esriGeometryPoint`, `inSR=4326`, `spatialRel=esriSpatialRelIntersects`) y `where` por `ESOCLOTE` — plan.md:101, spec.md:80
-- [ ] T012 Implementar `app/main.py`: servidor FastMCP por stdio registrando EXACTAMENTE las 4 tools (`resolve_lot_by_chip`, `resolve_lot_by_address`, `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`) — plan.md:97, plan.md:37
+- [x] T006 Definir modelos pydantic v2 en `app/models.py`: `Lote`, `ValorReferencia`, `DestinoEconomico`, `ReservaVial`, `ObraPublica` — spec.md:92
+- [x] T007 Definir `SourceTrace` en `app/models.py` con los 5 campos obligatorios (`source_name`, `layer_id`, `service_url`, `data_vigencia`, `query_timestamp`) — spec.md:82
+- [x] T008 Definir el estado por dato (`disponible` | `no_encontrado`) en las entidades temáticas de `app/models.py` — spec.md:83
+- [x] T009 Definir la taxonomía de errores canónica en `app/models.py` (`LOTE_NO_ENCONTRADO`, `DIRECCION_NO_LOCALIZADA`, `FUERA_DE_COBERTURA`, `DATO_NO_ENCONTRADO_POR_FUENTE`, `FUENTE_5XX`, `CREDENCIAL_FALTANTE`, `PARAMETROS_INVALIDOS`) — spec.md:85, spec.md:88, spec.md:65-71, data-model.md:137-149
+- [x] T010 [P] Implementar provider `app/providers/mapas_bogota.py`: cliente httpx async para Mapas Bogotá API (`cmd=direccion_chip`, `cmd=geocodificar`) con `raise_for_status` para detectar 5xx — plan.md:100, spec.md:85
+- [x] T011 [P] Implementar provider `app/providers/arcgis.py`: cliente httpx async para ArcGIS REST con query por punto (`esriGeometryPoint`, `inSR=4326`, `spatialRel=esriSpatialRelIntersects`) y `where` por `ESOCLOTE` — plan.md:101, spec.md:80
+- [x] T012 Implementar `app/main.py`: servidor FastMCP por stdio registrando EXACTAMENTE las 4 tools (`resolve_lot_by_chip`, `resolve_lot_by_address`, `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`) — plan.md:97, plan.md:37
 
 **Checkpoint**: fundación lista — las historias de usuario pueden comenzar.
 
@@ -59,17 +59,17 @@
 
 ### Tests para Historia de Usuario 1 (escribirlos PRIMERO para que fallen antes de implementar)
 
-- [ ] T013 [P] [US1] Contract test de `resolve_lot_by_chip` en `tests/contract/test_resolve_lot_by_chip.py` — spec.md:21
-- [ ] T014 [P] [US1] Contract test de `get_lot_summary_by_chip` en `tests/contract/test_get_lot_summary_by_chip.py` — spec.md:21
+- [x] T013 [P] [US1] Contract test de `resolve_lot_by_chip` en `tests/contract/test_resolve_lot_by_chip.py` — spec.md:21
+- [x] T014 [P] [US1] Contract test de `get_lot_summary_by_chip` en `tests/contract/test_get_lot_summary_by_chip.py` — spec.md:21
 
 ### Implementación para Historia de Usuario 1
 
-- [ ] T015 [P] [US1] Implementar validación de CHIP con patrón `^[A-Z0-9]{11}$` en el límite de las tools (fail-fast, `PARAMETROS_INVALIDOS`) — spec.md:88
-- [ ] T016 [P] [US1] Implementar búsqueda por CHIP vía Mapas Bogotá `cmd=direccion_chip` (geometría del predio + centroide) en `app/providers/mapas_bogota.py` — plan.md:100, spec.md:77
-- [ ] T017 [P] [US1] Implementar consulta de la capa Lote (`Mapa_Referencia/Mapa_Referencia`, `layer_id=38`) por punto/centroide en `app/providers/arcgis.py` — plan.md:101, spec.md:77
-- [ ] T018 [US1] Implementar las 4 consultas temáticas (`catastro/valorreferencia`, `catastro/destinolt` por `ESOCLOTE`, `ordenamientoterritorial/reservavial`, `gestionpublica/obraspublicas`) en `app/providers/arcgis.py`, cada una con su `data_vigencia`, ejecutadas en paralelo con `asyncio.gather` (SC-001, rendimiento <10 s) — spec.md:80, spec.md:84, spec.md:102, research.md:53-54
-- [ ] T019 [US1] Implementar `resolve_lot_by_chip` completa: resolver lote (identidad + geometría + centroide) y enriquecer con contexto temático y trazabilidad por fuente — spec.md:77, spec.md:82
-- [ ] T020 [US1] Implementar `get_lot_summary_by_chip` completa: resumen consolidado descriptivo (`identidad` + `contexto_por_fuente`), sin puntajes de factibilidad ni reglas inferidas — spec.md:81, spec.md:87
+- [x] T015 [P] [US1] Implementar validación de CHIP con patrón `^[A-Z0-9]{11}$` en el límite de las tools (fail-fast, `PARAMETROS_INVALIDOS`) — spec.md:88
+- [x] T016 [P] [US1] Implementar búsqueda por CHIP vía Mapas Bogotá `cmd=direccion_chip` (geometría del predio + centroide) en `app/providers/mapas_bogota.py` — plan.md:100, spec.md:77
+- [x] T017 [P] [US1] Implementar consulta de la capa Lote (`Mapa_Referencia/Mapa_Referencia`, `layer_id=38`) por punto/centroide en `app/providers/arcgis.py` — plan.md:101, spec.md:77
+- [x] T018 [US1] Implementar las 4 consultas temáticas (`catastro/valorreferencia`, `catastro/destinolt` por `ESOCLOTE`, `ordenamientoterritorial/reservavial`, `gestionpublica/obraspublicas`) en `app/providers/arcgis.py`, cada una con su `data_vigencia`, ejecutadas en paralelo con `asyncio.gather` (SC-001, rendimiento <10 s) — spec.md:80, spec.md:84, spec.md:102, research.md:53-54
+- [x] T019 [US1] Implementar `resolve_lot_by_chip` completa: resolver lote (identidad + geometría + centroide) y enriquecer con contexto temático y trazabilidad por fuente — spec.md:77, spec.md:82
+- [x] T020 [US1] Implementar `get_lot_summary_by_chip` completa: resumen consolidado descriptivo (`identidad` + `contexto_por_fuente`), sin puntajes de factibilidad ni reglas inferidas — spec.md:81, spec.md:87
 
 **Checkpoint**: Historia de Usuario 1 funcional y comprobable de forma independiente.
 
@@ -83,15 +83,15 @@
 
 ### Tests para Historia de Usuario 2 (escribirlos PRIMERO para que fallen antes de implementar)
 
-- [ ] T021 [P] [US2] Contract test de `resolve_lot_by_address` en `tests/contract/test_resolve_lot_by_address.py` (resolución única, dirección no localizada, múltiples candidatos, credencial faltante) — spec.md:37, spec.md:43, spec.md:86
+- [x] T021 [P] [US2] Contract test de `resolve_lot_by_address` en `tests/contract/test_resolve_lot_by_address.py` (resolución única, dirección no localizada, múltiples candidatos, credencial faltante) — spec.md:37, spec.md:43, spec.md:86
 
 ### Implementación para Historia de Usuario 2
 
-- [ ] T022 [P] [US2] Implementar fail-fast de credencial en el límite de la tool `resolve_lot_by_address` en `app/main.py`: si falta `MAPAS_BOGOTA_APIKEY` en el entorno → `CREDENCIAL_FALTANTE` sin llamar a las fuentes — spec.md:86, contracts/resolve-lot-by-address.md:43-45
-- [ ] T023 [US2] Implementar geocodificación de dirección (`cmd=geocodificar`) en `app/providers/mapas_bogota.py` — plan.md:100, spec.md:78
-- [ ] T024 [US2] Implementar resolución del lote por punto geocodificado reutilizando la capa Lote y las temáticas de US1 — spec.md:78, spec.md:80
-- [ ] T025 [US2] Implementar manejo de múltiples candidatos: respuesta `multiples_candidatos` con `candidatos` y `source_trace` de `geocodificar`, sin elegir uno arbitrariamente — spec.md:43
-- [ ] T026 [US2] Implementar error `DIRECCION_NO_LOCALIZADA` (sin inventar ni asumir un lote) y completar `resolve_lot_by_address` — spec.md:78, spec.md:66
+- [x] T022 [P] [US2] Implementar fail-fast de credencial en el límite de la tool `resolve_lot_by_address` en `app/main.py`: si falta `MAPAS_BOGOTA_APIKEY` en el entorno → `CREDENCIAL_FALTANTE` sin llamar a las fuentes — spec.md:86, contracts/resolve-lot-by-address.md:43-45
+- [x] T023 [US2] Implementar geocodificación de dirección (`cmd=geocodificar`) en `app/providers/mapas_bogota.py` — plan.md:100, spec.md:78
+- [x] T024 [US2] Implementar resolución del lote por punto geocodificado reutilizando la capa Lote y las temáticas de US1 — spec.md:78, spec.md:80
+- [x] T025 [US2] Implementar manejo de múltiples candidatos: respuesta `multiples_candidatos` con `candidatos` y `source_trace` de `geocodificar`, sin elegir uno arbitrariamente — spec.md:43
+- [x] T026 [US2] Implementar error `DIRECCION_NO_LOCALIZADA` (sin inventar ni asumir un lote) y completar `resolve_lot_by_address` — spec.md:78, spec.md:66
 
 **Checkpoint**: Historias de Usuario 1 y 2 funcionales de forma independiente.
 
@@ -105,13 +105,13 @@
 
 ### Tests para Historia de Usuario 3 (escribirlos PRIMERO para que fallen antes de implementar)
 
-- [ ] T027 [P] [US3] Contract test de `resolve_lot_by_coordinates` en `tests/contract/test_resolve_lot_by_coordinates.py` (punto dentro de un lote, punto fuera de Bogotá, límite entre lotes sin lote único) — spec.md:53, spec.md:59
+- [x] T027 [P] [US3] Contract test de `resolve_lot_by_coordinates` en `tests/contract/test_resolve_lot_by_coordinates.py` (punto dentro de un lote, punto fuera de Bogotá, límite entre lotes sin lote único) — spec.md:53, spec.md:59
 
 ### Implementación para Historia de Usuario 3
 
-- [ ] T028 [P] [US3] Verificar la consulta por punto de la capa Lote reutilizando el helper de T017 dentro del flujo de `resolve_lot_by_coordinates`, validando `FUERA_DE_COBERTURA` (spec.md:58) y `LOTE_NO_ENCONTRADO` (spec.md:59) — spec.md:53, spec.md:79
-- [ ] T029 [US3] Implementar error `FUERA_DE_COBERTURA` para puntos dentro de rango pero fuera del área de Bogotá — spec.md:79, spec.md:67
-- [ ] T030 [US3] Implementar `LOTE_NO_ENCONTRADO` para puntos en límite entre lotes o sin lote asociado, y completar `resolve_lot_by_coordinates` — spec.md:59
+- [x] T028 [P] [US3] Verificar la consulta por punto de la capa Lote reutilizando el helper de T017 dentro del flujo de `resolve_lot_by_coordinates`, validando `FUERA_DE_COBERTURA` (spec.md:58) y `LOTE_NO_ENCONTRADO` (spec.md:59) — spec.md:53, spec.md:79
+- [x] T029 [US3] Implementar error `FUERA_DE_COBERTURA` para puntos dentro de rango pero fuera del área de Bogotá — spec.md:79, spec.md:67
+- [x] T030 [US3] Implementar `LOTE_NO_ENCONTRADO` para puntos en límite entre lotes o sin lote asociado, y completar `resolve_lot_by_coordinates` — spec.md:59
 
 **Checkpoint**: las tres historias de usuario funcionales de forma independiente.
 
@@ -121,12 +121,12 @@
 
 **Propósito**: pruebas, verificación de trazabilidad y mejoras que afectan a múltiples historias
 
-- [ ] T031 [P] Smoke test de arranque en `tests/smoke/test_main.py`: el servidor inicia y las 4 tools quedan registradas — plan.md:33
-- [ ] T032 [P] Contract tests de la taxonomía de errores en `tests/contract/test_errores.py`: un 5xx de la fuente se reporta como `FUENTE_5XX` y NUNCA como no encontrado; se verifican los 7 códigos canónicos — spec.md:85
-- [ ] T033 [P] Contract tests de validación FR-012 en `tests/contract/test_validacion.py`: CHIP mal formado, dirección vacía y coordenadas fuera de rango → `PARAMETROS_INVALIDOS` — spec.md:88
-- [ ] T034 [P] Verificar trazabilidad completa en `tests/contract/test_trazabilidad.py`: los 5 campos (`source_name`, `layer_id`, `service_url`, `data_vigencia`, `query_timestamp`) en cada dato y nunca mezclar vigencias — spec.md:104, spec.md:105
-- [ ] T035 Verificar estados `disponible` / `no_encontrado` por fuente en el 100% de las respuestas (SC-002) en `tests/contract/test_estados.py` — spec.md:103
-- [ ] T036 Validar contra `quickstart.md` los escenarios de CHIP, coordenadas, dirección sin credencial y trazabilidad en `tests/contract/test_quickstart.py` (SC-005, SC-006, SC-003/SC-004, FR-010; SC-001 de rendimiento <10 s se valida contra quickstart.md) — spec.md:86, spec.md:102, spec.md:104, spec.md:105, spec.md:106, spec.md:107
+- [x] T031 [P] Smoke test de arranque en `tests/smoke/test_main.py`: el servidor inicia y las 4 tools quedan registradas — plan.md:33
+- [x] T032 [P] Contract tests de la taxonomía de errores en `tests/contract/test_errores.py`: un 5xx de la fuente se reporta como `FUENTE_5XX` y NUNCA como no encontrado; se verifican los 7 códigos canónicos — spec.md:85
+- [x] T033 [P] Contract tests de validación FR-012 en `tests/contract/test_validacion.py`: CHIP mal formado, dirección vacía y coordenadas fuera de rango → `PARAMETROS_INVALIDOS` — spec.md:88
+- [x] T034 [P] Verificar trazabilidad completa en `tests/contract/test_trazabilidad.py`: los 5 campos (`source_name`, `layer_id`, `service_url`, `data_vigencia`, `query_timestamp`) en cada dato y nunca mezclar vigencias — spec.md:104, spec.md:105
+- [x] T035 Verificar estados `disponible` / `no_encontrado` por fuente en el 100% de las respuestas (SC-002) en `tests/contract/test_estados.py` — spec.md:103
+- [x] T036 Validar contra `quickstart.md` los escenarios de CHIP, coordenadas, dirección sin credencial y trazabilidad en `tests/contract/test_quickstart.py` (SC-005, SC-006, SC-003/SC-004, FR-010; SC-001 de rendimiento <10 s se valida contra quickstart.md) — spec.md:86, spec.md:102, spec.md:104, spec.md:105, spec.md:106, spec.md:107
 
 ---
 
