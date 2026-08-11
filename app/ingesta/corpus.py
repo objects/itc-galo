@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html as html_mod
 import json
 import os
 import re
@@ -35,16 +36,96 @@ from app.models import (
 # motor de regex elegiria "I" dentro de "II"/"III"/"IV" y el libro se perderia.
 LIBRO_PATRON = re.compile(r"LIBRO\s+(VIII|VII|VI|V|IV|III|II|I)\b")
 ARTICULO_PATRON = re.compile(r"ARTÍCULO\s+(\d+)")
-UPL_PATRON = re.compile(r"UPL\d{2}")
+# La fuente real menciona UPL de uno y dos dígitos ("UPL 2".."UPL 33"); el
+# dígito se normaliza después a dos posiciones (UPL02..UPL33).
+UPL_PATRON = re.compile(r"UPL\s*(\d{1,2})")
 ARTICULO_DEROGADO_PATRON = re.compile(
     r"deroga[ra]?\s+(?:el\s+)?art[ií]culo\s+(\d+)", re.IGNORECASE
 )
 
 PARTE_POR_LIBRO = {"II": "general", "III": "urbano", "IV": "rural"}
 
+# Formato sisjur (HTML exportado por Word): el número de artículo vive en el
+# span ancla `class="ancla" id="N"` (483 artículos) o en el encabezado inline
+# "Artículo N." (los 125 restantes). El ancla tambien marca los LIBRO
+# (`id="L.2"`), que nunca colisionan con el patron numerico de articulo.
+MARCA_ANCLA = 'class="ancla"'
+ANCLA_ARTICULO_PATRON = re.compile(r'<span[^>]*class="ancla"[^>]*id="(\d+)"')
+ARTICULO_INLINE_PATRON = re.compile(
+    r'<b(?:\s[^>]*)?>\s*<span lang="ES"[^>]*>\s*Art[ií]culo\s+(\d+)\s*\.'
+    r"(?:\s*|&nbsp;|(?:<font[^>]*>)?\s*&nbsp;\s*(?:</font>)?)</span></b>",
+    re.IGNORECASE,
+)
+BOLD_PATRON = re.compile(r"<b(?:\s[^>]*)?>(.*?)</b>", re.DOTALL)
+LIBRO_SISJUR_PATRON = re.compile(
+    r'LIBRO<span[^>]*id="L\.\d+"[^>]*>\s*</span>\s*&nbsp;\s*'
+    r"(VIII|VII|VI|V|IV|III|II|I)\b"
+)
 
-def parsear_articulos(html: str) -> list[ArticuloNormativo]:
-    """Parsea el HTML del Decreto 555/2021 de sisjur en articulos tipados.
+MENSAJE_SIN_ARTICULOS = (
+    "No se encontró ningún 'ARTÍCULO' en el HTML del Decreto 555/2021. "
+    "Verifica que la fuente de sisjur devuelva el documento completo."
+)
+# El formato sisjur no usa "ARTÍCULO" en mayúsculas: el número vive en el span
+# `class="ancla"`; el mensaje debe señalar esa marca estructural.
+MENSAJE_SIN_ARTICULOS_SISJUR = (
+    "No se encontró ningún artículo con 'class=\"ancla\"' en el HTML del "
+    "Decreto 555/2021. Verifica que la fuente de sisjur devuelva el documento "
+    "completo."
+)
+
+
+def _limpiar_html(texto: str) -> str:
+    """Limpia HTML del formato sisjur: tags fuera, entidades decodificadas.
+
+    Los cierres de bloque y los saltos `<br>` se conservan como separación de
+    párrafos (`\n`); el resto de tags se quita y toda corrida de espacios o de
+    saltos suaves de línea de Word colapsa a un solo espacio (requisito B:
+    los títulos no pueden tener saltos internos).
+    """
+    SALTO_PARRAFO = "\x00"
+    # El pie de página de sisjur inyecta <script> con gtag/dataLayer/UA- y
+    # <style>: no son contenido normativo y se eliminan enteros ANTES de tocar
+    # los tags, para que su cuerpo no contamine el artículo final.
+    texto = re.sub(
+        r"<script\b.*?</script>|<style\b.*?</style>",
+        "",
+        texto,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    texto = re.sub(
+        r"</(?:p|div|tr|li|table|h[1-6])>|<br\s*/?>",
+        SALTO_PARRAFO,
+        texto,
+        flags=re.IGNORECASE,
+    )
+    texto = re.sub(r"<[^>]+>", " ", texto)
+    texto = html_mod.unescape(texto)
+    texto = re.sub(r"\s+", " ", texto)
+    texto = re.sub(f" *{re.escape(SALTO_PARRAFO)} *", SALTO_PARRAFO, texto)
+    texto = re.sub(re.escape(SALTO_PARRAFO) + r"+", SALTO_PARRAFO, texto)
+    return texto.replace(SALTO_PARRAFO, "\n").strip()
+
+
+def _extraer_upls(texto: str) -> list[str]:
+    """UPLs mencionadas en el texto, únicas y en forma canónica de dos dígitos.
+
+    Acepta las variantes de la fuente (`UPL 2`, `UPL20`, `UPL 33`) y normaliza
+    todas a la forma canónica de dos dígitos (`UPL02`..`UPL33`), con cero-padding
+    para los valores de un dígito: "UPL 2" -> "UPL02", "UPL20" -> "UPL20".
+    """
+    return list(
+        dict.fromkeys(f"UPL{int(digitos):02d}" for digitos in UPL_PATRON.findall(texto))
+    )
+
+
+def _extraer_derogados(texto: str) -> list[int]:
+    """Números de artículos que el texto deroga explícitamente."""
+    return [int(n) for n in ARTICULO_DEROGADO_PATRON.findall(texto)]
+
+
+def _parsear_formato_demo(html: str) -> list[ArticuloNormativo]:
+    """Parsea el HTML plano del modo demo (encabezados "ARTÍCULO N. Título").
 
     Reglas de extraccion:
     - Cada "ARTÍCULO N." abre un articulo: su titulo es el resto de la linea del
@@ -52,18 +133,10 @@ def parsear_articulos(html: str) -> list[ArticuloNormativo]:
     - El libro vigente es el último "LIBRO <numeral>" anterior al articulo ("I"
       si no hay ninguno); la parte se deriva del libro (II general, III urbano,
       IV rural; el resto sin parte).
-    - Las UPLs mencionadas y los articulos derogados se extraen del texto con
-      regex y se deduplican.
-
-    Fail fast: sin ningún "ARTÍCULO" el HTML no es el documento esperado y se
-    lanza ValueError con mensaje accionable.
     """
     partidos = list(ARTICULO_PATRON.finditer(html))
     if not partidos:
-        raise ValueError(
-            "No se encontró ningún 'ARTÍCULO' en el HTML del Decreto 555/2021. "
-            "Verifica que la fuente de sisjur devuelva el documento completo."
-        )
+        raise ValueError(MENSAJE_SIN_ARTICULOS)
 
     libros = list(LIBRO_PATRON.finditer(html))
     articulos: list[ArticuloNormativo] = []
@@ -90,8 +163,155 @@ def parsear_articulos(html: str) -> list[ArticuloNormativo]:
         )
         texto = re.sub(r"\n{2,}", "\n", html[inicio_cuerpo:fin_cuerpo]).strip()
 
-        upls_mencionadas = list(dict.fromkeys(UPL_PATRON.findall(texto)))
-        articulos_derogados = [int(n) for n in ARTICULO_DEROGADO_PATRON.findall(texto)]
+        articulos.append(
+            ArticuloNormativo(
+                numero=numero,
+                titulo=titulo,
+                texto=texto,
+                libro=libro_vigente,
+                parte=PARTE_POR_LIBRO.get(libro_vigente),
+                upls_mencionadas=_extraer_upls(texto),
+                articulos_derogados=_extraer_derogados(texto),
+            )
+        )
+
+    return articulos
+
+
+def _es_solo_anclas(texto: str) -> bool:
+    """True si el fragmento no tiene texto visible fuera de `<a href>...</a>`.
+
+    Sisjur inyecta anotaciones editoriales ("Reglamentado por...") entre el
+    número y el título del artículo; esas anotaciones se saltan al extraer el
+    título porque no forman parte del texto normativo.
+    """
+    sin_anclas = re.sub(r"<a\b.*?</a>", "", texto, flags=re.DOTALL)
+    return _limpiar_html(sin_anclas) == ""
+
+
+def _extraer_titulo_sisjur(
+    html: str, inicio: int, numero: int, fin_cuerpo: int
+) -> tuple[str, int]:
+    """Devuelve (titulo, inicio del cuerpo) para un articulo del formato sisjur.
+
+    El titulo es el texto de los grupos `<b>` posteriores al numero del articulo.
+    Word puede partir una palabra entre dos grupos ("4. P" + "rincipios..."), por
+    eso se unen sin espacio cuando el HTML original no tenia ninguno entre ambos.
+    Las anotaciones editoriales en `<a href>` se saltan; el cuerpo empieza en el
+    primer texto visible que no es negrita ni anotacion.
+    """
+    numero_patron = re.compile(r"(?:Art[ií]culo\s+)?" + str(numero) + r"\.")
+    grupo_numero = None
+    cursor = inicio
+    while grupo_numero is None:
+        grupo = BOLD_PATRON.search(html, cursor, fin_cuerpo)
+        if grupo is None:
+            # Fail Fast: el marcador (ancla o inline) existió pero ningún grupo
+            # <b> lleva el número del artículo; el título queda incompleto y un
+            # fallback silencioso ("", inicio) contaminaría el corpus.
+            raise ValueError(
+                f"No se encontró el título del marcador ancla {numero} en el "
+                "HTML del Decreto 555/2021."
+            )
+        if numero_patron.match(_limpiar_html(grupo.group(1))):
+            grupo_numero = grupo
+        else:
+            cursor = grupo.end()
+
+    coincidencia = numero_patron.match(_limpiar_html(grupo_numero.group(1)))
+    cursor = grupo_numero.end()
+    partes: list[str] = []
+    if coincidencia:
+        resto = _limpiar_html(grupo_numero.group(1))[coincidencia.end():]
+        if resto:
+            partes.append(resto)
+
+    while True:
+        grupo = BOLD_PATRON.search(html, cursor, fin_cuerpo)
+        if grupo is None:
+            break
+        entre = html[cursor:grupo.start()]
+        if _limpiar_html(entre) and not _es_solo_anclas(entre):
+            break
+        separador_tiene_espacio = re.search(
+            r"\s", re.sub(r"<[^>]+>", "", entre).replace("&nbsp;", " ")
+        )
+        contenido = _limpiar_html(grupo.group(1))
+        if not re.search(r"\w", contenido):
+            cursor = grupo.end()
+            continue
+        if separador_tiene_espacio and partes and partes[-1] != " ":
+            partes.append(" ")
+        partes.append(contenido)
+        cursor = grupo.end()
+
+    titulo = re.sub(r"\s{2,}", " ", "".join(partes)).strip()
+    return titulo, cursor
+
+
+def _ajustar_fin_cuerpo(html: str, fin_cuerpo: int) -> int:
+    """Recorta el fin del cuerpo a la frontera real del encabezado siguiente.
+
+    En el formato sisjur, el encabezado del artículo siguiente separa la palabra
+    "Artículo" en un grupo `<b>` propio situado ANTES de su ancla
+    (`class="ancla"`); sin este recorte, esa palabra suelta contamina el final
+    del cuerpo del artículo actual (frase huérfana "Artículo"). Solo se recorta
+    cuando el contenido limpio del último grupo `<b>` anterior a la frontera es
+    exactamente "Artículo" (re.IGNORECASE) y entre ese grupo y el ancla no hay
+    texto visible; los encabezados inline "Artículo N." no cumplen ninguna de
+    las dos condiciones y conservan el fin original.
+    """
+    ventana_inicio = max(0, fin_cuerpo - 2000)
+    ventana = html[ventana_inicio:fin_cuerpo]
+    grupo_anterior = None
+    for grupo in BOLD_PATRON.finditer(ventana):
+        grupo_anterior = grupo
+    if grupo_anterior is None:
+        return fin_cuerpo
+    inicio_grupo = ventana_inicio + grupo_anterior.start()
+    if _limpiar_html(html[ventana_inicio + grupo_anterior.end():fin_cuerpo]) != "":
+        return fin_cuerpo
+    if _limpiar_html(grupo_anterior.group(1)).strip().lower() != "artículo":
+        return fin_cuerpo
+    return inicio_grupo
+
+
+def _parsear_formato_sisjur(html: str) -> list[ArticuloNormativo]:
+    """Parsea el HTML real de sisjur (Word exportado): anclas + encabezados inline.
+
+    Fuente autoritativa del numero: los spans `class="ancla" id="N"` (483) unidos
+    a los encabezados inline "Artículo N." con punto (125). Las referencias
+    internas ("artículo 12 de la Ley 810 de 2003", "artículo 2.2.2.1.2.3.5") no
+    cumplen el patron inline (sin punto seguido de cierre del span) y quedan
+    fuera; la union produce exactamente {1..608} sin lagunas.
+    """
+    marcadores: dict[int, int] = {}
+    for partido in ANCLA_ARTICULO_PATRON.finditer(html):
+        marcadores.setdefault(int(partido.group(1)), partido.start())
+    for partido in ARTICULO_INLINE_PATRON.finditer(html):
+        numero = int(partido.group(1))
+        if numero not in marcadores or partido.start() < marcadores[numero]:
+            marcadores[numero] = partido.start()
+    if not marcadores:
+        raise ValueError(MENSAJE_SIN_ARTICULOS_SISJUR)
+
+    posiciones = sorted((posicion, numero) for numero, posicion in marcadores.items())
+    libros = list(LIBRO_SISJUR_PATRON.finditer(html))
+    articulos: list[ArticuloNormativo] = []
+
+    for indice, (inicio, numero) in enumerate(posiciones):
+        fin_cuerpo = (
+            posiciones[indice + 1][0] if indice + 1 < len(posiciones) else len(html)
+        )
+        fin_cuerpo = _ajustar_fin_cuerpo(html, fin_cuerpo)
+        titulo, inicio_cuerpo = _extraer_titulo_sisjur(html, inicio, numero, fin_cuerpo)
+        texto = _limpiar_html(html[inicio_cuerpo:fin_cuerpo])
+        if texto.startswith("."):
+            texto = texto[1:].lstrip()
+
+        libro_vigente = next(
+            (m.group(1) for m in reversed(libros) if m.start() < inicio), "I"
+        )
 
         articulos.append(
             ArticuloNormativo(
@@ -100,12 +320,38 @@ def parsear_articulos(html: str) -> list[ArticuloNormativo]:
                 texto=texto,
                 libro=libro_vigente,
                 parte=PARTE_POR_LIBRO.get(libro_vigente),
-                upls_mencionadas=upls_mencionadas,
-                articulos_derogados=articulos_derogados,
+                upls_mencionadas=_extraer_upls(texto),
+                articulos_derogados=_extraer_derogados(texto),
             )
         )
 
     return articulos
+
+
+def parsear_articulos(html: str) -> list[ArticuloNormativo]:
+    """Parsea el HTML del Decreto 555/2021 de sisjur en articulos tipados.
+
+    Detecta el formato por una unica senal estructural, sin heuristica fragil:
+    la presencia de `class="ancla"` (HTML exportado por Word de la fuente real)
+    despacha al parser sisjur; su ausencia, al parser del HTML plano del modo
+    demo y de los fixtures.
+
+    Reglas comunes a ambos formatos:
+    - Cada "ARTÍCULO N." abre un articulo: titulo del encabezado (limpio, sin
+      tags ni saltos internos) y texto literal (FR-003) hasta el siguiente
+      articulo.
+    - El libro vigente es el último "LIBRO <numeral>" anterior al articulo ("I"
+      si no hay ninguno); la parte se deriva del libro (II general, III urbano,
+      IV rural; el resto sin parte).
+    - Las UPLs mencionadas y los articulos derogados se extraen del texto con
+      regex y se deduplican.
+
+    Fail fast: sin ningún "ARTÍCULO" el HTML no es el documento esperado y se
+    lanza ValueError con mensaje accionable.
+    """
+    if MARCA_ANCLA in html:
+        return _parsear_formato_sisjur(html)
+    return _parsear_formato_demo(html)
 
 
 def _construir_chunk(
@@ -226,8 +472,18 @@ def _etiqueta_embedding(embedding_function) -> str:
     return getattr(embedding_function, "model_name", None) or _modelo_embedding_env()
 
 
+# Tamaño máximo de documentos por llamada de embedding/upsert. El servidor
+# Ollama remoto rechaza lotes grandes de embeddings (evidencia empírica:
+# n=200 funciona, n=500 falla), por eso 100 deja margen seguro. Se ajusta con
+# la variable EMBEDDING_BATCH_SIZE sin tocar código.
+BATCH_EMBEDDING_TAMANO = int(os.getenv("EMBEDDING_BATCH_SIZE", "100"))
+
+
 def indexar_corpus(
-    corpus: list[ArticuloNormativo], ruta_indice: str, embedding_function=None
+    corpus: list[ArticuloNormativo],
+    ruta_indice: str,
+    embedding_function=None,
+    batch_tamano: int = BATCH_EMBEDDING_TAMANO,
 ) -> CorpusInfo:
     """Indexa el corpus en ChromaDB y devuelve metadatos del corpus indexado.
 
@@ -239,7 +495,15 @@ def indexar_corpus(
     (corpus distinto, modelo de embeddings distinto o índice legado sin la huella
     del modelo: se borra la colección y se re-indexa desde cero para no mezclar
     vectores de versiones previas ni de modelos distintos en el mismo HNSW).
+
+    El upsert se particiona en lotes de `batch_tamano` documentos para no saturar
+    el servidor de embeddings remoto (ver `BATCH_EMBEDDING_TAMANO`); el resultado
+    final es idéntico a un upsert único: mismos ids, documentos y metadatos.
     """
+    if batch_tamano <= 0:
+        raise ValueError(
+            f"batch_tamano debe ser mayor que 0 (recibido: {batch_tamano})"
+        )
     if embedding_function is None:
         embedding_function = _crear_embedding_function()
     embedding_model = _etiqueta_embedding(embedding_function)
@@ -335,7 +599,12 @@ def indexar_corpus(
             }
         )
 
-    coleccion.upsert(ids=ids, documents=documents, metadatas=metadatas)
+    for inicio in range(0, len(ids), batch_tamano):
+        coleccion.upsert(
+            ids=ids[inicio : inicio + batch_tamano],
+            documents=documents[inicio : inicio + batch_tamano],
+            metadatas=metadatas[inicio : inicio + batch_tamano],
+        )
 
     return CorpusInfo(
         documento="Decreto 555 de 2021 (POT Bogotá)",

@@ -54,6 +54,95 @@ ARTÍCULO 1. Disposiciones generales.
 Este es un artículo del Libro I sin parte derivada.
 """
 
+# Formato real de sisjur (HTML exportado por Word): artículo 1 con ancla
+# (`id="1"`, el número NO va inline), artículo 2 con número inline ("Artículo 2."),
+# título multilínea con tags, y una referencia interna falsa ("artículo 5 de la
+# Ley X" sin punto) que NO debe crear un artículo 5. El LIBRO II (ancla "L.2")
+# está antes del artículo 2 para probar la proximidad de libro/parte.
+HTML_SISJUR = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<b><span lang="ES" style="color:black">Artículo</span></b>
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES" style="color:black">1. </span></b>
+<b><span lang="ES">Título del
+primer artículo en varias líneas.</span></b>
+<span lang="ES">Cuerpo del artículo uno con <b>negrita</b> y enlaces.</span>
+</p>
+<p class="MsoNormal"><b>LIBRO<span class="ancla" id="L.2"></span>&nbsp;II</b></p>
+<p class="MsoNormal" style="text-align:justify">
+<b><span lang="ES" style="color:black">Artículo 2.</span></b>
+<b><span lang="ES">Normas urbanas en UPL 20.</span></b>
+<span lang="ES">Cuerpo del artículo dos; cita al artículo 5 de la Ley X sin punto y a la UPL 20.</span>
+</p>
+</body>
+"""
+
+# Frontera contaminante del formato real: el encabezado del artículo 2 separa la
+# palabra "Artículo" en un grupo <b> propio ANTES de su ancla. Sin el ajuste de
+# frontera (FIX 1), esa palabra suelta caería al final del cuerpo del artículo 1.
+HTML_SISJUR_BORDE = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Título del primer artículo.</span></b>
+<span lang="ES">Cuerpo del primer artículo con frontera limpia.</span>
+</p>
+<p class="MsoNormal" style="text-align:justify">
+<b><span lang="ES" style="color:black">Artículo</span></b>
+<span style="font-size: 12pt;" class="ancla" id="2"></span>
+<b><span lang="ES">2. </span></b>
+<b><span lang="ES">Título del segundo artículo.</span></b>
+<span lang="ES">Cuerpo del segundo artículo.</span>
+</p>
+</body>
+"""
+
+# Punto final del título FUERA del grupo <b> (queda entre el título y el cuerpo):
+# sin el ajuste (FIX 2), el cuerpo arrancaría con un "." huérfano.
+HTML_SISJUR_PUNTO_FUERA = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Título con punto fuera del grupo</span></b>.
+<span lang="ES">Cuerpo del artículo con punto huérfano.</span>
+</p>
+</body>
+"""
+
+# Pie de página real de sisjur: <script> con gtag/dataLayer/UA- y <style> caen
+# dentro del rango del último artículo; sin el ajuste (FIX 3) contaminan el cuerpo.
+HTML_SISJUR_SCRIPT = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Artículo con pie de página.</span></b>
+<span lang="ES">Cuerpo del artículo.</span>
+</p>
+<script type="text/javascript">
+  $(document).ready(function() {
+    gtag('config', 'UA-129457683-1');
+    dataLayer.push({event: 'pageview'});
+  });
+</script>
+<style>p { color: red; }</style>
+</body>
+"""
+
+# Ancla detectada pero sin ningún grupo <b> con el número del artículo: el título
+# es irrecuperable y el parser debe fallar rápido (FIX 6), no devolver ("", inicio).
+HTML_SISJUR_SIN_TITULO = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<span lang="ES">Cuerpo sin grupo de número en negrita.</span>
+</p>
+</body>
+"""
+
 HTML_CHUNKING = """\
 LIBRO II
 ARTÍCULO 1. Artículo largo.
@@ -101,6 +190,26 @@ class EmbeddingFunctionLegacy:
 
     def name(self) -> str:
         return "ollama"
+
+
+class FakeEmbeddingFunctionConLimite(FakeEmbeddingFunction):
+    """EF que aborta si una sola llamada recibe más de `max_por_llamada` textos.
+
+    Verifica que el upsert se particiona: sin batching, ChromaDB pasaría todos
+    los chunks de una vez y esta EF lanzaría AssertionError.
+    """
+
+    def __init__(self, max_por_llamada: int, model_name: str = "fake"):
+        super().__init__(model_name=model_name)
+        self.max_por_llamada = max_por_llamada
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        if len(input) > self.max_por_llamada:
+            raise AssertionError(
+                f"El EF recibió {len(input)} documentos en una sola llamada; "
+                f"máximo permitido {self.max_por_llamada}"
+            )
+        return super().__call__(input)
 
 
 @pytest.fixture
@@ -162,6 +271,123 @@ def test_parsear_articulos_articulos_derogados(corpus_base):
 def test_parsear_articulos_html_vacio_raise_valueerror():
     with pytest.raises(ValueError, match=r"No se encontró ningún 'ARTÍCULO'"):
         parsear_articulos("<html><body>Sin artículos</body></html>")
+
+
+# --- Parseo del formato real de sisjur (Word exportado: anclas + inline) ---
+# Fuente autoritativa del número: span `class="ancla" id="N"` unido a los
+# encabezados inline "Artículo N." con punto. Las referencias internas sin
+# punto ("artículo 5 de la Ley X") NO crean artículos.
+
+def test_parsear_articulos_sisjur_ancla_e_inline():
+    corpus = parsear_articulos(HTML_SISJUR)
+    assert [a.numero for a in corpus] == [1, 2]
+    # La referencia interna "artículo 5 de la Ley X" no genera un artículo 5.
+    assert all(a.numero != 5 for a in corpus)
+    assert len(corpus) == 2
+
+
+def test_parsear_articulos_sisjur_titulo_limpio_multilinea():
+    corpus = parsear_articulos(HTML_SISJUR)
+    art1 = next(a for a in corpus if a.numero == 1)
+    art2 = next(a for a in corpus if a.numero == 2)
+    assert art1.titulo == "Título del primer artículo en varias líneas."
+    assert art2.titulo == "Normas urbanas en UPL 20."
+    # Títulos sin tags ni saltos internos (requisito B).
+    for a in corpus:
+        assert "<" not in a.titulo
+        assert "\n" not in a.titulo
+
+
+def test_parsear_articulos_sisjur_cuerpo_sin_tags():
+    corpus = parsear_articulos(HTML_SISJUR)
+    art1 = next(a for a in corpus if a.numero == 1)
+    assert "<" not in art1.texto
+    assert "Cuerpo del artículo uno con negrita y enlaces." in art1.texto
+
+
+def test_parsear_articulos_sisjur_libro_por_proximidad():
+    corpus = parsear_articulos(HTML_SISJUR)
+    art1 = next(a for a in corpus if a.numero == 1)
+    art2 = next(a for a in corpus if a.numero == 2)
+    # Sin LIBRO previo el artículo 1 cae en el libro por defecto ("I"); el
+    # artículo 2 hereda el LIBRO II vigente y su parte derivada.
+    assert art1.libro == "I"
+    assert art1.parte is None
+    assert art2.libro == "II"
+    assert art2.parte == "general"
+
+
+def test_parsear_articulos_sisjur_upls_mencionadas():
+    corpus = parsear_articulos(HTML_SISJUR)
+    art2 = next(a for a in corpus if a.numero == 2)
+    assert art2.upls_mencionadas == ["UPL20"]
+
+
+def test_parsear_articulos_sisjur_ningun_cuerpo_termina_en_palabra_articulo():
+    # Aserción de frontera sobre el fixture base: el cuerpo de ningún artículo
+    # puede terminar en la palabra suelta "Artículo" del encabezado siguiente.
+    corpus = parsear_articulos(HTML_SISJUR)
+    for a in corpus:
+        assert not a.texto.endswith("Artículo")
+        assert not a.texto.rstrip().endswith("Artículo")
+
+
+def test_parsear_articulos_sisjur_borde_recorta_articulo_siguiente():
+    # El encabezado del artículo 2 usa el estilo real (`<b>Artículo</b>` + ancla):
+    # sin el ajuste de frontera (FIX 1), el cuerpo del artículo 1 terminaría en la
+    # palabra suelta "Artículo" y el cuerpo del artículo 2 empezaría con "2.".
+    corpus = parsear_articulos(HTML_SISJUR_BORDE)
+    assert [a.numero for a in corpus] == [1, 2]
+    art1 = next(a for a in corpus if a.numero == 1)
+    art2 = next(a for a in corpus if a.numero == 2)
+    assert art1.texto == "Cuerpo del primer artículo con frontera limpia."
+    assert "Artículo" not in art1.texto
+    assert art2.texto == "Cuerpo del segundo artículo."
+
+
+def test_parsear_articulos_sisjur_cuerpo_sin_punto_huerfano_inicial():
+    # El punto final del título quedó fuera del grupo <b> (FIX 2): el cuerpo debe
+    # arrancar directo con el texto, sin el "." huérfano.
+    corpus = parsear_articulos(HTML_SISJUR_PUNTO_FUERA)
+    art1 = corpus[0]
+    assert art1.titulo == "Título con punto fuera del grupo"
+    assert art1.texto == "Cuerpo del artículo con punto huérfano."
+    assert not art1.texto.startswith(".")
+
+
+def test_parsear_articulos_sisjur_elimina_script_y_style_del_cuerpo():
+    # El pie de página inyecta <script> (gtag/dataLayer/UA-) y <style> dentro del
+    # rango del último artículo (FIX 3): no deben quedar restos en el cuerpo.
+    corpus = parsear_articulos(HTML_SISJUR_SCRIPT)
+    art1 = corpus[0]
+    assert art1.texto == "Cuerpo del artículo."
+    for marca in ("gtag", "dataLayer", "UA-", "$(document", "ready", "<script", "<style"):
+        assert marca not in art1.texto
+
+
+def test_parsear_articulos_sisjur_upl_un_digito_normaliza_con_cero():
+    # La fuente real menciona "UPL 2".."UPL 9" de un dígito y "UPL20" de dos
+    # (FIX 4): todos se normalizan a la forma canónica de dos dígitos.
+    html = """\
+<body>
+<p class="MsoNormal" style="text-align:justify">
+<span style="font-size: 12pt;" class="ancla" id="1"></span>
+<b><span lang="ES">1. </span></b>
+<b><span lang="ES">Edificabilidad por UPL.</span></b>
+<span lang="ES">Regula la edificabilidad UPL 2, UPL20 y UPL 33.</span>
+</p>
+</body>
+"""
+    corpus = parsear_articulos(html)
+    art1 = corpus[0]
+    assert art1.upls_mencionadas == ["UPL02", "UPL20", "UPL33"]
+
+
+def test_parsear_articulos_sisjur_sin_titulo_raise_valueerror():
+    # Ancla detectada pero sin grupo <b> con el número: Fail Fast (FIX 6), no un
+    # título vacío silencioso.
+    with pytest.raises(ValueError, match=r"No se encontró el título del marcador ancla 1"):
+        parsear_articulos(HTML_SISJUR_SIN_TITULO)
 
 
 # --- Chunking (boundary-aware, overlap 1 párrafo) ---
@@ -333,6 +559,32 @@ def test_indexar_reconstruye_indice_legado_sin_huella_embedding(
     assert coleccion.metadata[METADATA_EMBEDDING_MODEL] == "fake"
     assert coleccion.metadata[METADATA_CORPUS_SHA256] == hash_documento(corpus_base)
     assert coleccion.count() == len(corpus_base)
+
+
+# --- Particionado del upsert en batches (servidor Ollama remoto) ---
+# El servidor real rechaza lotes grandes de embeddings; el test fuerza batch
+# pequeño (3) e indexa ~8 chunks con un EF que aborta si recibe más de 3 textos
+# por llamada: sin el particionado la prueba falla al primer upsert.
+
+def test_indexar_corpus_particiona_upsert_en_batches(chroma_tempdir):
+    # 4 artículos largos (~2 chunks cada uno = 8 chunks) y batch de 3: el EF
+    # no puede recibir más de 3 documentos por llamada.
+    html = "LIBRO II\n" + "\n".join(
+        f"ARTÍCULO {i}. Artículo largo.\n" + ("Párrafo " + "x" * 100 + "\n") * 30
+        for i in range(1, 5)
+    )
+    corpus = parsear_articulos(html)
+    chunks = [c for a in corpus for c in chunk_articulo(a)]
+    assert len(chunks) > 3  # sanity: el escenario realmente exige particionar
+
+    ef = FakeEmbeddingFunctionConLimite(max_por_llamada=3)
+
+    info = indexar_corpus(corpus, str(chroma_tempdir), ef, batch_tamano=3)
+
+    cliente = chromadb.PersistentClient(path=str(chroma_tempdir))
+    coleccion = cliente.get_collection(COLECCION_NORMATIVA)
+    assert coleccion.count() == len(chunks)
+    assert info.total_articulos == len(corpus)
 
 
 # --- Normalización del modelo de embeddings y etiqueta (FR-008) ---
