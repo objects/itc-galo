@@ -98,18 +98,13 @@ def feature_valor(valor_m2=3200000, anio=2025):
     }
 
 
-def feature_destino(codigo="01", descripcion="VIVIENDA", anio=2022):
+def feature_reserva(descripcion="Reserva vial Avenida 68", anio=None):
+    propiedades = {"DESCRIPCION": descripcion}
+    if anio is not None:
+        propiedades["ANIO"] = anio
     return {
         "type": "Feature",
-        "properties": {"CODIGO_DESTINO": codigo, "DESCRIPCION": descripcion, "ANIO": anio},
-        "geometry": None,
-    }
-
-
-def feature_reserva(descripcion="Reserva vial Avenida 68"):
-    return {
-        "type": "Feature",
-        "properties": {"DESCRIPCION": descripcion},
+        "properties": propiedades,
         "geometry": None,
     }
 
@@ -154,11 +149,10 @@ def provider_mapas_estandar(api_key="clave-de-prueba"):
 def provider_arcgis_estandar(
     lotes=None,
     valor=None,
-    destino=None,
     reserva=None,
     obras=None,
 ):
-    """Provider ArcGIS: capa Lote por punto y las 4 tematicas con respuestas simuladas.
+    """Provider ArcGIS: capa Lote por punto y las 3 tematicas activas con respuestas simuladas.
 
     Cada parametro acepta una lista de features o la tupla (payload, status) para
     simular errores HTTP de la fuente.
@@ -176,8 +170,6 @@ def provider_arcgis_estandar(
             return respuesta_de(lotes if lotes is not None else [feature_lote()])
         if "valorreferencia" in url:
             return respuesta_de(valor if valor is not None else [feature_valor()])
-        if "destinolt" in url:
-            return respuesta_de(destino if destino is not None else [feature_destino()])
         if "reservavial" in url:
             return respuesta_de(reserva if reserva is not None else [feature_reserva()])
         if "obraspublicas" in url:

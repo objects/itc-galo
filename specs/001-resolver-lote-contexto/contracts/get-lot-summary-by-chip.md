@@ -7,7 +7,7 @@
 ## Propósito
 
 Genera el **resumen consolidado** de un lote a partir de su CHIP: identidad del lote y
-contexto temático por fuente (valor de referencia, destino económico, reserva vial y obras
+contexto temático por fuente (valor de referencia, reserva vial y obras
 públicas), donde **cada dato** incluye su trazabilidad de **5 campos** y su estado
 `disponible` / `no_encontrado` (FR-005, FR-006, FR-007). El resumen es **descriptivo**: no
 calcula puntajes de factibilidad ni infiere reglas urbanísticas ausentes en las fuentes
@@ -85,7 +85,7 @@ la entidad completa `Lote` (incluida su geometría) se documenta en data-model.m
         "properties": {
           "fuente": {
             "type": "string",
-            "enum": ["valor_referencia", "destino_economico", "reserva_vial", "obras_publicas"]
+            "enum": ["valor_referencia", "reserva_vial", "obras_publicas"]
           },
           "estado": {
             "type": "string",

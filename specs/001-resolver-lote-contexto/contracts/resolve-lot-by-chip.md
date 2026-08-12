@@ -9,7 +9,7 @@
 Resuelve un lote catastral de Bogotá a partir de su **CHIP** (identificador oficial del
 predio) y devuelve la identidad del lote (CHIP, código catastral, manzana, dirección
 normalizada cuando esté disponible), su geometría/centroide con trazabilidad y el contexto
-temático asociado (valor de referencia, destino económico, reserva vial y obras públicas)
+temático asociado (valor de referencia, reserva vial y obras públicas)
 con su estado `disponible` / `no_encontrado` y su trazabilidad por fuente (FR-001, FR-004).
 
 Es la vía de menor fricción y la que entrega el valor principal de la feature: el resumen
@@ -78,10 +78,9 @@ consolidado (Historia de Usuario 1, P1).
     "contexto_tematico": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["valor_referencia", "destino_economico", "reserva_vial", "obras_publicas"],
+      "required": ["valor_referencia", "reserva_vial", "obras_publicas"],
       "properties": {
         "valor_referencia": { "$ref": "#/definitions/dato_tematico" },
-        "destino_economico": { "$ref": "#/definitions/dato_tematico" },
         "reserva_vial": { "$ref": "#/definitions/dato_tematico" },
         "obras_publicas": { "$ref": "#/definitions/dato_tematico" }
       }
@@ -144,7 +143,7 @@ El error 5xx **nunca** se reporta como "lote no encontrado" ni como "dato no enc
 | Requisito | Descripción |
 |-----------|-------------|
 | FR-001 | Identidad del lote por CHIP. |
-| FR-004 | Contexto temático (valor, destino, reserva vial, obras públicas). |
+| FR-004 | Contexto temático (valor, reserva vial, obras públicas). |
 | FR-006 | Trazabilidad de 5 campos por dato. |
 | FR-007 | Distinción `disponible` / `no_encontrado` por fuente. |
 | FR-008 | No mezclar vigencias. |

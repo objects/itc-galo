@@ -90,10 +90,9 @@ obligatorios.
     "contexto_tematico": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["valor_referencia", "destino_economico", "reserva_vial", "obras_publicas"],
+      "required": ["valor_referencia", "reserva_vial", "obras_publicas"],
       "properties": {
         "valor_referencia": { "$ref": "#/definitions/dato_tematico" },
-        "destino_economico": { "$ref": "#/definitions/dato_tematico" },
         "reserva_vial": { "$ref": "#/definitions/dato_tematico" },
         "obras_publicas": { "$ref": "#/definitions/dato_tematico" }
       }

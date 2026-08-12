@@ -3,18 +3,20 @@
 Frontera de parsing para
 https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/ (constitucion,
 Principio II). Resuelve la capa Lote (Mapa_Referencia, layer 38) por punto y las
-4 tematicas en paralelo con asyncio.gather (SC-001 < 10 s).
+3 tematicas activas en paralelo con asyncio.gather (SC-001 < 10 s).
 
 Criterio de consulta tematica (research.md D5, lineas 125-128):
 - valorreferencia (catastro/valorreferencia): por punto/centroide.
-- destinolt (catastro/destinolt): join por `ESOCLOTE=<codigo_catastral>`.
 - reservavial (ordenamientoterritorial/reservavial): por punto/centroide.
 - obraspublicas (gestionpublica/obraspublicas): por punto/centroide.
 
-SOLO destinolt se consulta por ESOCLOTE. El research descarto el join por
-ESOCLOTE para las demas tematicas porque no tienen el codigo del lote como llave
-estable (research.md D5, "Alternatives considered", lineas 143-145). Por eso se
-conserva el criterio aprobado: 1 join y 3 consultas espaciales.
+NOTA destinolt (catastro/destinolt): el servicio responde 500 en vivo ("Service
+catastro/destinolt/MapServer not started") y no aparece en el listado del folder
+catastro, asi que se retiro del contexto tematico por defecto (Fix C). El codigo
+queda listo para re-anadirlo cuando el servicio vuelva: basta con restaurar su
+CapaConfig (VIGENCIAS_DEFAULT/_NOMBRES_CANONICOS/_URLS_CANONICOS/_CAPAS_CANONICOS),
+la tarea _consultar_destino_economico en consultar_contexto_tematico y el campo
+destino_economico de ContextoTematico (app/models.py).
 
 Manejo de errores (FR-009, Principio IV): un 5xx (HTTP o code del body) es
 Fuente5xxError y nunca "no encontrado"; un 4xx es Fuente4xxError; un payload no
@@ -45,10 +47,9 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
-from app.errores import Fuente4xxError, FuenteDatosInvalidosError
+from app.errores import FuenteDatosInvalidosError
 from app.models import (
     ContextoTematico,
-    DestinoEconomico,
     ObraPublica,
     ReservaVial,
     SourceTrace,
@@ -64,14 +65,13 @@ from app.providers.arcgis_utils import (
 # Vigencias declaradas por capa (research.md D5 y brief 20260809-01-perplexity.md):
 # - Mapa de Referencia: ano 2019.
 # - valorreferencia: datos recopilados 2012-2025.
-# - destinolt: informacion 2022.
+# - destinolt (retirado, ver NOTA en el docstring): informacion 2022.
 # - reservavial: actualizacion 2019-08-15.
 # - obraspublicas: vigencia de publicacion del servicio (asumida, no documentada
 #   en el brief; configurable via vigencias_por_tema para pruebas).
 VIGENCIAS_DEFAULT: dict[str, str] = {
     "lote": "2019",
     "valorreferencia": "2012-2025",
-    "destinolt": "2022",
     "reservavial": "2019-08-15",
     "obraspublicas": "2025",
 }
@@ -94,7 +94,6 @@ def _configuracion_capas(vigencias_por_tema: dict[str, str] | None) -> dict[str,
 _NOMBRES_CANONICOS = {
     "lote": "Mapa_Referencia/Mapa_Referencia",
     "valorreferencia": "catastro/valorreferencia",
-    "destinolt": "catastro/destinolt",
     "reservavial": "ordenamientoterritorial/reservavial",
     "obraspublicas": "gestionpublica/obraspublicas",
 }
@@ -102,7 +101,6 @@ _NOMBRES_CANONICOS = {
 _URLS_CANONICOS = {
     "lote": f"{RAIZ_ARCGIS}/Mapa_Referencia/Mapa_Referencia/MapServer",
     "valorreferencia": f"{RAIZ_ARCGIS}/catastro/valorreferencia/MapServer",
-    "destinolt": f"{RAIZ_ARCGIS}/catastro/destinolt/MapServer",
     "reservavial": f"{RAIZ_ARCGIS}/ordenamientoterritorial/reservavial/MapServer",
     "obraspublicas": f"{RAIZ_ARCGIS}/gestionpublica/obraspublicas/MapServer",
 }
@@ -110,15 +108,13 @@ _URLS_CANONICOS = {
 _CAPAS_CANONICOS = {
     "lote": "38",
     "valorreferencia": "0",
-    "destinolt": "0",
-    "reservavial": "1",
+    # reservavial usa el layer 2: el layer 1 es un Group Layer y la capa
+    # consultable es el Feature Layer 2 (hallazgo vivo, Fix C).
+    "reservavial": "2",
     "obraspublicas": "0",
 }
 
 PATRON_CHIP = re.compile(r"^[A-Z0-9]{11}$")
-# LOTCODIGO es alfanumerico (hallazgo A2, punto 7): se valida antes de interpolar
-# en la clausula where ESOCLOTE para evitar inyeccion SQL sobre el servicio.
-PATRON_CODIGO_CATASTRAL = re.compile(r"^[A-Za-z0-9]+$")
 
 
 class LoteArcgis(BaseModel):
@@ -171,7 +167,10 @@ class ArcGISProvider:
     async def consultar_contexto_tematico(
         self, codigo_catastral: str, lng: float, lat: float
     ) -> ContextoTematico:
-        """Ejecuta las 4 consultas tematicas en paralelo (SC-001 < 10 s).
+        """Ejecuta las 3 consultas tematicas activas en paralelo (SC-001 < 10 s).
+
+        destinolt (catastro/destinolt) se retiro del contexto por defecto: el
+        servicio responde 500 en vivo (ver NOTA en el docstring del modulo).
 
         Fail-fast deliberado: asyncio.gather sin return_exceptions. Un 5xx de una
         tematica falla toda la respuesta (FUENTE_5XX en el limite de la tool); no
@@ -181,14 +180,12 @@ class ArcGISProvider:
         """
         tareas = [
             self._consultar_valor_referencia(lng, lat),
-            self._consultar_destino_economico(codigo_catastral),
             self._consultar_reserva_vial(lng, lat),
             self._consultar_obras_publicas(lng, lat),
         ]
-        valor, destino, reserva, obras = await asyncio.gather(*tareas)
+        valor, reserva, obras = await asyncio.gather(*tareas)
         return ContextoTematico(
             valor_referencia=valor,
-            destino_economico=destino,
             reserva_vial=reserva,
             obras_publicas=obras,
         )
@@ -204,41 +201,10 @@ class ArcGISProvider:
         return ValorReferencia(
             estado="disponible",
             valor_m2=_extraer_numero(
-                propiedades, ["VALOR_M2", "VALOR_M2_REFERENCIA", "VRM", "VALOR", "VLRM2"]
+                propiedades,
+                ["VALOR_M2", "VALOR_M2_REFERENCIA", "VRM", "VALOR", "VLRM2", "V_REF"],
             ),
             unidad_monetaria="COP",
-            vigencia=vigencia,
-            source_trace=_construir_trace(capa, data_vigencia=vigencia),
-        )
-
-    async def _consultar_destino_economico(self, codigo_catastral: str) -> DestinoEconomico:
-        capa = self._capas["destinolt"]
-        if not isinstance(codigo_catastral, str) or not PATRON_CODIGO_CATASTRAL.fullmatch(
-            codigo_catastral
-        ):
-            # Invariante interna: LOTCODIGO es alfanumerico; falla rapido antes de
-            # interpolar en la clausula where (hallazgo A2, punto 7).
-            raise Fuente4xxError(
-                capa.source_name, 400, "código catastral con formato no válido"
-            )
-        params = {
-            "f": "geojson",
-            "where": f"ESOCLOTE='{_escapar_sql(codigo_catastral)}'",
-            "returnGeometry": "false",
-            "outFields": "*",
-        }
-        data = await self._consultar(capa, params)
-        features = data.get("features") or []
-        if not features:
-            return DestinoEconomico(estado="no_encontrado", source_trace=_construir_trace(capa))
-        propiedades = features[0].get("properties") or {}
-        vigencia = _vigencia_del_feature(propiedades) or capa.data_vigencia
-        return DestinoEconomico(
-            estado="disponible",
-            codigo_destino=_primer_texto(propiedades, ["CODIGO_DESTINO", "COD_DESTINO", "CODIGO"]),
-            descripcion_destino=_primer_texto(
-                propiedades, ["DESCRIPCION", "DESCRIPCION_DESTINO", "NOMBRE", "DESTINO"]
-            ),
             vigencia=vigencia,
             source_trace=_construir_trace(capa, data_vigencia=vigencia),
         )
@@ -351,11 +317,6 @@ def _normalizar_chip(propiedades: dict[str, Any]) -> str | None:
         return None
     chip = str(valor).strip().upper()
     return chip if PATRON_CHIP.fullmatch(chip) else None
-
-
-def _escapar_sql(valor: str) -> str:
-    """Escape de comillas simples para la clausula where del servicio ArcGIS."""
-    return valor.replace("'", "''")
 
 
 def _parsear_geometria(feature: dict[str, Any], capa: CapaConfig) -> dict[str, Any]:

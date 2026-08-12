@@ -23,7 +23,7 @@ async def test_todas_las_tematicas_reportan_estado():
         await servidor.aclose()
 
     contexto = respuesta["contexto_tematico"]
-    assert len(contexto) == 4
+    assert len(contexto) == 3
     for nombre, bloque in contexto.items():
         assert bloque["estado"] in ESTADOS_VALIDOS, nombre
         if bloque["estado"] == "no_encontrado":
@@ -48,7 +48,6 @@ async def test_fuente_sin_dato_reporta_no_encontrado_y_no_cero():
     assert contexto["reserva_vial"]["dato"] is None
     # Las demas tematicas siguen disponibles
     assert contexto["valor_referencia"]["estado"] == "disponible"
-    assert contexto["destino_economico"]["estado"] == "disponible"
 
 
 async def test_estados_en_el_resumen_por_fuente():
@@ -59,6 +58,6 @@ async def test_estados_en_el_resumen_por_fuente():
         await servidor.aclose()
 
     por_fuente = respuesta["contexto_por_fuente"]
-    assert len(por_fuente) == 4
+    assert len(por_fuente) == 3
     for bloque in por_fuente:
         assert bloque["estado"] in ESTADOS_VALIDOS

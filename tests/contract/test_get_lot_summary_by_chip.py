@@ -35,10 +35,9 @@ async def test_resumen_consolidado_descriptivo_sin_geometria():
     assert set(identidad["source_trace"]) == CAMPOS_TRAZA
 
     por_fuente = respuesta["contexto_por_fuente"]
-    assert len(por_fuente) == 4
+    assert len(por_fuente) == 3
     assert {bloque["fuente"] for bloque in por_fuente} == {
         "valor_referencia",
-        "destino_economico",
         "reserva_vial",
         "obras_publicas",
     }

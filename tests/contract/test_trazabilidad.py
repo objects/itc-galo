@@ -9,7 +9,7 @@ from __future__ import annotations
 from tests.conftest import (
     CHIP_VALIDO,
     construir_servidor,
-    feature_destino,
+    feature_reserva,
     feature_valor,
     provider_arcgis_estandar,
 )
@@ -32,7 +32,7 @@ async def test_cada_dato_lleva_los_5_campos_de_trazabilidad():
 
     bloques = [respuesta["lote"]["source_trace"]]
     bloques += [bloque["source_trace"] for bloque in respuesta["contexto_tematico"].values()]
-    assert len(bloques) == 5  # lote + 4 tematicas
+    assert len(bloques) == 4  # lote + 3 tematicas
 
     for traza in bloques:
         assert set(traza) == CAMPOS_TRAZA
@@ -44,10 +44,10 @@ async def test_cada_dato_lleva_los_5_campos_de_trazabilidad():
 
 
 async def test_nunca_se_mezclan_vigencias_distintas():
-    # valorreferencia declara ANIO 2025 y destinolt ANIO 2022 (research.md D5)
+    # valorreferencia declara ANIO 2025 y reservavial ANIO 2019-08-15
     arcgis = provider_arcgis_estandar(
         valor=[feature_valor(valor_m2=3200000, anio=2025)],
-        destino=[feature_destino(codigo="01", descripcion="VIVIENDA", anio=2022)],
+        reserva=[feature_reserva(anio="2019-08-15")],
     )
     servidor = construir_servidor(arcgis=arcgis)
     try:
@@ -57,15 +57,15 @@ async def test_nunca_se_mezclan_vigencias_distintas():
 
     contexto = respuesta["contexto_tematico"]
     vigencia_valor = contexto["valor_referencia"]["source_trace"]["data_vigencia"]
-    vigencia_destino = contexto["destino_economico"]["source_trace"]["data_vigencia"]
+    vigencia_reserva = contexto["reserva_vial"]["source_trace"]["data_vigencia"]
 
     # Cada bloque conserva su propia vigencia: no se mezclan (FR-008, SC-004)
     assert vigencia_valor == "2025"
-    assert vigencia_destino == "2022"
-    assert vigencia_valor != vigencia_destino
+    assert vigencia_reserva == "2019-08-15"
+    assert vigencia_valor != vigencia_reserva
     # Y la vigencia del dato es coherente con la de su trazabilidad
     assert contexto["valor_referencia"]["dato"]["vigencia"] == vigencia_valor
-    assert contexto["destino_economico"]["dato"]["vigencia"] == vigencia_destino
+    assert contexto["reserva_vial"]["dato"]["vigencia"] == vigencia_reserva
 
 
 async def test_trazabilidad_en_resumen_por_fuente():
@@ -77,6 +77,6 @@ async def test_trazabilidad_en_resumen_por_fuente():
 
     bloques = [respuesta["identidad"]["source_trace"]]
     bloques += [bloque["source_trace"] for bloque in respuesta["contexto_por_fuente"]]
-    assert len(bloques) == 5
+    assert len(bloques) == 4
     for traza in bloques:
         assert set(traza) == CAMPOS_TRAZA

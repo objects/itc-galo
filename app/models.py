@@ -121,10 +121,14 @@ class ObraPublica(DatoTematico):
 
 
 class ContextoTematico(BaseModel):
-    """Las 4 tematicas consultadas en paralelo para un lote (FR-004, SC-001)."""
+    """Las tematicas consultadas en paralelo para un lote (FR-004, SC-001).
+
+    destinolt (catastro/destinolt) se retiro del contexto por defecto: el
+    servicio responde 500 en vivo (Fix C; ver app/providers/arcgis.py). Para
+    re-anadirlo, restaurar su consulta y el campo `destino_economico` aqui.
+    """
 
     valor_referencia: ValorReferencia
-    destino_economico: DestinoEconomico
     reserva_vial: ReservaVial
     obras_publicas: ObraPublica
 
@@ -132,7 +136,6 @@ class ContextoTematico(BaseModel):
         """Formato contexto_tematico de los contratos resolve_lot_by_*."""
         return {
             "valor_referencia": self.valor_referencia.a_dato_contrato(),
-            "destino_economico": self.destino_economico.a_dato_contrato(),
             "reserva_vial": self.reserva_vial.a_dato_contrato(),
             "obras_publicas": self.obras_publicas.a_dato_contrato(),
         }
@@ -141,7 +144,6 @@ class ContextoTematico(BaseModel):
         """Formato contexto_por_fuente del contrato get_lot_summary_by_chip."""
         fuentes = [
             ("valor_referencia", self.valor_referencia),
-            ("destino_economico", self.destino_economico),
             ("reserva_vial", self.reserva_vial),
             ("obras_publicas", self.obras_publicas),
         ]

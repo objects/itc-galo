@@ -36,7 +36,7 @@ async def test_escenario_1_chip_valido_devuelve_resumen_con_trazabilidad():
     assert "error" not in respuesta
     assert set(respuesta) == {"identidad", "contexto_por_fuente"}
     assert respuesta["identidad"]["chip"] == CHIP_VALIDO
-    assert len(respuesta["contexto_por_fuente"]) == 4
+    assert len(respuesta["contexto_por_fuente"]) == 3
     for bloque in respuesta["contexto_por_fuente"]:
         assert set(bloque["source_trace"]) == CAMPOS_TRAZA
 

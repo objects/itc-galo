@@ -36,7 +36,7 @@ async def test_resuelve_lote_valido_con_contexto_tematico():
     }
 
     contexto = respuesta["contexto_tematico"]
-    assert set(contexto) == {"valor_referencia", "destino_economico", "reserva_vial", "obras_publicas"}
+    assert set(contexto) == {"valor_referencia", "reserva_vial", "obras_publicas"}
     for bloque in contexto.values():
         assert bloque["estado"] in {"disponible", "no_encontrado"}
         assert set(bloque["source_trace"]) == {
