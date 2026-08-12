@@ -34,13 +34,16 @@ Notas:
   Docker Python; ingesta automática del corpus POT al iniciar.
 - Herramientas MCP planeadas: `resolve_lot_by_chip`, `resolve_lot_by_address`,
   `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`, `get_feasibility_report`.
-- API de búsqueda: `https://mapas.bogota.gov.co/api/` con
+- API de búsqueda: `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web/buscar` con
   `cmd=direccion_chip&query=<CHIP>&spatialReference=102100`. Geocodificar/geocodificar_inverso
-  requieren `MAPAS_BOGOTA_APIKEY`.
+  usan `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web/api` y requieren
+  `MAPAS_BOGOTA_APIKEY`.
 - ArcGIS REST: `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/`:
   - `Mapa_Referencia/Mapa_Referencia/MapServer` → **Lote = capa 38** (`LOTCODIGO`, `MANZCODIGO`), **UPL = capa 44**
-  - Temáticas: `catastro/valorreferencia`, `catastro/destinolt` (join por `ESOCLOTE`),
-    `ordenamientoterritorial/reservavial`, `gestionpublica/obraspublicas`
+  - Temáticas: `catastro/valorreferencia`, `ordenamientoterritorial/reservavial`,
+    `gestionpublica/obraspublicas`. `catastro/destinolt` se retiró del contexto: el
+    servicio en vivo responde 500 ("not started") y puede reincorporarse cuando vuelva
+    (ver `app/providers/arcgis.py`).
   - Consultas: `f=geojson`, `geometry=<lng,lat>&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects`; metadatos con `f=pjson`
 - RAG normativo: corpus = Decreto 555 de 2021 (POT "Bogotá Reverdece 2022-2035") + micrositio POT +
   compendio de Datos Abiertos; chunks con metadatos (norma, artículo, tema, vigencia, jerarquía, territorio/UPL); almacén JSONL.

@@ -32,7 +32,7 @@ el contexto temático se asocia a él (Key Entity del spec).
 
 | Campo | Tipo | Requerido | Descripción / Validación |
 |-------|------|-----------|--------------------------|
-| `chip` | `string` | sí | CHIP del predio (identificador oficial). Formato: 11 caracteres alfanuméricos, p. ej. `AAA0072LRYN`. Validación en FR-012. |
+| `chip` | `string` | no | CHIP del predio cuando la fuente lo expone (solo Mapas Bogotá). Formato: 11 caracteres alfanuméricos, p. ej. `AAA0072LRYN`; `null` cuando la fuente no lo trae (p. ej. por coordenadas). Validación en FR-012. |
 | `codigo_catastral` | `string` | sí | Código catastral del lote (`LOTCODIGO` de la capa Lote), p. ej. `006202003016`. |
 | `manzana` | `string` | sí | Código de la manzana (`MANZCODIGO` de la capa Lote), p. ej. `006202003`. |
 | `direccion_normalizada` | `string` | no | Dirección normalizada del lote cuando la fuente la provee (FR-001). |
@@ -44,6 +44,10 @@ Reglas de dominio:
 
 - El `Lote` se resuelve por: CHIP (Mapas Bogotá `direccion_chip` + capa Lote), dirección
   (Mapas Bogotá `geocodificar` + capa Lote) o coordenadas (capa Lote por punto).
+- El CHIP solo proviene de la API de Mapas Bogotá; la capa Lote de ArcGIS no lo expone.
+  La identidad del lote reposa en `codigo_catastral` (`LOTCODIGO`) y `manzana`
+  (`MANZCODIGO`); por coordenadas, `chip` es `null` (decisión de producto; ver
+  `app/models.py`).
 - Si la resolución no produce un lote único, no se inventa un lote: se responde el error
   correspondiente (ver taxonomía).
 
@@ -63,6 +67,11 @@ Valor de referencia catastral del terreno publicado por el catastro oficial (Key
 
 Uso o destino económico predominante del Lote según el catastro oficial (Key Entity),
 obtenido por join `ESOCLOTE=<codigo_catastral>`.
+
+> **Nota**: la consulta a `catastro/destinolt` está retirada del contexto temático por
+> defecto: el servicio en vivo responde 500 ("Service catastro/destinolt/MapServer not
+> started"). La entidad se conserva en el modelo; puede reincorporarse cuando el servicio
+> vuelva a responder (ver `app/providers/arcgis.py` y `app/models.py`).
 
 | Campo | Tipo | Requerido | Descripción / Validación |
 |-------|------|-----------|--------------------------|
@@ -107,8 +116,8 @@ siempre).
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
-| `source_name` | `string` | sí | Nombre canónico de la fuente: `mapas_bogota`, `Mapa_Referencia/Mapa_Referencia`, `catastro/valorreferencia`, `catastro/destinolt`, `ordenamientoterritorial/reservavial`, `gestionpublica/obraspublicas`. |
-| `layer_id` | `string` | sí | Identificador de la capa/tema dentro del servicio (p. ej. `38` para Lote, `0` para valorreferencia/destinolt/obraspublicas, `1` para reservavial, `direccion_chip`/`geocodificar` para la API de Mapas Bogotá). |
+| `source_name` | `string` | sí | Nombre canónico de la fuente: `mapas_bogota`, `Mapa_Referencia/Mapa_Referencia`, `catastro/valorreferencia`, `ordenamientoterritorial/reservavial`, `gestionpublica/obraspublicas`. |
+| `layer_id` | `string` | sí | Identificador de la capa/tema dentro del servicio (p. ej. `38` para Lote, `0` para valorreferencia/obraspublicas, `2` para reservavial — el layer 1 es un Group Layer y la capa consultable es la 2 —, `direccion_chip`/`geocodificar` para la API de Mapas Bogotá). |
 | `service_url` | `string` | sí | URL del servicio consultado. |
 | `data_vigencia` | `string` | sí | Vigencia del dato en la fuente (fecha ISO o año, según la declare la fuente). |
 | `query_timestamp` | `string` | sí | Marca de tiempo de la consulta, ISO 8601 UTC (p. ej. `2026-08-10T14:30:00Z`). |

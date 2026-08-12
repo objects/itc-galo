@@ -2,7 +2,7 @@
 
 Servidor MCP (Model Context Protocol) en Python que permite consultar un **lote
 catastral de Bogotá** por CHIP, por dirección o por coordenadas, enriquecerlo con
-**contexto temático** (valor de referencia catastral, destino económico, reservas
+**contexto temático** (valor de referencia catastral, reservas
 viales y obras públicas), resolver su **UPL (Unidad de Planeamiento Local)** y
 consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
 (ChromaDB + Ollama), todo con trazabilidad por fuente.
@@ -15,7 +15,7 @@ consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
 
 - Python 3.11 o superior.
 - Acceso de red a las fuentes públicas:
-  - `https://mapas.bogota.gov.co/api/` (API de búsqueda de Mapas Bogotá)
+  - `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web` (API de búsqueda de Mapas Bogotá: `buscar` para CHIP, `api` para geocodificar)
   - `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/` (ArcGIS REST del catastro)
 - **Ollama local** (solo Feature 2: `get_upl` y `consultar_normativa`) con los
   modelos de embeddings y de chat descargados:
@@ -132,7 +132,7 @@ Cada dato presentado al LLM incluye exactamente 5 campos de origen:
 
 - `source_name`: nombre canónico de la fuente (`mapas_bogota`,
   `Mapa_Referencia/Mapa_Referencia`, `catastro/valorreferencia`,
-  `catastro/destinolt`, `ordenamientoterritorial/reservavial`,
+  `ordenamientoterritorial/reservavial`,
   `gestionpublica/obraspublicas`, `IDECA Catastro — Unidad de Planeamiento Local`,
   `Decreto 555 de 2021 (POT Bogotá)`).
 - `layer_id`: capa o tema dentro del servicio (p. ej. `38`, `unidadplaneamientolocal.0`,
@@ -140,6 +140,10 @@ Cada dato presentado al LLM incluye exactamente 5 campos de origen:
 - `service_url`: URL del servicio consultado.
 - `data_vigencia`: vigencia del dato en la fuente.
 - `query_timestamp`: marca de tiempo de la consulta (ISO 8601 UTC).
+
+> **Nota**: `catastro/destinolt` (destino económico) se retiró del contexto temático:
+> el servicio en vivo responde 500 ("Service catastro/destinolt/MapServer not started").
+> Puede reincorporarse cuando el servicio vuelva a responder (ver `app/providers/arcgis.py`).
 
 Los datos de vigencias distintas nunca se presentan como una sola fotografía
 temporal: cada dato conserva su vigencia (FR-014).

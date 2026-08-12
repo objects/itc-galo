@@ -14,11 +14,12 @@ documentan a partir del brief y de la documentación pública referenciada en é
 
 Fuentes de decisión citadas en el brief:
 
-- API de búsqueda de Mapas Bogotá: `https://mapas.bogota.gov.co/api/`
-  (`cmd=direccion_chip`, `cmd=geocodificar`, `cmd=geocodificar_inverso`).
+- API de búsqueda de Mapas Bogotá: `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web`
+  (`buscar` para `cmd=direccion_chip`; `api` para `cmd=geocodificar` y
+  `cmd=geocodificar_inverso`).
 - ArcGIS REST del catastro: `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/`
   (`Mapa_Referencia/Mapa_Referencia/MapServer` capa 38 = Lote; temáticas
-  `catastro/valorreferencia`, `catastro/destinolt`, `ordenamientoterritorial/reservavial`,
+  `catastro/valorreferencia`, `ordenamientoterritorial/reservavial`,
   `gestionpublica/obraspublicas`).
 
 ---
@@ -86,12 +87,12 @@ tipos y rangos al construir el modelo (fail-fast en el límite).
 
 **Decision**: Resolver el lote con dos pasos por fuente, según el medio de entrada:
 
-- **Por CHIP**: `GET https://mapas.bogota.gov.co/api/` con
+- **Por CHIP**: `GET https://catalogopmb.catastrobogota.gov.co/PMBWeb/web/buscar` con
   `cmd=direccion_chip&query=<CHIP>&spatialReference=102100` → resultado con geometría del
   predio; se calcula el centroide y se consulta la capa **Lote** de ArcGIS.
-- **Por dirección**: `GET https://mapas.bogota.gov.co/api/` con `cmd=geocodificar`
-  (requiere `MAPAS_BOGOTA_APIKEY`; fail-fast si falta) → punto geográfico → se consulta la
-  capa Lote.
+- **Por dirección**: `GET https://catalogopmb.catastrobogota.gov.co/PMBWeb/web/api` con
+  `cmd=geocodificar` (requiere `MAPAS_BOGOTA_APIKEY`; fail-fast si falta) → punto
+  geográfico → se consulta la capa Lote.
 - **Por coordenadas**: consulta directa de la capa **Lote**:
   `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/Mapa_Referencia/MapServer/38/query`
   con `f=geojson`, `geometry=<lng,lat>`, `geometryType=esriGeometryPoint`, `inSR=4326`,
@@ -117,32 +118,37 @@ contiene un punto.
 
 ---
 
-## D5. Contexto temático: servicios ArcGIS temáticos con join por `ESOCLOTE`
+## D5. Contexto temático: servicios ArcGIS temáticos por punto
 
-**Decision**: Enriquecer el lote con 4 temáticas, cada una con su propio provider de
+**Decision**: Enriquecer el lote con 3 temáticas, cada una con su propio provider de
 consulta y su `data_vigencia`:
 
 - **Valor de referencia**: `catastro/valorreferencia` (capa 0), por punto/centroide.
-- **Destino económico**: `catastro/destinolt` (capa 0), join por `ESOCLOTE=<lotcodigo>`.
-- **Reserva vial**: `ordenamientoterritorial/reservavial` (capa 1), por punto/centroide.
+- **Reserva vial**: `ordenamientoterritorial/reservavial` (capa 2), por punto/centroide.
 - **Obras públicas**: `gestionpublica/obraspublicas` (capa 0), por punto/centroide.
+
+> **Nota**: `catastro/destinolt` (destino económico) se retiró del contexto temático: el
+> servicio en vivo responde 500 ("Service catastro/destinolt/MapServer not started") y no
+> aparece en el listado del folder `catastro`. Puede reincorporarse cuando el servicio
+> vuelva a responder (ver `app/providers/arcgis.py`).
 
 Consulta base: `.../query` con `f=geojson` y los parámetros espaciales estándar
 (`geometryType=esriGeometryPoint`, `inSR=4326`, `spatialRel=esriSpatialRelIntersects`,
-`outSR=4326`), o `where=ESOCLOTE='<lotcodigo>'` con `returnGeometry=false` para el destino.
+`outSR=4326`).
 Cada dato conserva su `data_vigencia`; cuando la fuente no devuelve un resultado, el estado
 es **"no_encontrado"** (nunca cero ni vacío silencioso, FR-007).
 
 **Rationale**: Son los servicios públicos oficiales que el brief recomienda para el
-contexto de mercado, uso y restricciones de un lote. Cada servicio declara cobertura y
-vigencia distintas (p. ej. `destinolt` con información 2022 y `valorreferencia` con rangos
-2012–2025), por lo que conservar `data_vigencia` por dato es obligatorio (FR-008).
+contexto de mercado, restricciones y entorno de un lote. Cada servicio declara cobertura y
+vigencia distintas (p. ej. `valorreferencia` con rangos 2012–2025 y `reservavial` con
+actualización 2019-08-15), por lo que conservar `data_vigencia` por dato es obligatorio
+(FR-008).
 
 **Alternatives considered**:
 
-- **Consultar todas las temáticas por `where` con join**: el destino económico se une por
-  `ESOCLOTE`; las demás temáticas no tienen el código del lote como llave estable y se
-  resuelven espacialmente por punto. Descartado.
+- **Consultar todas las temáticas por `where` con join**: ninguna de las temáticas activas
+  (valorreferencia, reservavial, obraspublicas) tiene el código del lote como llave
+  estable; todas se resuelven espacialmente por punto. Descartado.
 - **Incluir UPL/localidad como contexto**: fuera de alcance de F1 (la UPL queda para la
   feature de RAG normativo; YAGNI).
 
