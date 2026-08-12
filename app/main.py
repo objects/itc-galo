@@ -386,7 +386,7 @@ class ServidorLotes:
     ) -> tuple[Any, dict | None]:
         try:
             contexto = await self._arcgis.consultar_contexto_tematico(
-                lote.codigo_catastral, lote.centroid.lng, lote.centroid.lat
+                lote.centroid.lng, lote.centroid.lat
             )
         except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError) as exc:
             return None, _error_de_fuente(exc)

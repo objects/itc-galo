@@ -164,9 +164,7 @@ class ArcGISProvider:
         data = await self._consultar(capa, params)
         return self._parsear_lotes(data)
 
-    async def consultar_contexto_tematico(
-        self, codigo_catastral: str, lng: float, lat: float
-    ) -> ContextoTematico:
+    async def consultar_contexto_tematico(self, lng: float, lat: float) -> ContextoTematico:
         """Ejecuta las 3 consultas tematicas activas en paralelo (SC-001 < 10 s).
 
         destinolt (catastro/destinolt) se retiro del contexto por defecto: el

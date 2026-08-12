@@ -45,6 +45,8 @@ from app.errores import (
 from app.models import SourceTrace
 
 URL_SERVICIO = "https://catalogopmb.catastrobogota.gov.co/PMBWeb/web"
+# Ruta relativa: httpx anexa a URL_SERVICIO quitando el "/" inicial
+# (p. ej. "/buscar" -> .../PMBWeb/web/buscar); no es ruta absoluta del host.
 RUTA_BUSCAR = "/buscar"
 RUTA_API = "/api"
 NOMBRE_FUENTE = "mapas_bogota"
@@ -113,6 +115,10 @@ class MapasBogotaProvider:
         """
         params = {"cmd": "direccion_chip", "query": chip, "spatialReference": 102100}
         data = await self._consultar(RUTA_BUSCAR, params)
+        if data.get("status") is False:
+            # CHIP desconocido: la API viva responde HTTP 200 con status:false
+            # ("El servicio no esta disponible"); es no encontrado (None), no 5xx.
+            return None
         resultados = data.get("resultados") or []
         if not resultados:
             return None

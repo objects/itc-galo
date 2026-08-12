@@ -16,6 +16,11 @@ Si la dirección no puede localizarse (no encontrada o ambigua), la tool respond
 **más de un lote candidato**, la tool presenta los candidatos o solicita precisión
 adicional, en lugar de elegir uno arbitrariamente (Historia de Usuario 2, P2).
 
+El `chip` del lote resuelto puede ser `null`: las capas catastrales de ArcGIS no publican el
+campo CHIP (este solo proviene de la API de Mapas Bogotá), así que la identidad del lote se
+soporta en `codigo_catastral` (LOTCODIGO) y `manzana` (MANZCODIGO), que son siempre
+obligatorios.
+
 ## Entrada (input)
 
 ### JSON Schema
@@ -60,7 +65,7 @@ adicional, en lugar de elegir uno arbitrariamente (Historia de Usuario 2, P2).
       "additionalProperties": false,
       "required": ["chip", "codigo_catastral", "manzana", "direccion_normalizada", "geometry", "centroid", "source_trace"],
       "properties": {
-        "chip": { "type": "string", "pattern": "^[A-Z0-9]{11}$" },
+        "chip": { "type": ["string", "null"], "pattern": "^[A-Z0-9]{11}$", "description": "Chip predial; puede ser null si la fuente catastral no lo expone." },
         "codigo_catastral": { "type": "string", "description": "LOTCODIGO de la capa Lote." },
         "manzana": { "type": "string", "description": "MANZCODIGO de la capa Lote." },
         "direccion_normalizada": { "type": "string", "description": "Dirección normalizada devuelta por la geocodificación." },
