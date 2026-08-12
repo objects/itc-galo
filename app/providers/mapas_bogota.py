@@ -1,11 +1,23 @@
 """Provider de la API de busqueda de Mapas Bogota (T010, T016, T023).
 
-Frontera de parsing para https://mapas.bogota.gov.co/api/ (constitucion,
-Principio II): expone modelos tipados y NO mezcla responsabilidades con ArcGIS.
+Frontera de parsing para https://catalogopmb.catastrobogota.gov.co/PMBWeb/web
+(constitucion, Principio II): expone modelos tipados y NO mezcla
+responsabilidades con ArcGIS.
 
-- cmd=direccion_chip: busca el predio por CHIP (geometria + centroide).
-- cmd=geocodificar: localiza una direccion (requiere MAPAS_BOGOTA_APIKEY; el
-  fail-fast de credencial se hace en el limite de la tool, no aqui, FR-010).
+La API viva migro de https://mapas.bogota.gov.co/api/ (hoy un shell ReDoc
+estatico sin API) a catalogopmb.catastrobogota.gov.co/PMBWeb/web con dos rutas:
+- /buscar con cmd=direccion_chip: busca el predio por CHIP (geometria WGS84 +
+  centroide); la geometria ya llega en grados decimales, no se convierte.
+- /api con cmd=geocodificar: localiza una direccion (requiere
+  MAPAS_BOGOTA_APIKEY; el fail-fast de credencial se hace en el limite de la
+  tool, no aqui, FR-010). Una clave rechazada por la fuente ("API Key no
+  valida") se reporta como CredencialFaltanteError.
+
+Formas de error de la API viva (todas HTTP 200 JSON): CHIP desconocido o sin
+spatialReference -> {"mensaje": "El servicio no esta disponible", "status":
+false}; sin query -> {"status": false}; cmd desconocido -> {}. Ninguna es un
+5xx: se tratan como "dato no encontrado" (None) salvo la clave invalida, que es
+un problema de credencial.
 
 Manejo de errores de fuente (FR-009, Principio IV): un 5xx (HTTP o code del
 body) es Fuente5xxError y nunca "no encontrado"; un 4xx es Fuente4xxError (la
@@ -32,14 +44,22 @@ from app.errores import (
 )
 from app.models import SourceTrace
 
-URL_SERVICIO = "https://mapas.bogota.gov.co/api/"
+URL_SERVICIO = "https://catalogopmb.catastrobogota.gov.co/PMBWeb/web"
+RUTA_BUSCAR = "/buscar"
+RUTA_API = "/api"
 NOMBRE_FUENTE = "mapas_bogota"
 VIGENCIA_API = "2025"  # vigencia declarada de la API de busqueda en vivo
 
 
 class PredioBuscado(BaseModel):
-    """Predio devuelto por cmd=direccion_chip, con centroide en WGS84 (lng, lat)."""
+    """Predio devuelto por cmd=direccion_chip, con centroide en WGS84 (lng, lat).
 
+    `chip` es el VALUE del resultado (el CHIP puede no coincidir con el
+    consultado si la API devuelve varios resultados); `direccion` y `barrio`
+    son NOMBRE y BARRIO del predio.
+    """
+
+    chip: str | None = None
     direccion: str | None = None
     barrio: str | None = None
     centroid: tuple[float, float]
@@ -84,9 +104,15 @@ class MapasBogotaProvider:
         )
 
     async def buscar_por_chip(self, chip: str) -> PredioBuscado | None:
-        """Resuelve el predio del CHIP (cmd=direccion_chip) o None si no existe."""
+        """Resuelve el predio del CHIP (cmd=direccion_chip) o None si no existe.
+
+        La API viva puede devolver 2+ resultados para un mismo CHIP; se toma el
+        primero. Un body con status:false ("El servicio no esta disponible" para
+        CHIP desconocido, "sin query", o cmd desconocido {}) NO es un 5xx: se
+        trata como predio no encontrado (None).
+        """
         params = {"cmd": "direccion_chip", "query": chip, "spatialReference": 102100}
-        data = await self._consultar(params)
+        data = await self._consultar(RUTA_BUSCAR, params)
         resultados = data.get("resultados") or []
         if not resultados:
             return None
@@ -97,14 +123,23 @@ class MapasBogotaProvider:
 
         Defensa en profundidad (FR-010): si falta la clave se falla rapido aqui
         tambien, aunque el limite de la tool ya valida antes de llamar al provider.
+        Si la fuente rechaza la clave ("API Key no valida", HTTP 200 status:false),
+        se reporta como CredencialFaltanteError (problema de credencial, no un
+        dato ausente ni un 5xx).
         """
         if not self.tiene_api_key():
             raise CredencialFaltanteError(NOMBRE_FUENTE)
-        params = {"cmd": "geocodificar", "direccion": direccion, "apikey": self._api_key}
-        data = await self._consultar(params)
+        params = {"cmd": "geocodificar", "query": direccion, "apikey": self._api_key}
+        data = await self._consultar(RUTA_API, params)
+        if data.get("status") is False:
+            mensaje = _texto_o_none(data.get("message") or data.get("mensaje"))
+            if mensaje and "API Key" in mensaje:
+                raise CredencialFaltanteError(NOMBRE_FUENTE)
+            # Sin candidatos: la direccion no se localizo (dato no encontrado)
+            return []
         return self._parsear_candidatos(data)
 
-    async def _consultar(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _consultar(self, ruta: str, params: dict[str, Any]) -> dict[str, Any]:
         """GET a la API con clasificacion de errores de fuente tipada.
 
         - HTTP/body 5xx -> Fuente5xxError (FR-009).
@@ -112,7 +147,7 @@ class MapasBogotaProvider:
         - Payload no utilizable -> FuenteDatosInvalidosError.
         """
         try:
-            respuesta = await self._client.get("/", params=params)
+            respuesta = await self._client.get(ruta, params=params)
         except httpx.TransportError as exc:
             # Fallo de red: la fuente no esta disponible
             raise Fuente5xxError(NOMBRE_FUENTE, 503) from exc
@@ -140,6 +175,7 @@ class MapasBogotaProvider:
         if lng is None or lat is None:
             return None
         return PredioBuscado(
+            chip=_texto_o_none(resultado.get("VALUE")),
             direccion=_texto_o_none(resultado.get("NOMBRE")),
             barrio=_texto_o_none(resultado.get("BARRIO")),
             centroid=(lng, lat),
@@ -170,7 +206,12 @@ class MapasBogotaProvider:
 
 
 def _centroide_desde_rings(puntos: list[list[float]]) -> tuple[float | None, float | None]:
-    """Centroide aritmetico del anillo exterior, normalizado a WGS84 si es 102100."""
+    """Centroide aritmetico del anillo exterior (rings ya en WGS84).
+
+    La API viva entrega GEOMETRY.rings en grados decimales (WGS84); la conversion
+    desde Web Mercator queda solo como defensa (D4) por si un payload futuro no
+    respeta ese formato.
+    """
     if not puntos:
         return None, None
     cantidad = len(puntos)

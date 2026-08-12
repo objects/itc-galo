@@ -24,6 +24,9 @@ MANZANA = "006202003"
 RESPUESTA_CHIP_AAA = {
     "resultados": [
         {
+            "OBJECTID": "68410691",
+            "CODIGO_POSTAL": "111311",
+            "VALUE": "AAA0072LRYN",
             "NOMBRE": "CRA 12 # 10-20",
             "BARRIO": "LAS NIEVES",
             "GEOMETRY": {
@@ -38,10 +41,13 @@ RESPUESTA_CHIP_AAA = {
                 ]
             },
         }
-    ]
+    ],
+    "status": True,
 }
 
-RESPUESTA_CHIP_VACIA = {"resultados": []}
+# CHIP desconocido: la API viva responde HTTP 200 con status:false y el mensaje
+# "El servicio no esta disponible" (NO es un 5xx; se mapea a "no encontrado").
+RESPUESTA_CHIP_VACIA = {"mensaje": "El servicio no esta disponible", "status": False}
 
 
 def geocodificar_unica():
@@ -124,16 +130,21 @@ def geojson(features):
 
 
 def provider_mapas_estandar(api_key="clave-de-prueba"):
-    """Provider de Mapas Bogota: CHIP conocido, CHIP inexistente y geocodificacion unica."""
+    """Provider de Mapas Bogota: CHIP conocido, CHIP inexistente y geocodificacion unica.
+
+    La API viva expone /buscar (cmd=direccion_chip) y /api (cmd=geocodificar)
+    en https://catalogopmb.catastrobogota.gov.co/PMBWeb/web; el mock valida la
+    ruta y el cmd de cada consulta.
+    """
 
     def handler(request: httpx.Request) -> httpx.Response:
         cmd = request.url.params.get("cmd")
-        if cmd == "direccion_chip":
+        if cmd == "direccion_chip" and request.url.path.endswith("/buscar"):
             query = request.url.params.get("query")
             if query == CHIP_VALIDO:
                 return httpx.Response(200, json=RESPUESTA_CHIP_AAA)
             return httpx.Response(200, json=RESPUESTA_CHIP_VACIA)
-        if cmd == "geocodificar":
+        if cmd == "geocodificar" and request.url.path.endswith("/api"):
             return httpx.Response(200, json=geocodificar_unica())
         return httpx.Response(500, json={"error": "cmd no simulado"})
 

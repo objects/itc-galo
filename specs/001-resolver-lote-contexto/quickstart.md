@@ -20,8 +20,8 @@ remitirse a [contracts/](contracts/) y [data-model.md](data-model.md).
    `CREDENCIAL_FALTANTE` (FR-010) y las consultas por CHIP y por coordenadas siguen
    funcionando.
 4. **Fuentes públicas accesibles** desde la red donde se ejecute la validación:
-   `https://mapas.bogota.gov.co/api/` y
-   `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/`.
+   `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web` (API de búsqueda de Mapas Bogotá)
+   y `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/`.
 
 ## Comandos de verificación automática
 

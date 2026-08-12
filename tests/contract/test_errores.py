@@ -79,6 +79,46 @@ async def test_5xx_de_mapas_bogota_es_fuente_5xx():
     assert respuesta["error"]["source_name"] == "mapas_bogota"
 
 
+async def test_chip_desconocido_con_body_status_false_no_es_5xx():
+    """La API viva responde HTTP 200 {"mensaje": "...", "status": false} para un
+    CHIP desconocido. Ese body NO es un 5xx de fuente (FR-009): se mapea a
+    LOTE_NO_ENCONTRADO, nunca a FUENTE_5XX."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"mensaje": "El servicio no esta disponible", "status": False}
+        )
+
+    mapas = MapasBogotaProvider(transport=httpx.MockTransport(handler), api_key="clave-de-prueba")
+    servidor = construir_servidor(mapas=mapas)
+    try:
+        respuesta = await servidor.resolve_lot_by_chip(CHIP_VALIDO)
+    finally:
+        await servidor.aclose()
+
+    assert respuesta["error"]["code"] == "LOTE_NO_ENCONTRADO"
+
+
+async def test_clave_invalida_de_geocodificacion_es_credencial_faltante():
+    """La API viva rechaza una clave invalida con HTTP 200
+    {"message": "API Key no valida", "status": false}: se reporta como
+    CREDENCIAL_FALTANTE (problema de credencial), no como direccion no localizada."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("cmd") == "geocodificar":
+            return httpx.Response(
+                200, json={"message": "API Key no valida", "status": False}
+            )
+        return httpx.Response(200, json=geocodificar_unica())
+
+    mapas = MapasBogotaProvider(transport=httpx.MockTransport(handler), api_key="clave-invalida")
+    servidor = construir_servidor(mapas=mapas)
+    try:
+        respuesta = await servidor.resolve_lot_by_address("Calle 26 # 69-76")
+    finally:
+        await servidor.aclose()
+
+    assert respuesta["error"]["code"] == "CREDENCIAL_FALTANTE"
+
+
 async def test_5xx_de_geocodificacion_es_fuente_5xx_y_no_direccion_no_localizada():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.params.get("cmd") == "geocodificar":
