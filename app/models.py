@@ -56,7 +56,10 @@ class Lote(BaseModel):
     declaran vigencia propia: no se mezclan vigencias (FR-008).
     """
 
-    chip: str
+    # El CHIP solo proviene de la API de Mapas Bogota; las capas catastrales
+    # ArcGIS no lo traen. Por coordenadas la identidad la dan LOTCODIGO/
+    # MANZCODIGO, asi que chip puede ser None (decision de producto).
+    chip: str | None = None
     codigo_catastral: str
     manzana: str
     direccion_normalizada: str | None = None

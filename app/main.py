@@ -224,8 +224,7 @@ class ServidorLotes:
                 return error
             lote, error = await self._resolver_lote_por_punto(lng, lat)
             if error and error.get("error", {}).get("code") == CodigoError.LOTE_NO_ENCONTRADO.value:
-                # Fix E2E: si el lote no se resuelve por identidad incompleta (capa 38
-                # sin CHIP) o el punto es ambiguo (limite entre lotes), la UPL se
+                # Fix E2E: si el punto es ambiguo (limite entre lotes), la UPL se
                 # consulta directamente por el punto de entrada: la capa UPL
                 # intersecta por geometria y no depende de la identidad del lote.
                 return await self._consultar_upl_por_punto(lng, lat)
@@ -344,10 +343,15 @@ class ServidorLotes:
     ) -> tuple[Lote | None, dict | None]:
         """Resuelve el lote unico que contiene el punto.
 
+        La identidad del lote NO depende del CHIP: la capa Lote (layer 38) no
+        trae el campo CHIP y este solo llega desde Mapas Bogota; LOTCODIGO y
+        MANZCODIGO son identidad catastral suficiente (decision de producto).
+        Un lote unico sin CHIP se resuelve igual (chip=None en la respuesta).
+
         Semantica del retorno:
-        - (Lote, None): lote unico encontrado.
-        - (None, error): no se pudo resolver (5xx, limite entre lotes o identidad
-          incompleta); el error ya es la respuesta de la tool.
+        - (Lote, None): lote unico encontrado (con o sin CHIP).
+        - (None, error): no se pudo resolver (5xx o punto ambiguo entre lotes);
+          el error ya es la respuesta de la tool.
         - (None, None): no hay lote en el punto. El llamador decide el codigo
           (FUERA_DE_COBERTURA para coordenadas, LOTE_NO_ENCONTRADO para CHIP/direccion).
         """
@@ -365,15 +369,6 @@ class ServidorLotes:
                 lng=lng,
             )
         arcgis = lotes[0]
-        if arcgis.chip is None:
-            # El contrato exige chip en la identidad; sin el atributo de la capa no
-            # se puede construir una identidad veraz (no se inventa el dato).
-            return None, construir_error(
-                CodigoError.LOTE_NO_ENCONTRADO,
-                message="No se encontró un lote único para el punto ({lat}, {lng}).",
-                lat=lat,
-                lng=lng,
-            )
         lote = Lote(
             chip=arcgis.chip,
             codigo_catastral=arcgis.codigo_catastral,
@@ -400,11 +395,10 @@ class ServidorLotes:
     async def _consultar_upl_por_punto(self, lng: float, lat: float) -> dict[str, Any]:
         """Fallback de get_upl por coordenadas: capa UPL consultada por el punto.
 
-        Se activa cuando el lote no se resuelve por identidad (capa 38 sin CHIP)
-        o el punto es ambiguo (limite entre lotes). La capa UPL intersecta por
-        geometria, sin depender de la identidad del lote. Mismo manejo de errores
-        que el flujo principal: 5xx -> FUENTE_5XX (FR-009); sin dato -> LOTE_SIN_UPL
-        (FR-007).
+        Se activa cuando el punto de entrada es ambiguo (limite entre lotes). La
+        capa UPL intersecta por geometria, sin depender de la identidad del lote.
+        Mismo manejo de errores que el flujo principal: 5xx -> FUENTE_5XX
+        (FR-009); sin dato -> LOTE_SIN_UPL (FR-007).
         """
         try:
             upl = await self._upl.consultar_upl_por_punto(lng, lat)

@@ -73,8 +73,10 @@ Las 4 tools expuestas: `resolve_lot_by_chip`, `resolve_lot_by_address`,
 
 - **Acción**: invocar `resolve_lot_by_coordinates` con un punto dentro de Bogotá
   (p. ej. `latitude=4.60313`, `longitude=-74.08327`).
-- **Resultado esperado**: lote con `codigo_catastral`, `manzana` y geometría; cada bloque
-  de contexto temático con su `estado` y `source_trace`.
+- **Resultado esperado**: lote con `codigo_catastral`, `manzana` y geometría; `chip`
+  puede ser `null` (las capas catastrales ArcGIS no publican CHIP; la identidad la dan
+  `codigo_catastral`/`manzana`); cada bloque de contexto temático con su `estado` y
+  `source_trace`.
 - **Referencias**: contrato [resolve-lot-by-coordinates.md](contracts/resolve-lot-by-coordinates.md).
 
 ### Escenario 4 — Coordenadas fuera de Bogotá → `FUERA_DE_COBERTURA`

@@ -11,9 +11,13 @@ geográficas (WGS84, SRID 4326), consultando directamente la capa Lote de ArcGIS
 punto (FR-003). No requiere credencial (`MAPAS_BOGOTA_APIKEY` no aplica a esta tool).
 
 Si el punto está fuera del área de Bogotá, responde `FUERA_DE_COBERTURA`. Si el punto cae
-sobre el límite entre dos o más lotes, o sin lote asociado, la tool indica que **no hay un
-lote único** o que no encontró lote, según corresponda, sin elegir arbitrariamente
-(Historia de Usuario 3, P3).
+sobre el límite entre dos o más lotes, la tool indica que **no hay un lote único**, sin
+elegir arbitrariamente (Historia de Usuario 3, P3).
+
+El `chip` del lote resuelto puede ser `null`: las capas catastrales de ArcGIS no publican el
+campo CHIP (este solo proviene de la API de Mapas Bogotá), así que la identidad del lote se
+soporta en `codigo_catastral` (LOTCODIGO) y `manzana` (MANZCODIGO), que son siempre
+obligatorios.
 
 ## Entrada (input)
 
@@ -66,7 +70,7 @@ lote único** o que no encontró lote, según corresponda, sin elegir arbitraria
       "additionalProperties": false,
       "required": ["chip", "codigo_catastral", "manzana", "geometry", "centroid", "source_trace"],
       "properties": {
-        "chip": { "type": "string", "pattern": "^[A-Z0-9]{11}$" },
+        "chip": { "type": ["string", "null"], "pattern": "^[A-Z0-9]{11}$", "description": "CHIP del predio si la fuente lo provee; null cuando la capa Lote no lo trae (identidad vía codigo_catastral/manzana)." },
         "codigo_catastral": { "type": "string", "description": "LOTCODIGO de la capa Lote." },
         "manzana": { "type": "string", "description": "MANZCODIGO de la capa Lote." },
         "direccion_normalizada": { "type": ["string", "null"] },
@@ -134,7 +138,7 @@ lote único** o que no encontró lote, según corresponda, sin elegir arbitraria
 | Código | Condición | Mensaje (español) |
 |--------|-----------|-------------------|
 | `FUERA_DE_COBERTURA` | El punto está fuera del área de Bogotá. | `El punto (<lat>, <lng>) está fuera del área de cobertura (Bogotá).` |
-| `LOTE_NO_ENCONTRADO` | El punto cae en límite entre lotes (sin lote único) o sin lote asociado. | `No se encontró un lote único para el punto (<lat>, <lng>).` |
+| `LOTE_NO_ENCONTRADO` | El punto cae en límite entre lotes (sin lote único). | `No se encontró un lote único para el punto (<lat>, <lng>).` |
 | `PARAMETROS_INVALIDOS` | Coordenadas fuera de rango o tipo incorrecto. | `Parámetros inválidos: latitud debe estar entre -90 y 90 y longitud entre -180 y 180.` |
 | `FUENTE_5XX` | La capa Lote o una capa ArcGIS responde 5xx. | `La fuente <source_name> no está disponible (error <status>). Intenta nuevamente.` |
 

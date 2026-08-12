@@ -17,12 +17,14 @@ UPL del catastro (`unidadplaneamientolocal`, layer 0, `esriSpatialRelIntersects`
 D2) → se leen `CODIGO_UPL` y `NOMBRE` → se deriva la **localidad** por mapeo
 `NOMBRE → localidad` (research D3).
 
-Fallback por coordenadas (Fix E2E): cuando la consulta es por `coordenadas` y el lote no se
-resuelve por identidad (la capa Lote 38 no trae CHIP) o el punto cae en el límite entre lotes,
-`get_upl` **no** aborta con `LOTE_NO_ENCONTRADO`: consulta la capa UPL directamente por el punto
-de entrada (`metodo_resolucion = "punto_directo"`), porque la capa UPL intersecta por geometría
-y no depende de la identidad del lote. Si el punto no intersecta ningún lote (fuera de Bogotá)
-se conserva `FUERA_DE_COBERTURA`, sin fallback.
+Fallback por coordenadas (Fix E2E): cuando la consulta es por `coordenadas` y el punto cae
+en el límite entre lotes (no hay lote único), `get_upl` **no** aborta con
+`LOTE_NO_ENCONTRADO`: consulta la capa UPL directamente por el punto de entrada
+(`metodo_resolucion = "punto_directo"`), porque la capa UPL intersecta por geometría y no
+depende de la identidad del lote. Un lote único **sin CHIP** (la capa Lote no publica el
+campo; la identidad la dan `codigo_catastral`/`manzana`) se resuelve por el flujo normal con
+`metodo_resolucion = "centroide_lote"`. Si el punto no intersecta ningún lote (fuera de
+Bogotá) se conserva `FUERA_DE_COBERTURA`, sin fallback.
 
 ## Entrada (input)
 
@@ -92,7 +94,7 @@ se conserva `FUERA_DE_COBERTURA`, sin fallback.
     "metodo_resolucion": {
       "type": "string",
       "enum": ["centroide_lote", "punto_directo"],
-      "description": "Metodo usado para resolver la UPL: centroide_lote (flujo normal: el lote se resuelve por F1 y la UPL se consulta por el centroide del lote) o punto_directo (fallback: la capa UPL se consulta por el punto de entrada cuando el lote no se resuelve por identidad -capa 38 sin CHIP- o el punto es ambiguo -limite entre lotes-)."
+      "description": "Metodo usado para resolver la UPL: centroide_lote (flujo normal: el lote se resuelve por F1 y la UPL se consulta por el centroide del lote, incluidos lotes sin CHIP) o punto_directo (fallback: la capa UPL se consulta por el punto de entrada cuando el punto es ambiguo -limite entre lotes-)."
     },
     "upl": {
       "type": "object",
@@ -186,7 +188,7 @@ Consulta: `{"coordenadas": {"lat": 4.65, "lon": -74.1}}`
 
 | Código | Condición | Mensaje (español) |
 |--------|-----------|-------------------|
-| `LOTE_NO_ENCONTRADO` | El CHIP/dirección no resuelve a ningún lote, o el punto no intersecta ningún lote. Por coordenadas, los casos de identidad incompleta (capa 38 sin CHIP) y límite entre lotes se atienden con el fallback `punto_directo`, sin pasar por este error. | `No se encontró ningún lote para el criterio consultado.` |
+| `LOTE_NO_ENCONTRADO` | El CHIP/dirección no resuelve a ningún lote. Por coordenadas, el caso de punto ambiguo (límite entre lotes) se atiende con el fallback `punto_directo`, sin pasar por este error. | `No se encontró ningún lote para el criterio consultado.` |
 | `DIRECCION_NO_LOCALIZADA` | La dirección no pudo geocodificarse (no encontrada o ambigua); nunca se inventa un lote. | `La dirección no pudo localizarse. Refina la dirección o usa CHIP/coordenadas.` |
 | `FUERA_DE_COBERTURA` | El punto está fuera del área de Bogotá. | `El punto está fuera del área de cobertura (Bogotá).` |
 | `LOTE_SIN_UPL` | El lote se resolvió pero **no tiene UPL asignada** (dato no encontrado, FR-007); ningún feature de la capa UPL intersecta el centroide. | `El lote no tiene UPL asignada (dato no encontrado).` |

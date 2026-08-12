@@ -237,8 +237,10 @@ async def test_get_upl_coordenadas_fuera_de_bogota_devuelve_fuera_de_cobertura()
 
 
 @pytest.mark.asyncio
-async def test_get_upl_coordenadas_lote_sin_chip_fallback_punto_directo():
-    """Lote sin CHIP en la capa 38 -> fallback: UPL consultada por el punto de entrada."""
+async def test_get_upl_coordenadas_lote_sin_chip_resuelve_por_centroide():
+    """Lote unico sin CHIP en la capa 38 -> la UPL se resuelve por el centroide
+    del lote (la identidad catastral LOTCODIGO/MANZCODIGO es suficiente; el
+    fallback punto_directo queda solo para puntos ambiguos entre lotes)."""
     arcgis_sin_chip = provider_arcgis_estandar(lotes=[feature_lote(chip=None)])
     servidor = _crear_servidor_con_upl(handler_upl_ok, arcgis=arcgis_sin_chip)
     try:
@@ -247,7 +249,7 @@ async def test_get_upl_coordenadas_lote_sin_chip_fallback_punto_directo():
         await servidor.aclose()
 
     assert "error" not in resp
-    assert resp["metodo_resolucion"] == "punto_directo"
+    assert resp["metodo_resolucion"] == "centroide_lote"
     assert resp["upl"]["codigo"] == "UPL17"
     assert resp["trazabilidad"]["layer_id"] == "0"
 
@@ -271,9 +273,12 @@ async def test_get_upl_coordenadas_punto_ambiguo_fallback_punto_directo():
 
 @pytest.mark.asyncio
 async def test_get_upl_coordenadas_fallback_sin_upl_devuelve_lote_sin_upl():
-    """Fallback sin dato en la capa UPL -> LOTE_SIN_UPL (dato no encontrado, FR-007)."""
-    arcgis_sin_chip = provider_arcgis_estandar(lotes=[feature_lote(chip=None)])
-    servidor = _crear_servidor_con_upl(handler_upl_vacio, arcgis=arcgis_sin_chip)
+    """Fallback (punto ambiguo entre lotes) sin dato en la capa UPL ->
+    LOTE_SIN_UPL (dato no encontrado, FR-007)."""
+    arcgis_ambiguo = provider_arcgis_estandar(
+        lotes=[feature_lote(), feature_lote(codigo_catastral="006202003017")]
+    )
+    servidor = _crear_servidor_con_upl(handler_upl_vacio, arcgis=arcgis_ambiguo)
     try:
         resp = await servidor.get_upl(coordenadas={"lat": 4.65, "lon": -74.07})
     finally:
@@ -284,9 +289,12 @@ async def test_get_upl_coordenadas_fallback_sin_upl_devuelve_lote_sin_upl():
 
 @pytest.mark.asyncio
 async def test_get_upl_coordenadas_fallback_5xx_devuelve_fuente_5xx():
-    """Fallback con 5xx en la capa UPL -> FUENTE_5XX (nunca LOTE_SIN_UPL, FR-009)."""
-    arcgis_sin_chip = provider_arcgis_estandar(lotes=[feature_lote(chip=None)])
-    servidor = _crear_servidor_con_upl(handler_upl_500, arcgis=arcgis_sin_chip)
+    """Fallback (punto ambiguo entre lotes) con 5xx en la capa UPL -> FUENTE_5XX
+    (nunca LOTE_SIN_UPL, FR-009)."""
+    arcgis_ambiguo = provider_arcgis_estandar(
+        lotes=[feature_lote(), feature_lote(codigo_catastral="006202003017")]
+    )
+    servidor = _crear_servidor_con_upl(handler_upl_500, arcgis=arcgis_ambiguo)
     try:
         resp = await servidor.get_upl(coordenadas={"lat": 4.65, "lon": -74.07})
     finally:
