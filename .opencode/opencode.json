@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "bogota-factibilidad": {
+      "type": "local",
+      "command": ["/home/elkingomez/Repositorios/OpenCode/itc-galo/.venv/bin/python", "-m", "app.main"],
+      "enabled": true,
+      "environment": {
+        "MAPAS_BOGOTA_APIKEY": "{env:MAPAS_BOGOTA_APIKEY}"
+      }
+    }
+  }
+}
