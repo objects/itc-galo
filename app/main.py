@@ -917,7 +917,7 @@ class ServidorLotes:
 # --- Limite de entrada: validaciones FR-012 (fail-fast) ---
 
 
-def _error_de_fuente(exc: Exception) -> dict[str, Any]:
+def _error_de_fuente(exc: BaseException) -> dict[str, Any]:
     """Traduce un error tipado del provider a la respuesta canonica de la tool.
 
     Clasificacion (decision A2): 5xx (HTTP o code del body) -> FUENTE_5XX; 4xx ->
