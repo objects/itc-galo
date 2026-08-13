@@ -7,8 +7,10 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
-- **Repositorio en `master` con 27 commits; último hito: `feat(plan): feature 3`** (spec/plan de F3).
-  El repo ya contiene la aplicación implementada y probada (F1, F2) y la feature F3 en curso.
+- **Repositorio en `master`; último hito: `feat(feature3): implementar get_feasibility_report —
+  orquestación unificada (US1, US2, US3)`** (commit `7e3b6c1`, padre `bc70505`; working tree limpio).
+  La aplicación está implementada y probada: F1, F2 y F3 completas, **185 tests passing (131 contract
+  F1/F2 + 52 F3 + 2 smoke), 0 failed**, con las **7 tools** registradas.
 - **F1 — `specs/001-resolver-lote-contexto/`**: COMPLETA. spec.md, plan.md, research.md,
   data-model.md, contracts/, tasks.md (36 tareas T001–T036 marcadas completadas), quickstart.md,
   checklists/. Implementa las 4 tools de resolución de lote.
@@ -16,19 +18,17 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
   research, data-model, contracts, tasks (34 tareas, 6 fases), quickstart, checklists. Implementa
   2 tools (`get_upl`, `consultar_normativa`) + el pipeline de ingesta con el corpus REAL del
   Decreto 555/2021 (608 artículos).
-- **F3 — `specs/003-informe-factibilidad/`**: EN CURSO y es la **feature activa**
-  (`.specify/feature.json` → `specs/003-informe-factibilidad`). Existen spec.md, plan.md,
-  research.md, data-model.md, contracts/, tasks.md (25 tareas T001–T025, NINGUNA marcada aún),
-  quickstart.md y checklists/.
-  - Estado del código: la parte "Foundational" YA está implementada en disco (modelos F3 en
-    `app/models.py`, `app/scoring.py` completo con `calcular_score`, métodos
-    `consultar_destino_economico` y `consultar_obras_publicas_radio` en `app/providers/arcgis.py`,
-    fixtures F3 en `tests/conftest.py`), pero ese código foundational **parece NO estar
-    commiteado aún** (el último commit es solo del plan F3).
-  - Pendiente para completar F3: registrar la 7ª tool `get_feasibility_report` en `app/main.py`
-    (hoy siguen 6 tools), crear los tests F3 (`test_get_feasibility_report.py`, `test_scoring.py`,
-    etc.), actualizar `tests/smoke/test_main.py` (espera 6 tools) y actualizar el README (dice que
-    F3 está "fuera de alcance").
+- **F3 — `specs/003-informe-factibilidad/`**: COMPLETA e implementada (feature activa,
+  `.specify/feature.json` → `specs/003-informe-factibilidad`). spec.md, plan.md, research.md,
+  data-model.md, contracts/, quickstart.md y checklists/ (requirements.md 16/16). tasks.md con
+  25 tareas T001–T025 **TODAS marcadas `[x]`**.
+  - Implementa la 7ª tool `get_feasibility_report`: orquestación de 10 bloques, `_construir_consulta_automatica`
+    y 8 helpers de serialización en `app/main.py`; `app/scoring.py` completo (función pura
+    `calcular_score`, determinista, sin LLM); modelos F3 en `app/models.py` (InformeFactibilidad + 10
+    bloques) y métodos `consultar_destino_economico` (capa Predio) y `consultar_obras_publicas_radio`
+    (buffer 500 m) en `app/providers/arcgis.py`. Tests F3: 6 archivos en `tests/contract/` (52 tests)
+    + `_f3_shared.py` (constantes compartidas); smoke actualizado a 7 tools. README.md ya documenta F3.
+  - Commits: `f19d98a` (foundational F3), `bc70505` (tests F3), `7e3b6c1` (implementación completa).
 - `20260809-01-perplexity.md` es la **fuente de verdad del producto** (arquitectura, fuentes de
   datos, herramientas MCP, pipeline RAG). Léelo antes de especificar o planificar.
 
@@ -56,10 +56,12 @@ Notas:
 - App objetivo: Python (`mcp>=1.0.0` que incluye FastMCP, `httpx`, `pydantic`); MCP por stdio;
   Docker Python; la ingesta del corpus POT se ejecuta de forma explícita (CLI), no automática al iniciar.
   Paquete `mcp-bogota-factibilidad` v0.1.0 (`pyproject.toml`), requires-python `>=3.11`.
-- Herramientas MCP: **6 implementadas** (`resolve_lot_by_chip`, `resolve_lot_by_address`,
-  `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`, `get_upl`, `consultar_normativa`)
-  registradas por `crear_servidor_mcp()` en `app/main.py`, + **`get_feasibility_report` planificada (F3)**
-  (7ª tool, aún NO registrada). FastMCP (mcp>=1.x) con fallback a MCPServer (mcp 2.x); transporte stdio;
+- Herramientas MCP: **7 implementadas** (`resolve_lot_by_chip`, `resolve_lot_by_address`,
+  `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`, `get_upl`, `consultar_normativa`,
+  `get_feasibility_report`) registradas por `crear_servidor_mcp()` en `app/main.py`.
+  `get_feasibility_report` (F3) orquesta el informe en 10 bloques con scoring heurístico determinístico
+  (`calcular_score`) y degrada UPL/RAG con warnings en lugar de errores. FastMCP (mcp>=1.x) con fallback
+  a MCPServer (mcp 2.x); transporte stdio;
   lifespan cierra providers (httpx.AsyncClient); validaciones fail-fast (FR-012/FR-013).
 - API de búsqueda: `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web/buscar` con
   `cmd=direccion_chip&query=<CHIP>&spatialReference=102100`. Geocodificar/geocodificar_inverso
@@ -88,19 +90,20 @@ Notas:
 
 ## Estructura del proyecto
 
-- `app/`: código de aplicación. `main.py` (servidor MCP + lógica de dominio de las 6 tools),
+- `app/`: código de aplicación. `main.py` (servidor MCP + lógica de dominio de las 7 tools, incluida
+  la orquestación de 10 bloques y `_construir_consulta_automatica` de F3),
   `models.py` (pydantic v2: F1 SourceTrace/Lote/DatoTematico; F2 UPL/Localidad/ArticuloNormativo/
   Chunk; F3 InformeFactibilidad y bloques), `errores.py` (taxonomía), `scoring.py` (F3, función
-  pura `calcular_score`).
+  pura `calcular_score`, implementada).
 - `app/providers/`: un provider por fuente (Principio II): `arcgis.py` (Lote, contexto temático,
   Predio F3, obras por radio), `arcgis_utils.py` (`CapaConfig`, params/consulta compartidos),
   `mapas_bogota.py` (Mapas Bogotá), `upl.py` (capa UPL), `normativa.py` (RAG ChromaDB + Ollama).
 - `app/ingesta/corpus.py`: CLI con subcomandos `descargar` (HTML sisjur → JSONL + `.sha256`, SIN
   Ollama), `indexar` (JSONL → ChromaDB), `full` (pipeline completo), `consultar` (debug).
-- `tests/`: `smoke/test_main.py` (arranque y registro de tools) y `tests/contract/` (14 archivos:
-  resolvers, upl, normativa, ingesta, errores, estados, validación, trazabilidad, quickstart).
-  Fixtures con `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama). F3 aún NO
-  tiene tests propios.
+- `tests/`: `smoke/test_main.py` (arranque y registro de las 7 tools) y `tests/contract/`
+  (14 archivos F1/F2 + 6 archivos F3: get_feasibility_report, validación, errores, normativa,
+  scoring y trazabilidad + `_f3_shared.py` con constantes compartidas). Fixtures con
+  `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
 - `specs/001-*`, `specs/002-*`, `specs/003-*`: features Spec Kit (ver "Estado actual").
 - `.specify/`: feature.json (feature activa), integration.json (opencode, separador `.`),
   memory/constitution.md, scripts/, templates/, workflows/.
@@ -117,6 +120,8 @@ Notas:
 - El `feasibility_score` es heurístico (F3): el LLM no debe inferir reglas urbanísticas ausentes
   en la fuente (FR-014). `calcular_score` es determinista (SC-003), sin LLM ni reloj: base 50,
   clamps a [0,100], confidence según bloques evaluables.
+- F3 degrada por bloque (no fatal): UPL ausente → `upl: null` + warning; RAG no disponible → evidencia
+  vacía + causa + warning; un 5xx NUNCA se degrada ni se reporta como "no encontrado" (FR-012/FR-009).
 - Errores: taxonomía canónica de **10 códigos** (`CodigoError` en `app/errores.py`) con excepciones
   tipadas y `construir_error`. Un 5xx NUNCA se reporta como "no encontrado" (FR-009).
 - Tests sin red real ni Ollama: siempre usar fixtures `httpx.MockTransport` de `tests/conftest.py`
