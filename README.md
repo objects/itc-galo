@@ -118,6 +118,10 @@ Los contratos exactos (JSON Schema de entrada/salida) están en
 `specs/002-rag-normativo-upl/contracts/` (F2) y
 `specs/003-informe-factibilidad/contracts/` (F3).
 
+Para una guía práctica de uso de las 7 herramientas (entrada y validación, salida,
+fuentes consultadas, errores tipificados y ejemplos de invocación), ver
+[`Caracteristicas.md`](./Caracteristicas.md).
+
 ## Pruebas
 
 ```bash
