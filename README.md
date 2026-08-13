@@ -9,7 +9,7 @@ consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
 
 - **Feature 1** (MVP): resolución de lote + contexto temático (4 tools).
 - **Feature 2**: RAG normativo del POT + consulta de UPL (2 tools nuevas).
-- Fuera de alcance: el reporte consolidado de factibilidad (Feature 3).
+- **Feature 3**: informe de factibilidad orquestado (1 tool nueva: `get_feasibility_report`).
 
 ## Requisitos
 
@@ -97,7 +97,7 @@ O bien, con la entrada de consola instalada:
 mcp-bogota-factibilidad
 ```
 
-### Tools expuestas (6)
+### Tools expuestas (7)
 
 | Tool | Descripción |
 |------|-------------|
@@ -107,10 +107,16 @@ mcp-bogota-factibilidad
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo del lote por CHIP (identidad + contexto por fuente). |
 | `get_upl` | Resuelve la UPL del lote por CHIP, dirección o coordenadas (join espacial punto-en-polígono contra la capa UPL; localidad derivada por mapeo nombre → localidad). |
 | `consultar_normativa` | Consulta en lenguaje natural sobre el POT con citas literales de artículos (RAG local); filtro estricto opcional por UPL. |
+| `get_feasibility_report` | Informe de factibilidad orquestado en 10 bloques (identidad, contexto administrativo, restricciones, mercado, entorno, contexto económico, evidencia normativa, score heurístico determinístico, warnings y timestamp) con trazabilidad por fuente. |
+
+> **Nota**: el bloque `economic_context` de `get_feasibility_report` consulta la
+> capa tabular Predio de ArcGIS (`catastro/lote/MapServer/3`) y no requiere
+> `MAPAS_BOGOTA_APIKEY` (esa clave solo la usan la resolución y la UPL por dirección).
 
 Los contratos exactos (JSON Schema de entrada/salida) están en
-`specs/001-resolver-lote-contexto/contracts/` (F1) y
-`specs/002-rag-normativo-upl/contracts/` (F2).
+`specs/001-resolver-lote-contexto/contracts/` (F1),
+`specs/002-rag-normativo-upl/contracts/` (F2) y
+`specs/003-informe-factibilidad/contracts/` (F3).
 
 ## Pruebas
 
@@ -118,7 +124,7 @@ Los contratos exactos (JSON Schema de entrada/salida) están en
 python -m pytest -q
 ```
 
-- `tests/smoke/`: el servidor arranca y las 6 tools quedan registradas.
+- `tests/smoke/`: el servidor arranca y las 7 tools quedan registradas.
 - `tests/contract/`: contratos de las tools, taxonomía de errores, validación
   FR-013, trazabilidad (5 campos por dato), estados `disponible`/`no_encontrado`,
   ingesta del corpus (parseo, chunking, hash, indexación idempotente) y escenarios
@@ -152,12 +158,13 @@ temporal: cada dato conserva su vigencia (FR-014).
 
 ```text
 app/
-├── main.py              # FastMCP: registra las 6 tools (4 F1 + 2 F2)
-├── models.py            # Modelos pydantic (Lote, contexto, UPL, ArticuloNormativo, Chunk, CorpusInfo)
+├── main.py              # FastMCP: registra las 7 tools (4 F1 + 2 F2 + 1 F3)
+├── models.py            # Modelos pydantic (Lote, contexto, UPL, ArticuloNormativo, Chunk, CorpusInfo, InformeFactibilidad)
 ├── errores.py           # Taxonomía de errores del contrato (10 códigos)
+├── scoring.py           # F3: función pura calcular_score (score heurístico determinístico)
 ├── providers/           # Un provider por fuente (Principio II)
 │   ├── mapas_bogota.py  # Mapas Bogotá API (direccion_chip, geocodificar)
-│   ├── arcgis.py        # ArcGIS REST (Lote=38 + temáticas)
+│   ├── arcgis.py        # ArcGIS REST (Lote=38 + temáticas; F3: capa Predio + obras por radio)
 │   ├── arcgis_utils.py  # Utilidades compartidas (params por punto, consultar_query, CapaConfig)
 │   ├── upl.py           # Capa UPL (unidadplaneamientolocal.0) + mapeo nombre → localidad
 │   └── normativa.py     # RAG: ChromaDB + embeddings Ollama + chat LLM con citation forcing
@@ -166,7 +173,7 @@ app/
 ├── data/corpus/         # Corpus versionado en git (JSONL + .sha256) — FR-009
 └── tests/
     ├── contract/        # Contratos de las tools, errores, validación, trazabilidad, ingesta
-    └── smoke/           # Smoke test de arranque (6 tools)
+    └── smoke/           # Smoke test de arranque (7 tools)
 ```
 
 ## Docker

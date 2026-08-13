@@ -61,10 +61,10 @@
 
 ### Implementación para Historia de Usuario 1
 
-- [ ] T011 [US1] Registrar tool `get_feasibility_report` en `app/main.py`: 7ª tool vía `mcp.tool()(servidor_lotes.get_feasibility_report)` en `crear_servidor_mcp`, con el JSON Schema del contrato (criterio único + `consulta`/`top_k` opcionales) — plan.md:24-32, plan.md:113-116, contracts/get-feasibility-report.md:35-93
-- [ ] T012 [US1] Implementar el pipeline de orquestación en `ServidorLotes.get_feasibility_report`: validar entrada (FR-013) → resolver lote (flujos privados de F1) → UPL capturando `UplNoEncontradaError` como `upl: null` + warning → `planning_constraints`/`market_context` desde `ContextoTematico` de F1 → `environment_context` con `consultar_obras_publicas_radio` (buffer 500 m) → `economic_context` con `consultar_destino_economico` → scoring (T006) → montar los 10 bloques; los 5xx se propagan con `_error_de_fuente` (FR-012) — spec.md:83-87, research.md:365-413, data-model.md:165-204
-- [ ] T013 [US1] Implementar `lot_identity`, `administrative_context` (UPL + localidad + `clasificacion_suelo` derivada de `UPL.vocacion`; `upl: null` → `localidad: null` + warning) y los bloques temáticos con interpretaciones de texto fijo por reglas (FR-007, sin LLM), incluyendo el warning `LOTE_SIN_CHIP` cuando `chip: null` (lote por coordenadas) — spec.md:84-86, research.md:137-156, data-model.md:38-60, data-model.md:182-204
-- [ ] T014 [US1] Actualizar `tests/smoke/test_main.py` de 6 a 7 tools en el MISMO hito en que se registra `get_feasibility_report` (sin dejar ventana roja) — plan.md:139-140
+- [x] T011 [US1] Registrar tool `get_feasibility_report` en `app/main.py`: 7ª tool vía `mcp.tool()(servidor_lotes.get_feasibility_report)` en `crear_servidor_mcp`, con el JSON Schema del contrato (criterio único + `consulta`/`top_k` opcionales) — plan.md:24-32, plan.md:113-116, contracts/get-feasibility-report.md:35-93
+- [x] T012 [US1] Implementar el pipeline de orquestación en `ServidorLotes.get_feasibility_report`: validar entrada (FR-013) → resolver lote (flujos privados de F1) → UPL capturando `UplNoEncontradaError` como `upl: null` + warning → `planning_constraints`/`market_context` desde `ContextoTematico` de F1 → `environment_context` con `consultar_obras_publicas_radio` (buffer 500 m) → `economic_context` con `consultar_destino_economico` → scoring (T006) → montar los 10 bloques; los 5xx se propagan con `_error_de_fuente` (FR-012) — spec.md:83-87, research.md:365-413, data-model.md:165-204
+- [x] T013 [US1] Implementar `lot_identity`, `administrative_context` (UPL + localidad + `clasificacion_suelo` derivada de `UPL.vocacion`; `upl: null` → `localidad: null` + warning) y los bloques temáticos con interpretaciones de texto fijo por reglas (FR-007, sin LLM), incluyendo el warning `LOTE_SIN_CHIP` cuando `chip: null` (lote por coordenadas) — spec.md:84-86, research.md:137-156, data-model.md:38-60, data-model.md:182-204
+- [x] T014 [US1] Actualizar `tests/smoke/test_main.py` de 6 a 7 tools en el MISMO hito en que se registra `get_feasibility_report` (sin dejar ventana roja) — plan.md:139-140
 
 **Checkpoint**: Historia de Usuario 1 funcional y comprobable de forma independiente (MVP; SC-001: < 10 s sin normativa, SC-002: 100 % de bloques con 5 campos); el bloque `normative_evidence` se valida por shape (`items` vacío sin RAG/US2), sin exigir la consulta automática, que llega en Fase 4 (T015).
 
@@ -82,8 +82,8 @@
 
 ### Implementación para Historia de Usuario 2
 
-- [ ] T016 [US2] Construir la consulta normativa automática desde el contexto del lote en `app/main.py`: `"normas urbanísticas aplicables a la UPL {nombre} ({codigo}), localidad {localidad}, clasificación de suelo {clasificacion}"` con `upl=<codigo>`; respaldo con solo localidad y SIN filtro territorial cuando la UPL no se resolvió (FR-003/FR-008) — research.md:237-270, spec.md:90, data-model.md:61-70
-- [ ] T017 [US2] Integrar `consultar_normativa` (reutilizada tal cual de F2, filtro territorial H6) en el pipeline con degradación deliberada: capturar `CorpusNoIngestadoError`/`OllamaNoDisponibleError` → `normative_evidence.items: []` + `causa` + warning `NORMATIVA_NO_DISPONIBLE` (NO error de la tool, FR-009/FR-012; divergencia documentada); `sin_resultados: true` + warning `NORMATIVA_SIN_RESULTADOS` cuando la consulta no produce ítems; el bloque conserva `source_trace` al corpus (Decreto 555/2021, `data_vigencia=2021-12-30`) — spec.md:90-91, spec.md:94, research.md:417-437, contracts/get-feasibility-report.md:333-343
+- [x] T016 [US2] Construir la consulta normativa automática desde el contexto del lote en `app/main.py`: `"normas urbanísticas aplicables a la UPL {nombre} ({codigo}), localidad {localidad}, clasificación de suelo {clasificacion}"` con `upl=<codigo>`; respaldo con solo localidad y SIN filtro territorial cuando la UPL no se resolvió (FR-003/FR-008) — research.md:237-270, spec.md:90, data-model.md:61-70
+- [x] T017 [US2] Integrar `consultar_normativa` (reutilizada tal cual de F2, filtro territorial H6) en el pipeline con degradación deliberada: capturar `CorpusNoIngestadoError`/`OllamaNoDisponibleError` → `normative_evidence.items: []` + `causa` + warning `NORMATIVA_NO_DISPONIBLE` (NO error de la tool, FR-009/FR-012; divergencia documentada); `sin_resultados: true` + warning `NORMATIVA_SIN_RESULTADOS` cuando la consulta no produce ítems; el bloque conserva `source_trace` al corpus (Decreto 555/2021, `data_vigencia=2021-12-30`) — spec.md:90-91, spec.md:94, research.md:417-437, contracts/get-feasibility-report.md:333-343
 
 **Checkpoint**: Historias de Usuario 1 y 2 funcionales de forma independiente (SC-004: cita literal verificable; SC-005: reporte completo sin Ollama).
 
@@ -101,8 +101,8 @@
 
 ### Implementación para Historia de Usuario 3
 
-- [ ] T019 [US3] Ajustar e integrar las reglas del scoring (T006) en el pipeline: aplicar penalizaciones por reserva vial que afecta el lote (de `planning_constraints.dato.afecta_lote`), UPL ausente, bloques `no_encontrado` y evidencia vacía; `confidence` por cobertura de los 6 bloques evaluables; `reasons` enumeran los bloques ausentes cuando `confidence: "low"`; poblar `rules_applied` para auditoría — research.md:272-314, data-model.md:205-227, spec.md:88, spec.md:96
-- [ ] T020 [US3] Implementar los `warnings` deterministas y deduplicados en el orquestador: `LOTE_SIN_CHIP`, `UPL_NO_ENCONTRADA`, `LOCALIDAD_NO_DERIVADA`, `BLOQUE_SIN_DATO`, `NORMATIVA_NO_DISPONIBLE`, `NORMATIVA_SIN_RESULTADOS` (una entrada por degradación, código + mensaje) — spec.md:93, data-model.md:182-204, contracts/get-feasibility-report.md:333-343
+- [x] T019 [US3] Ajustar e integrar las reglas del scoring (T006) en el pipeline: aplicar penalizaciones por reserva vial que afecta el lote (de `planning_constraints.dato.afecta_lote`), UPL ausente, bloques `no_encontrado` y evidencia vacía; `confidence` por cobertura de los 6 bloques evaluables; `reasons` enumeran los bloques ausentes cuando `confidence: "low"`; poblar `rules_applied` para auditoría — research.md:272-314, data-model.md:205-227, spec.md:88, spec.md:96
+- [x] T020 [US3] Implementar los `warnings` deterministas y deduplicados en el orquestador: `LOTE_SIN_CHIP`, `UPL_NO_ENCONTRADA`, `LOCALIDAD_NO_DERIVADA`, `BLOQUE_SIN_DATO`, `NORMATIVA_NO_DISPONIBLE`, `NORMATIVA_SIN_RESULTADOS` (una entrada por degradación, código + mensaje) — spec.md:93, data-model.md:182-204, contracts/get-feasibility-report.md:333-343
 
 **Checkpoint**: las tres historias de usuario funcionales de forma independiente (SC-003, SC-006).
 
@@ -113,10 +113,10 @@
 **Propósito**: pruebas transversales (trazabilidad, no-regresión), documentación final, gate y verificación de la checklist que afectan a múltiples historias
 
 - [x] T021 [P] Contract tests de trazabilidad en `tests/contract/test_trazabilidad_f3.py`: los 5 campos (`source_name`, `layer_id`, `service_url`, `data_vigencia`, `query_timestamp`) en cada bloque de datos (`lot_identity`, `administrative_context`, `planning_constraints`, `market_context`, `environment_context`, `economic_context`, `normative_evidence`); `data_vigencia` del bloque económico = `PREVACTUAL` del registro; nunca mezclar vigencias (FR-008/FR-010) — spec.md:92, spec.md:112, data-model.md:238-248, quickstart.md:152-159
-- [ ] T022 [P] Actualizar `README.md` raíz: 7 tools expuestas (incluida `get_feasibility_report` con su resumen de bloques), estructura con `app/scoring.py`, nota de que `economic_context` usa la capa Predio de ArcGIS (sin `MAPAS_BOGOTA_APIKEY`) — plan.md:143-146
-- [ ] T023 Ejecutar `.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks` → PASS con `plan.md`, `tasks.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md` y checklists completos — AGENTS.md flujo de trabajo, plan.md:148-163
-- [ ] T024 Mantener completada la checklist `checklists/requirements.md` 16/16 (CHK-001 a CHK-016) y verificación cruzada spec ↔ plan ↔ contratos ↔ data-model ↔ tasks (sin regresiones a F1/F2) — plan.md:74-89
-- [ ] T025 Ejecución completa de pytest: no-regresión de F1/F2 (tests existentes en `tests/contract/` y `tests/smoke/`) + tests nuevos de F3, sin red real ni Ollama en vivo — plan.md:48-51
+- [x] T022 [P] Actualizar `README.md` raíz: 7 tools expuestas (incluida `get_feasibility_report` con su resumen de bloques), estructura con `app/scoring.py`, nota de que `economic_context` usa la capa Predio de ArcGIS (sin `MAPAS_BOGOTA_APIKEY`) — plan.md:143-146
+- [x] T023 Ejecutar `.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks` → PASS con `plan.md`, `tasks.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md` y checklists completos — AGENTS.md flujo de trabajo, plan.md:148-163
+- [x] T024 Mantener completada la checklist `checklists/requirements.md` 16/16 (CHK-001 a CHK-016) y verificación cruzada spec ↔ plan ↔ contratos ↔ data-model ↔ tasks (sin regresiones a F1/F2) — plan.md:74-89
+- [x] T025 Ejecución completa de pytest: no-regresión de F1/F2 (tests existentes en `tests/contract/` y `tests/smoke/`) + tests nuevos de F3, sin red real ni Ollama en vivo — plan.md:48-51
 
 ---
 

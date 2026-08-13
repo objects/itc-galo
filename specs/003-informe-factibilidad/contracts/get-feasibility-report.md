@@ -85,9 +85,9 @@ UPL ausente → `upl: null` + warning (NO error `LOTE_SIN_UPL`); dato por fuente
 - **Exactamente uno** de `chip` | `direccion` | `coordenadas`. Cero o más de uno →
   `PARAMETROS_INVALIDOS`, sin llamar a las fuentes (fail-fast).
 - `chip`: `^[A-Z0-9]{11}$` (idéntico a F1/F2).
-- `direccion`: string no vacío; sin `MAPAS_BOGOTA_APIKEY` → `CREDENCIAL_FALTANTE`.
+- `direccion`: string no vacío tras `strip()` (espacios en blanco se rechazan con `PARAMETROS_INVALIDOS`); sin `MAPAS_BOGOTA_APIKEY` → `CREDENCIAL_FALTANTE`.
 - `coordenadas`: `lat ∈ [-90, 90]`, `lon ∈ [-180, 180]` (idéntico a F1/F2).
-- `consulta`: opcional, 1–500 caracteres.
+- `consulta`: opcional, 1–500 caracteres; no vacío tras `strip()` (espacios en blanco se rechazan con `PARAMETROS_INVALIDOS`).
 - `top_k`: opcional, entero 1–6, default 3.
 - Punto fuera de Bogotá (sin lote) → `FUERA_DE_COBERTURA`.
 

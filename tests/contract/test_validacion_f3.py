@@ -1,8 +1,8 @@
 """Contract tests F3 — validacion fail-fast de `get_feasibility_report` (T009, FR-013).
 
 Cero o mas de un criterio de {chip, direccion, coordenadas}, CHIP mal formado,
-coordenadas fuera de rango o sin lat/lon, consulta > 500 y top_k fuera de 1-6
--> PARAMETROS_INVALIDOS SIN llamar a las fuentes (fail-fast).
+coordenadas fuera de rango o sin lat/lon, direccion > 200, consulta > 500 y
+top_k fuera de 1-6 -> PARAMETROS_INVALIDOS SIN llamar a las fuentes (fail-fast).
 
 NOTA (TDD red): la tool `get_feasibility_report` AUN NO existe; estos tests
 fallan con AttributeError hasta su implementacion (fase posterior).
@@ -144,6 +144,18 @@ async def test_consulta_mayor_a_500_devuelve_parametros_invalidos():
 
     assert respuesta["error"]["code"] == "PARAMETROS_INVALIDOS"
     assert stub.llamadas == []
+
+
+async def test_direccion_de_201_caracteres_devuelve_parametros_invalidos():
+    """direccion de mas de 200 caracteres -> PARAMETROS_INVALIDOS (contrato:53)."""
+    servidor, stub = _servidor_con_fuentes_trampa()
+    try:
+        respuesta = await servidor.get_feasibility_report(direccion="A" * 201)
+    finally:
+        await servidor.aclose()
+
+    assert respuesta["error"]["code"] == "PARAMETROS_INVALIDOS"
+    assert stub.llamadas == []  # fail-fast: ninguna fuente consultada
 
 
 async def test_top_k_fuera_de_rango_devuelve_parametros_invalidos():

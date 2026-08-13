@@ -1,4 +1,4 @@
-"""Smoke test de arranque (T031): el servidor inicia y registra exactamente las 6 tools (4 F1 + 2 F2)."""
+"""Smoke test de arranque (T031): el servidor inicia y registra exactamente las 7 tools (4 F1 + 2 F2 + 1 F3)."""
 
 from __future__ import annotations
 
@@ -11,24 +11,25 @@ TOOLS_ESPERADAS = {
     "get_lot_summary_by_chip",
     "get_upl",
     "consultar_normativa",
+    "get_feasibility_report",
 }
 
 
 @pytest.mark.asyncio
-async def test_el_servidor_registra_exactamente_las_6_tools():
+async def test_el_servidor_registra_exactamente_las_7_tools():
     import app.main as modulo
 
     try:
         tools = await modulo.mcp.list_tools()
         nombres = {t.name for t in tools}
         assert nombres == TOOLS_ESPERADAS
-        assert len(tools) == 6
+        assert len(tools) == 7
     finally:
         await modulo.servidor_lotes.aclose()
 
 
 @pytest.mark.asyncio
-async def test_create_server_registra_las_6_tools_con_providers_simulados():
+async def test_create_server_registra_las_7_tools_con_providers_simulados():
     from tests.conftest import construir_servidor
 
     servidor = construir_servidor()
@@ -39,6 +40,6 @@ async def test_create_server_registra_las_6_tools_con_providers_simulados():
         tools = await mcp.list_tools()
         nombres = {t.name for t in tools}
         assert nombres == TOOLS_ESPERADAS
-        assert len(tools) == 6
+        assert len(tools) == 7
     finally:
         await servidor.aclose()
