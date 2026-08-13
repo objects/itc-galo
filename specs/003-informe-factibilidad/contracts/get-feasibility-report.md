@@ -331,7 +331,7 @@ UPL ausente → `upl: null` + warning (NO error `LOTE_SIN_UPL`); dato por fuente
 | `CREDENCIAL_FALTANTE` | Falta `MAPAS_BOGOTA_APIKEY` en geocodificación (falla sin llamar fuentes) |
 | `FUENTE_5XX` | 5xx (HTTP o `body.error`) de cualquier fuente; nunca degradado |
 
-Formato de error (misma convención F1/F2): `{ "codigo": "<CODIGO>", "mensaje": "...", "trazabilidad": { "fuente": "...", "capa": "...", "servicio": "...", "vigencia": "...", "timestamp": "..." } }`.
+Formato de error (misma convención F1/F2, `app/errores.py` `construir_error`): `{ "error": { "code": "<CODIGO>", "message": "...", "source_name": "..." } }`.
 
 ### Degradaciones (NO error; se representan en el reporte + warnings)
 

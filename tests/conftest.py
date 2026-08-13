@@ -294,3 +294,83 @@ def server_lotes_f3(mapas=None, arcgis=None, upl=None, normativa=None):
         upl if upl is not None else provider_upl_estandar(),
         normativa if normativa is not None else NormativaProvider(),
     )
+
+
+# --- Ampliacion de fixtures F3: stub del NormativaProvider (T015 y reporte F3) ---
+# Los contract tests F3 no pueden usar el NormativaProvider real (requiere
+# ChromaDB + Ollama, prohibido en tests). Este stub implementa la interfaz que
+# usara el orquestador de `get_feasibility_report` (consultar + aclose), registra
+# las llamadas para verificar la consulta explicita/automatica (T015) e inyecta
+# errores tipados (CorpusNoIngestadoError/OllamaNoDisponibleError) o respuestas
+# vacias para probar la degradacion deliberada de normative_evidence (FR-009).
+
+
+def respuesta_normativa_ok():
+    """Respuesta RAG con 1 articulo recuperado (formato consultar_normativa de F2).
+
+    `trazabilidad` es el source_trace del corpus (Decreto 555/2021) que el
+    orquestador debe propagar al bloque normative_evidence (T017).
+    """
+    return {
+        "respuesta": "El Artículo 361 regula los usos del suelo.",
+        "sin_resultados": False,
+        "resultados": [
+            {
+                "articulo": 361,
+                "titulo": "Usos del suelo",
+                "libro": "III",
+                "parte": "urbano",
+                "texto_cita": "El presente artículo regula los usos del suelo...",
+                "similitud": 0.42,
+            }
+        ],
+        "trazabilidad": {
+            "source_name": "Decreto 555 de 2021 (POT Bogotá)",
+            "layer_id": "Decreto_555_2021",
+            "service_url": "https://sisjur.bogotajuridica.gov.co/sisjur/normas/Norma1.jsp?i=119582",
+            "data_vigencia": "2021-12-30",
+            "query_timestamp": "2026-08-12T02:15:04Z",
+        },
+    }
+
+
+def respuesta_normativa_sin_resultados():
+    """Respuesta RAG sin resultados (formato consultar_normativa de F2)."""
+    return {
+        "respuesta": "No se encontraron resultados relevantes en el POT 555/2021.",
+        "sin_resultados": True,
+        "resultados": [],
+        "trazabilidad": {
+            "source_name": "Decreto 555 de 2021 (POT Bogotá)",
+            "layer_id": "Decreto_555_2021",
+            "service_url": "https://sisjur.bogotajuridica.gov.co/sisjur/normas/Norma1.jsp?i=119582",
+            "data_vigencia": "2021-12-30",
+            "query_timestamp": "2026-08-12T02:15:04Z",
+        },
+    }
+
+
+class NormativaProviderStub:
+    """Stub del NormativaProvider para los contract tests F3 (sin red ni Ollama).
+
+    Registra cada llamada a `consultar` en `llamadas` (consulta, upl, top_k) y
+    devuelve `respuesta` o lanza `error` si se inyecto uno (degradacion T015).
+    """
+
+    def __init__(
+        self,
+        respuesta: dict | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.respuesta = respuesta if respuesta is not None else respuesta_normativa_sin_resultados()
+        self.error = error
+        self.llamadas: list[dict] = []
+
+    async def consultar(self, consulta: str, upl: str | None = None, top_k: int = 3) -> dict:
+        self.llamadas.append({"consulta": consulta, "upl": upl, "top_k": top_k})
+        if self.error is not None:
+            raise self.error
+        return self.respuesta
+
+    async def aclose(self) -> None:
+        return None
