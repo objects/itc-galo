@@ -246,11 +246,14 @@ def feature_upl(codigo="UPL24", nombre="Chapinero", vocacion="Urbano"):
     }
 
 
-def provider_arcgis_f3(lotes=None, valor=None, reserva=None, obras=None, predio=None):
+def provider_arcgis_f3(lotes=None, valor=None, reserva=None, obras=None, predio=None, contador=None):
     """Provider ArcGIS del flujo F3: capa Lote, tematicas, obras buffer 500 m y capa Predio.
 
     `predio` acepta el payload pjson de la capa Predio o la tupla (payload, status);
     `obras` por defecto es el payload con buffer 500 m (formato geojson).
+    `contador` (opcional) es una lista donde el handler registra cada request
+    (str(request.url)) para verificar el numero de consultas por ruta (deuda
+    tecnica post-revision: contexto tematico consultado una sola vez).
     """
 
     def respuesta_de(contenido):
@@ -262,6 +265,8 @@ def provider_arcgis_f3(lotes=None, valor=None, reserva=None, obras=None, predio=
         return httpx.Response(200, json=contenido)
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if contador is not None:
+            contador.append(str(request.url))
         url = str(request.url)
         if "Mapa_Referencia/Mapa_Referencia/MapServer/38/query" in url:
             return respuesta_de(lotes if lotes is not None else [feature_lote(codigo_catastral="006101016001", manzana="006101016")])

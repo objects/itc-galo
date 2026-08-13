@@ -258,7 +258,7 @@ UPL ausente → `upl: null` + warning (NO error `LOTE_SIN_UPL`); dato por fuente
   },
   "market_context": {
     "estado": "disponible",
-    "dato": { "valor_referencia_m2": 4500000, "moneda": "COP", "m2_terreno": 3704.8, "vigencia": "2025" },
+    "dato": { "valor_m2": 4500000, "unidad_monetaria": "COP", "vigencia": "2025" },
     "interpretation": "Valor de referencia catastral del terreno: 4500000 COP/m² (vigencia 2025).",
     "source_trace": { "source_name": "catastro/valorreferencia", "layer_id": "0", "service_url": "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/catastro/valorreferencia/MapServer/0", "data_vigencia": "2025", "query_timestamp": "2026-08-12T02:15:02Z" }
   },

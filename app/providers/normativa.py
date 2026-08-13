@@ -205,7 +205,7 @@ class NormativaProvider:
             raise ValueError("consulta vacía")
         if len(consulta) > CONSULTA_MAX_CHARS:
             raise ValueError(f"consulta excede {CONSULTA_MAX_CHARS} caracteres")
-        if not 1 <= top_k <= TOP_K_MAX:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= TOP_K_MAX:
             raise ValueError(f"top_k debe estar entre 1 y {TOP_K_MAX}")
 
         if upl:

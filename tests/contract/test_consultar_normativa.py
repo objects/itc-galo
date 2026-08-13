@@ -163,6 +163,20 @@ async def test_consultar_normativa_top_k_fuera_de_rango_devuelve_parametros_inva
 
 
 @pytest.mark.asyncio
+async def test_top_k_bool_devuelve_parametros_invalidos(servidor_normativa_ok):
+    """top_k=True (bool es subclase de int) -> PARAMETROS_INVALIDOS (deuda post-revision).
+
+    El provider validaba `1 <= top_k <= TOP_K_MAX` sin type-check: True pasaba
+    como 1. Ahora rechaza explicitamente los bools y la tool F2 traduce el
+    ValueError a PARAMETROS_INVALIDOS.
+    """
+    resp = await servidor_normativa_ok.consultar_normativa(consulta="test", top_k=True)
+    await servidor_normativa_ok.aclose()
+    assert resp["error"]["code"] == "PARAMETROS_INVALIDOS"
+    assert "top_k debe estar entre 1 y 6" in resp["error"]["message"]
+
+
+@pytest.mark.asyncio
 async def test_consultar_normativa_upl_invalida_formato_devuelve_parametros_invalidos(servidor_normativa_ok):
     resp = await servidor_normativa_ok.consultar_normativa(consulta="test", upl="UPL99")
     await servidor_normativa_ok.aclose()

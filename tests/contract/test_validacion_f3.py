@@ -172,6 +172,23 @@ async def test_top_k_fuera_de_rango_devuelve_parametros_invalidos():
     assert stub.llamadas == []
 
 
+async def test_top_k_bool_devuelve_parametros_invalidos():
+    """top_k=True (bool es subclase de int) -> PARAMETROS_INVALIDOS (deuda post-revision).
+
+    Antes, isinstance(True, int) era True y 1 <= True <= 6 tambien: top_k=True
+    se aceptaba como 1. Ahora el bool se rechaza explicitamente en el limite.
+    """
+    servidor, stub = _servidor_con_fuentes_trampa()
+    try:
+        respuesta = await servidor.get_feasibility_report(chip=CHIP_VALIDO, top_k=True)
+    finally:
+        await servidor.aclose()
+
+    assert respuesta["error"]["code"] == "PARAMETROS_INVALIDOS"
+    assert "top_k" in respuesta["error"]["message"]
+    assert stub.llamadas == []  # fail-fast: ninguna fuente consultada
+
+
 async def test_direccion_vacia_devuelve_parametros_invalidos():
     """direccion en blanco/espacios -> PARAMETROS_INVALIDOS sin llamar fuentes (contrato:51-53)."""
     servidor, stub = _servidor_con_fuentes_trampa()

@@ -49,6 +49,30 @@ async def test_reporte_por_chip_devuelve_los_10_bloques():
     assert set(reporte) == BLOQUES_RAIZ
 
 
+async def test_flujo_por_direccion_consulta_contexto_una_sola_vez():
+    """Flujo por direccion: el contexto tematico se consulta UNA sola vez (deuda post-revision).
+
+    Antes, `_resolver_lote_por_candidato` consultaba el contexto (y lo descartaba)
+    y el orquestador lo volvia a consultar: valorreferencia y reservavial
+    aparecian 2 veces por reporte. Con incluir_contexto=False en F3, cada ruta
+    tematica se consulta exactamente 1 vez y el reporte fluye igual.
+    """
+    requests = []
+    arcgis = provider_arcgis_f3(contador=requests)
+    servidor = server_lotes_f3(
+        arcgis=arcgis,
+        normativa=NormativaProviderStub(respuesta=respuesta_normativa_ok()),
+    )
+    try:
+        reporte = await servidor.get_feasibility_report(direccion="Calle 26 # 69-76")
+    finally:
+        await servidor.aclose()
+
+    assert "error" not in reporte
+    assert sum("valorreferencia" in url for url in requests) == 1
+    assert sum("reservavial" in url for url in requests) == 1
+
+
 async def test_lot_identity_tiene_identidad_completa():
     """lot_identity: chip, codigo catastral, manzana, direccion, barrio, geometry, centroid, source_trace."""
     servidor = server_lotes_f3(normativa=NormativaProviderStub(respuesta=respuesta_normativa_ok()))

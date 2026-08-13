@@ -29,6 +29,7 @@ manualmente via servidor.aclose(); el lifespan solo corre cuando mcp.run() arran
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from contextlib import asynccontextmanager
@@ -404,7 +405,7 @@ class ServidorLotes:
                         f"{CONSULTA_MAX_CHARS} caracteres."
                     ),
                 )
-        if not isinstance(top_k, int) or not 1 <= top_k <= TOP_K_MAX:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= TOP_K_MAX:
             return construir_error(
                 CodigoError.PARAMETROS_INVALIDOS,
                 message=f"Parámetros inválidos: top_k debe ser un entero entre 1 y {TOP_K_MAX}.",
@@ -437,7 +438,9 @@ class ServidorLotes:
                         "candidatos. Refina la dirección para elegir uno."
                     ),
                 )
-            lote, error = await self._resolver_lote_por_candidato(candidatos[0])
+            lote, error = await self._resolver_lote_por_candidato(
+                candidatos[0], incluir_contexto=False
+            )
         else:
             lote, error = await self._resolver_lote_por_punto(lng_entrada, lat_entrada)
             if error:
@@ -510,26 +513,32 @@ class ServidorLotes:
             source_trace=trace_upl,
         )
 
-        # --- Contexto tematico (reserva vial + valor de referencia de F1) ---
-        contexto, error_contexto = await self._consultar_contexto_seguro(lote)
+        # --- Contexto tematico, obras publicas y destino economico en paralelo ---
+        # (deuda tecnica post-revision: antes eran 3 rondas HTTP secuenciales).
+        # Semantica de errores preservada: contexto primero (tuple (contexto,
+        # error|None) de _consultar_contexto_seguro), luego obras y destino
+        # (excepciones tipadas -> _error_de_fuente; inesperadas -> fail loud).
+        t_contexto = self._consultar_contexto_seguro(lote)
+        t_obras = self._arcgis.consultar_obras_publicas_radio(
+            lote.centroid.lng, lote.centroid.lat, RADIO_OBRAS_M
+        )
+        t_destino = self._arcgis.consultar_destino_economico(
+            chip=lote.chip, codigo_catastral=lote.codigo_catastral
+        )
+        r_contexto, r_obras, r_destino = await asyncio.gather(
+            t_contexto, t_obras, t_destino, return_exceptions=True
+        )
+        if isinstance(r_contexto, BaseException):
+            return _error_de_fuente(r_contexto)
+        contexto, error_contexto = r_contexto
         if error_contexto:
             return error_contexto
-
-        # --- Obras publicas con buffer 500 m (FR-004, research H5) ---
-        try:
-            obras_publicas = await self._arcgis.consultar_obras_publicas_radio(
-                lote.centroid.lng, lote.centroid.lat, RADIO_OBRAS_M
-            )
-        except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError) as exc:
-            return _error_de_fuente(exc)
-
-        # --- Destino economico (capa Predio por PRECHIP o BARMANPRE, research H2) ---
-        try:
-            destino = await self._arcgis.consultar_destino_economico(
-                chip=lote.chip, codigo_catastral=lote.codigo_catastral
-            )
-        except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError) as exc:
-            return _error_de_fuente(exc)
+        if isinstance(r_obras, BaseException):
+            return _error_de_fuente(r_obras)
+        obras_publicas = r_obras
+        if isinstance(r_destino, BaseException):
+            return _error_de_fuente(r_destino)
+        destino = r_destino
 
         # --- Bloques con el patron {estado, dato, interpretation, source_trace} ---
         reserva = contexto.reserva_vial
@@ -779,7 +788,7 @@ class ServidorLotes:
         )
 
     async def _resolver_lote_por_candidato(
-        self, candidato: CandidatoDireccion
+        self, candidato: CandidatoDireccion, incluir_contexto: bool = True
     ) -> tuple[Lote | None, dict | None]:
         lote, error = await self._resolver_lote_por_punto(candidato.lng, candidato.lat)
         if error:
@@ -801,9 +810,14 @@ class ServidorLotes:
             centroid=lote.centroid,
             source_trace=lote.source_trace,
         )
-        contexto, error = await self._consultar_contexto_seguro(lote_con_direccion)
-        if error:
-            return None, error
+        if incluir_contexto:
+            # Comportamiento F1 (resolve_lot_by_address/get_upl por direccion): se
+            # propaga un error del contexto tematico como error de la resolucion.
+            # El orquestador F3 llama con incluir_contexto=False: consulta el
+            # contexto una sola vez (deuda tecnica post-revision).
+            contexto, error = await self._consultar_contexto_seguro(lote_con_direccion)
+            if error:
+                return None, error
         return lote_con_direccion, None
 
     async def _resolver_lote_por_punto(
