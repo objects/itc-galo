@@ -5,9 +5,8 @@ interpretation, source_trace} en los bloques tematicos/economicos, ejemplo del
 contrato con economic_context disponible (2 filas, fila dominante por mayor
 PREAUSO) y determinismo del score (SC-003).
 
-NOTA (TDD red): la tool `get_feasibility_report` AUN NO esta registrada en
-app/main.py; estos tests fallan con AttributeError hasta su implementacion
-(fase posterior). El unico test que ya debe pasar es test_scoring.py (T018).
+Nota: la tool `get_feasibility_report` está implementada y registrada en
+app/main.py (commit 7e3b6c1); estos tests pasan.
 """
 
 from __future__ import annotations

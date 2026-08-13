@@ -5,8 +5,8 @@ del lote (UPL + localidad + clasificacion), degradacion sin Ollama/corpus
 (NORMATIVA_NO_DISPONIBLE) y sin resultados (NORMATIVA_SIN_RESULTADOS), con el
 resto del reporte completo (SC-005).
 
-NOTA (TDD red): la tool `get_feasibility_report` AUN NO existe; estos tests
-fallan con AttributeError hasta su implementacion (fase posterior).
+Nota: la tool `get_feasibility_report` está implementada (commit 7e3b6c1);
+estos tests pasan.
 """
 
 from __future__ import annotations

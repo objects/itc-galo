@@ -5,8 +5,8 @@ campos (source_name, layer_id, service_url, data_vigencia, query_timestamp);
 economic_context lleva data_vigencia = PREVACTUAL del registro (2026) y
 normative_evidence el source_name del corpus (Decreto 555 de 2021).
 
-NOTA (TDD red): la tool `get_feasibility_report` AUN NO existe; estos tests
-fallan con AttributeError hasta su implementacion (fase posterior).
+Nota: la tool `get_feasibility_report` está implementada (commit 7e3b6c1);
+estos tests pasan.
 """
 
 from __future__ import annotations

@@ -2,8 +2,8 @@
 
 `calcular_score` es una funcion pura (sin I/O, sin LLM, sin reloj): base 50,
 reglas positivas/negativas documentadas en app/scoring.py y confidence por
-cobertura de los 6 bloques evaluables. Estos tests YA DEBEN PASAR (el scoring
-foundational esta en disco); los demas contract tests F3 estan en TDD red.
+cobertura de los 6 bloques evaluables. Estos tests pasan junto con el resto
+de los contract tests F3 (suite completa en verde).
 """
 
 from __future__ import annotations

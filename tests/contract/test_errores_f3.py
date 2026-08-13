@@ -4,8 +4,8 @@ LOTE_NO_ENCONTRADO, FUERA_DE_COBERTURA, DIRECCION_NO_LOCALIZADA,
 CREDENCIAL_FALTANTE y FUENTE_5XX (un 5xx NUNCA se degrada a no_encontrado).
 Formato de error: {"error": {"code", "message", "source_name"}}.
 
-NOTA (TDD red): la tool `get_feasibility_report` AUN NO existe; estos tests
-fallan con AttributeError hasta su implementacion (fase posterior).
+Nota: la tool `get_feasibility_report` está implementada (commit 7e3b6c1);
+estos tests pasan.
 """
 
 from __future__ import annotations

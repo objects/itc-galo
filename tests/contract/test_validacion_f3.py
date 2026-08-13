@@ -4,8 +4,8 @@ Cero o mas de un criterio de {chip, direccion, coordenadas}, CHIP mal formado,
 coordenadas fuera de rango o sin lat/lon, direccion > 200, consulta > 500 y
 top_k fuera de 1-6 -> PARAMETROS_INVALIDOS SIN llamar a las fuentes (fail-fast).
 
-NOTA (TDD red): la tool `get_feasibility_report` AUN NO existe; estos tests
-fallan con AttributeError hasta su implementacion (fase posterior).
+Nota: la tool `get_feasibility_report` está implementada (commit 7e3b6c1);
+estos tests pasan.
 """
 
 from __future__ import annotations
