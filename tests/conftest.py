@@ -191,3 +191,106 @@ def construir_servidor(mapas=None, arcgis=None):
         UPLProvider(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"type": "FeatureCollection", "features": []}))),
         NormativaProvider(),
     )
+
+
+# --- Fixtures Feature 3 (informe de factibilidad, T007) ---
+# Patron payload/status de F1/F2: respuestas simuladas de la capa Predio
+# (f=pjson), de obraspublicas con buffer 500 m (f=geojson) y de la capa UPL
+# (UPL24 Chapinero, vocacion Urbano). Ninguna prueba hace llamadas de red reales.
+
+# Capa Predio (catastro/lote/MapServer/3): formato pjson {"features": [{"attributes": {...}}]}
+# (research H1/H3). CHIP AAA0072LRYN -> 2 filas: PRECDESTIN=04, PRECUSO=015/096,
+# PREAUSO=40453.8/3011.3, PREVACTUAL=2026, BARMANPRE=006101016001.
+PREDIO_FILA_DOMINANTE = {
+    "attributes": {
+        "PRECDESTIN": "04",
+        "PRECUSO": "015",
+        "PREAUSO": 40453.8,
+        "PREVACTUAL": "2026",
+        "PREATERRE": 3704.8,
+        "PREACONST": 43465.1,
+        "PREDIRECC": "AK 30 25 90",
+        "PRENBARRIO": "FLORIDA",
+        "BARMANPRE": "006101016001",
+    }
+}
+
+PREDIO_FILA_SECUNDARIA = {
+    "attributes": {
+        "PRECDESTIN": "04",
+        "PRECUSO": "096",
+        "PREAUSO": 3011.3,
+        "PREVACTUAL": "2026",
+        "PREATERRE": 3704.8,
+        "PREACONST": 43465.1,
+        "PREDIRECC": "AK 30 25 90",
+        "PRENBARRIO": "FLORIDA",
+        "BARMANPRE": "006101016001",
+    }
+}
+
+PAYLOAD_PREDIO = {"features": [PREDIO_FILA_DOMINANTE, PREDIO_FILA_SECUNDARIA]}
+PAYLOAD_PREDIO_VACIO = {"features": []}
+
+# Obras publicas con buffer 500 m (FR-004, research H5): formato geojson.
+PAYLOAD_OBRAS_BUFFER_500 = geojson(
+    [feature_obra("Ampliación de Estaciones: Calle 146")]
+)
+
+# Capa UPL (unidadplaneamientolocal/0): UPL24 Chapinero con vocacion Urbano.
+def feature_upl(codigo="UPL24", nombre="Chapinero", vocacion="Urbano"):
+    return {
+        "type": "Feature",
+        "properties": {"CODIGO_UPL": codigo, "NOMBRE": nombre, "VOCACION": vocacion},
+        "geometry": None,
+    }
+
+
+def provider_arcgis_f3(lotes=None, valor=None, reserva=None, obras=None, predio=None):
+    """Provider ArcGIS del flujo F3: capa Lote, tematicas, obras buffer 500 m y capa Predio.
+
+    `predio` acepta el payload pjson de la capa Predio o la tupla (payload, status);
+    `obras` por defecto es el payload con buffer 500 m (formato geojson).
+    """
+
+    def respuesta_de(contenido):
+        if isinstance(contenido, tuple) and len(contenido) == 2 and isinstance(contenido[1], int):
+            payload, status = contenido
+            return httpx.Response(status, json=payload)
+        if isinstance(contenido, list):
+            return httpx.Response(200, json=geojson(contenido))
+        return httpx.Response(200, json=contenido)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "Mapa_Referencia/Mapa_Referencia/MapServer/38/query" in url:
+            return respuesta_de(lotes if lotes is not None else [feature_lote(codigo_catastral="006101016001", manzana="006101016")])
+        if "valorreferencia" in url:
+            return respuesta_de(valor if valor is not None else [feature_valor()])
+        if "reservavial" in url:
+            return respuesta_de(reserva if reserva is not None else [feature_reserva()])
+        if "obraspublicas" in url:
+            return respuesta_de(obras if obras is not None else PAYLOAD_OBRAS_BUFFER_500)
+        if "catastro/lote/MapServer/3/query" in url:
+            return respuesta_de(predio if predio is not None else PAYLOAD_PREDIO)
+        return httpx.Response(404, json={"error": f"sin respuesta simulada para {url}"})
+
+    return ArcGISProvider(transport=httpx.MockTransport(handler))
+
+
+def provider_upl_estandar(upl_features=None):
+    """Provider UPL: UPL24 Chapinero (vocacion Urbano) por defecto."""
+    features = upl_features if upl_features is not None else [feature_upl()]
+    return UPLProvider(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=geojson(features)))
+    )
+
+
+def server_lotes_f3(mapas=None, arcgis=None, upl=None, normativa=None):
+    """ServidorLotes con providers simulados del flujo F3 (informe de factibilidad)."""
+    return ServidorLotes(
+        mapas if mapas is not None else provider_mapas_estandar(),
+        arcgis if arcgis is not None else provider_arcgis_f3(),
+        upl if upl is not None else provider_upl_estandar(),
+        normativa if normativa is not None else NormativaProvider(),
+    )

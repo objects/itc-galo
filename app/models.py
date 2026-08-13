@@ -97,12 +97,41 @@ class ValorReferencia(DatoTematico):
     vigencia: str | None = None
 
 
-class DestinoEconomico(DatoTematico):
-    """Destino economico predominante del lote (catastro/destinolt)."""
+class UsoEconomico(BaseModel):
+    """Uso de una fila de construccion del predio (capa Predio, PRECUSO/PREAUSO).
 
+    Sub-entidad de `DestinoEconomico`: cada fila de la capa tabular Predio
+    representa un uso con su area asignada en la fuente (research H3).
+    """
+
+    codigo: str
+    descripcion: str
+    area_uso: float
+
+
+class DestinoEconomico(BaseModel):
+    """Destino economico predominante del lote (capa tabular Predio catastro/lote/3).
+
+    Reactivado en F3 con la NUEVA fuente (research D1/H1): la capa tabular
+    `catastro/lote/MapServer/3` (f=pjson), consultada por PRECHIP o BARMANPRE.
+    La fila con mayor PREAUSO define el destino principal
+    (`codigo_destino`/`descripcion_destino`/`uso`/`area_uso`); las demas se
+    listan en `usos`. `vigencia` = PREVACTUAL del registro (research H7) y
+    alimenta el `data_vigencia` del source_trace del bloque.
+    """
+
+    estado: EstadoDato
     codigo_destino: str | None = None
     descripcion_destino: str | None = None
+    uso: str | None = None
+    area_uso: float | None = None
+    usos: list[UsoEconomico] = []
+    area_terreno: float | None = None
+    area_construccion: float | None = None
+    direccion: str | None = None
+    barrio: str | None = None
     vigencia: str | None = None
+    source_trace: SourceTrace
 
 
 class ReservaVial(DatoTematico):
@@ -265,3 +294,168 @@ class CorpusInfo(BaseModel):
     vigencia: str
     hash_sha256: str
     total_articulos: int
+
+
+# --- Feature 3 (Informe de factibilidad orquestado, get_feasibility_report) ---
+# Entidades nuevas del data-model.md de F3 (data-model.md:71-152). El reporte es
+# 100% deterministico (FR-006/FR-007): score e interpretaciones son funciones
+# puras sobre los datos recuperados; la unica salida del RAG es normative_evidence.
+# Reutiliza los modelos F1/F2 (Lote, SourceTrace, ValorReferencia, ReservaVial,
+# ObraPublica, UPL, Localidad) sin modificarlos (CHK-015).
+
+
+class FeasibilityScore(BaseModel):
+    """Score heuristico 0-100 del reporte (research D3, FR-006/FR-007).
+
+    `score` es un entero con clamp(0, 100); `confidence` canónico
+    ("high" | "medium" | "low") por cobertura de los 6 bloques evaluables;
+    `reasons` son textos fijos por regla con el dato interpolado y el
+    `source_name`; `rules_applied` lista los codigos de regla que participaron
+    (auditoria interna). Ninguna regla inventa normativa (FR-014).
+    """
+
+    score: int
+    confidence: Literal["high", "medium", "low"]
+    reasons: list[str]
+    rules_applied: list[str]
+
+
+class IdentidadLote(BaseModel):
+    """Bloque lot_identity: identidad del lote (shape del contrato F1 `lote`).
+
+    `chip` puede ser null cuando el lote se resolvio por coordenadas (la capa
+    Lote 38 no publica CHIP); `codigo_catastral` (LOTCODIGO) siempre esta
+    poblado y es el join key con BARMANPRE de la capa Predio (research H2).
+    """
+
+    chip: str | None = None
+    codigo_catastral: str
+    manzana: str
+    direccion_normalizada: str | None = None
+    barrio: str | None = None
+    geometry: dict[str, Any]
+    centroid: Centroide
+    source_trace: SourceTrace
+
+
+class ContextoAdministrativo(BaseModel):
+    """Bloque administrative_context: UPL, localidad y clasificacion de suelo.
+
+    `upl`/`localidad` son null + warning cuando la UPL no se resuelve (no error;
+    research D5). `clasificacion_suelo` se deriva de `UPL.vocacion` (research
+    D2/H4): "Urbano" -> urbano, "Rural" -> rural, "Urbano-Rural" -> urbano-rural;
+    null si no hay UPL. `source_trace` es el de la capa UPL.
+    """
+
+    upl: UPL | None = None
+    localidad: Localidad | None = None
+    clasificacion_suelo: Literal["urbano", "rural", "urbano-rural"] | None = None
+    source_trace: SourceTrace
+
+
+class BloqueReservaVial(BaseModel):
+    """Bloque planning_constraints con el patron F1 {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: ReservaVial | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloqueValorReferencia(BaseModel):
+    """Bloque market_context con el patron F1 {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: ValorReferencia | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloqueObrasPublicas(BaseModel):
+    """Bloque environment_context con el patron F1 {estado, dato, interpretation, source_trace}.
+
+    El dato proviene de `consultar_obras_publicas_radio` (buffer 500 m sobre la
+    capa multipunto, research H5); no reutiliza `ContextoTematico.obras_publicas`
+    (consulta puntual de F1, que no cumple FR-004).
+    """
+
+    estado: EstadoDato
+    dato: ObraPublica | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloqueDestinoEconomico(BaseModel):
+    """Bloque economic_context con el patron F1 {estado, dato, interpretation, source_trace}.
+
+    `dato` es el `DestinoEconomico` de la capa tabular Predio (research D1).
+    """
+
+    estado: EstadoDato
+    dato: DestinoEconomico | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class ItemEvidenciaNormativa(BaseModel):
+    """Articulo del POT citado literalmente en normative_evidence (shape del contrato).
+
+    `texto_cita` es el fragmento literal de la fuente oficial (FR-003);
+    `similitud` es la similitud del chunk recuperado por el RAG.
+    """
+
+    articulo: str
+    titulo: str
+    libro: str
+    parte: str | None = None
+    texto_cita: str
+    similitud: float | None = None
+
+
+class EvidenciaNormativa(BaseModel):
+    """Bloque normative_evidence: evidencia del POT (Decreto 555/2021) con citas literales.
+
+    Degradacion deliberada (FR-009/FR-012, research.md "Divergencia deliberada"):
+    si el RAG no esta disponible o no hay resultados, `items` queda vacio con
+    `causa` y warning; no es un error de la tool.
+    """
+
+    items: list[ItemEvidenciaNormativa]
+    consulta: str
+    consulta_automatica: bool
+    sin_resultados: bool
+    causa: Literal["CORPUS_NO_INGESTADO", "OLLAMA_NO_DISPONIBLE", "SIN_RESULTADOS"] | None = None
+    source_trace: SourceTrace
+
+
+class Warning(BaseModel):
+    """Advertencia determinista del reporte (una entrada por degradacion, deduplicada)."""
+
+    codigo: Literal[
+        "LOTE_SIN_CHIP",
+        "UPL_NO_ENCONTRADA",
+        "LOCALIDAD_NO_DERIVADA",
+        "BLOQUE_SIN_DATO",
+        "NORMATIVA_NO_DISPONIBLE",
+        "NORMATIVA_SIN_RESULTADOS",
+    ]
+    mensaje: str
+
+
+class InformeFactibilidad(BaseModel):
+    """Entidad raiz del contrato get_feasibility_report: los 10 bloques (data-model.md:114-128).
+
+    `query_timestamp` es ISO 8601 UTC de generacion del reporte; no participa
+    del score (SC-003: el score es deterministico).
+    """
+
+    lot_identity: IdentidadLote
+    administrative_context: ContextoAdministrativo
+    planning_constraints: BloqueReservaVial
+    market_context: BloqueValorReferencia
+    environment_context: BloqueObrasPublicas
+    economic_context: BloqueDestinoEconomico
+    normative_evidence: EvidenciaNormativa
+    feasibility_score: FeasibilityScore
+    warnings: list[Warning]
+    query_timestamp: str
