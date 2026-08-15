@@ -1,0 +1,19 @@
+{
+  "documento_base": "Decreto_555_2021",
+  "documentos": [
+    {
+      "documento_id": "Decreto_122_2023",
+      "hash_sha256": "85d536d4635bb783b18384f175b11250aaa50f11919ef716a1b9b8f0a0b739fe",
+      "tipo_norma": "decreto",
+      "numero": 122,
+      "año": 2023,
+      "fecha_expedicion": "2023-03-30",
+      "fecha_vigencia": "2023-03-31",
+      "url_origen": "https://www.alcaldiabogota.gov.co/sisjur/normas/Norma1.jsp?i=139499",
+      "formato": "sisjur_html",
+      "relacion_con_555": "referencia_articulos",
+      "articulos": 13,
+      "indexado": false
+    }
+  ]
+}
