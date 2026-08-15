@@ -18,8 +18,8 @@ normativa** del POT (RAG local sobre el Decreto 555 de 2021).
 - **100 % determinista sin LLM** en la resolución de lote, el contexto temático y el
   `feasibility_score` (`app/scoring.py`, función pura). El LLM se usa **solo** en el RAG
   normativo opcional (`consultar_normativa` y la evidencia de `get_feasibility_report`).
-- Suite: **188 tests passing, 0 failed** (smoke de arranque + contract tests con respuestas
-  simuladas, sin red real ni Ollama).
+- Suite: **231 tests passing, 0 failed** (132 contract F1/F2 + 54 F3 + 2 smoke + 43 F4; sin red
+  real ni Ollama).
 
 Las 7 tools:
 
@@ -385,3 +385,5 @@ cat data/corpus/decreto_555_2021.jsonl.sha256
   ("not started"); puede reincorporarse cuando vuelva a responder (ver `app/providers/arcgis.py`).
 - **Umbral de relevancia del RAG**: 0.30–0.35 (similitud coseno) en el pipeline de
   `consultar_normativa`; por debajo → abstención explícita (`sin_resultados: true`).
+- **F4 no añade tools MCP**: la feature 4 (ingesta de actos modificatorios del 555) amplía el
+  corpus RAG a un corpus consolidado (Decreto 555 + actos), sin cambiar las 7 tools.

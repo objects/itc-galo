@@ -7,10 +7,11 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
-- **Repositorio en `master`; último hito: `feat(feature3): implementar get_feasibility_report —
-  orquestación unificada (US1, US2, US3)`** (commit `7e3b6c1`, padre `bc70505`; working tree limpio).
-  La aplicación está implementada y probada: F1, F2 y F3 completas, **185 tests passing (131 contract
-  F1/F2 + 52 F3 + 2 smoke), 0 failed**, con las **7 tools** registradas.
+- **Repositorio en `master`; HEAD `398e094` (feature 4 implementada y commiteada:
+  `feat(feature4): implementar ingesta de actos modificatorios del 555 (US1-US3)`).** La aplicación
+  está implementada y probada: F1, F2,
+  F3 y F4 completas, **231 tests passing (132 contract F1/F2 + 54 F3 + 2 smoke + 43 F4), 0 failed**,
+  gate PASS, con las **7 tools** registradas (F4 no añade tools MCP).
 - **F1 — `specs/001-resolver-lote-contexto/`**: COMPLETA. spec.md, plan.md, research.md,
   data-model.md, contracts/, tasks.md (36 tareas T001–T036 marcadas completadas), quickstart.md,
   checklists/. Implementa las 4 tools de resolución de lote.
@@ -28,7 +29,35 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
     bloques) y métodos `consultar_destino_economico` (capa Predio) y `consultar_obras_publicas_radio`
     (buffer 500 m) en `app/providers/arcgis.py`. Tests F3: 6 archivos en `tests/contract/` (52 tests)
     + `_f3_shared.py` (constantes compartidas); smoke actualizado a 7 tools. README.md ya documenta F3.
-  - Commits: `f19d98a` (foundational F3), `bc70505` (tests F3), `7e3b6c1` (implementación completa).
+  - Commits: `f19d98a` (foundational F3), `bc70505` (tests F3), `7e3b6c1` (implementación completa),
+    luego fixes `b591391`/`c0315cd`, limpieza TDD `ec7e63b`, docs `2e55b5d`/`3a4dc49`/`5939625`
+    (Caracteristicas.md con el inventario de las 7 herramientas MCP).
+- **F4 — `specs/004-ingesta-actos-modificatorios/`**: COMPLETA e implementada (feature activa,
+  `.specify/feature.json` → `specs/004-ingesta-actos-modificatorios`). spec.md, plan.md, research.md,
+  data-model.md, contracts/, quickstart.md y checklists/ (requirements.md 16/16). tasks.md con
+  26 tareas T001–T026 (6 fases) **TODAS marcadas `[x]`**, gate PASS.
+  - Implementa la ingesta CLI de actos que reglamentan o modifican el Decreto 555/2021 en 3 historias:
+    **US1** subcomando `acto` con 5 formatos (`sisjur_html`, `pdf`, `docx`, `markdown`, `txt`),
+    deduplicación por hash SHA-256 del archivo (FR-007), fallo atómico por documento (FR-009) y
+    validación FR-014 (rechazo si `fecha_expedicion < 2021-12-30`); **US2** RAG consolidado en la MISMA
+    colección `decreto_555_2021` con `norma`/`source_name` aditivos por ítem (FR-004/FR-005), regla de
+    precedencia temporal en el prompt y re-indexación aditiva con huella multi-documento (FR-008);
+    **US3** evidencia de F3 (`normative_evidence`) con norma real por ítem sin romper el contrato de F3
+    (FR-011, SC-005). Las **7 tools MCP permanecen SIN cambios**.
+  - Archivos clave: `app/ingesta/actos.py` (NUEVO: detección de formato + extracción genérica +
+    validación FR-014 + registro del corpus consolidado), subcomando `acto` en `app/ingesta/corpus.py`
+    (T013/T014), `app/providers/normativa.py` (RAG consolidado + precedencia + `indexar_acto`),
+    `app/models.py` (`DocumentoNormativo` + campos aditivos en `ArticuloNormativo`/`Chunk`/
+    `ItemEvidenciaNormativa`). Storage: `data/corpus/actos_modificatorios/` (JSONL por acto + `.sha256`
+    + `.corpus_consolidado.json`, versionados en git, FR-013).
+  - 3 desviaciones menores documentadas del contrato CLI: código de error extra `METADATOS_INCOMPLETOS`,
+    `url_origen="cli"` para `--archivo`, y `fecha_vigencia` con fallback a `fecha_expedicion`.
+    Dependencias CLI nuevas (solo ingesta): `pypdf>=5`, `python-docx>=1.1` (`pdfplumber` solo CLI como
+    alternativa); sin variables de entorno nuevas.
+  - Commits: de especificación/plan `ea9415e` (spec+checklist), `b8e328e` (correcciones de revisión
+    C1/M1/M2), `601570d` (plan) y de implementación `398e094` (implementación completa). La
+    implementación T001–T026 está completa y commiteada. Próximo paso: verificar la ingesta real del
+    Decreto 122 de 2023 (SC-001) con Ollama disponible.
 - `20260809-01-perplexity.md` es la **fuente de verdad del producto** (arquitectura, fuentes de
   datos, herramientas MCP, pipeline RAG). Léelo antes de especificar o planificar.
 
@@ -81,12 +110,16 @@ Notas:
     dominante por mayor `PREAUSO`, vigencia `PREVACTUAL`. Obras públicas por radio: buffer 500 m
     sobre capa multipunto.
   - Consultas: `f=geojson`, `geometry=<lng,lat>&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects`; metadatos con `f=pjson`.
-- RAG normativo: corpus = Decreto 555 de 2021 (POT "Bogotá Reverdece 2022-2035") + micrositio POT +
-  compendio de Datos Abiertos. **608 artículos en `data/corpus/decreto_555_2021.jsonl` + `.sha256`,
+- RAG normativo: corpus consolidado = Decreto 555 de 2021 (POT "Bogotá Reverdece 2022-2035", 608
+  artículos, micrositio POT + compendio de Datos Abiertos) + actos modificatorios del 555 (F4).
+  **608 artículos del 555 en `data/corpus/decreto_555_2021.jsonl` + `.sha256` y actos en
+  `data/corpus/actos_modificatorios/` (JSONL por acto + `.sha256` + `.corpus_consolidado.json`),
   versionados en git (fuente de verdad, FR-009).** Índice vectorial derivado en `.data/chroma/`
-  (gitignored, regenerable), colección `decreto_555_2021`. Chunks con metadatos (norma, artículo,
-  tema, vigencia, jerarquía, territorio/UPL). Modelos Ollama: `bge-m3` (embeddings, 1024 dims) y
-  `qwen3:8b` (chat, con citation forcing de citas literales verificables).
+  (gitignored, regenerable), colección única `decreto_555_2021` con re-indexación aditiva por documento
+  y huella multi-documento (FR-008). Chunks con metadatos extendidos (norma, artículo, tema, vigencia,
+  jerarquía, territorio/UPL + `norma_id`, `fecha_vigencia`, `titulo_norma`, `source_name`). Modelos
+  Ollama: `bge-m3` (embeddings, 1024 dims) y `qwen3:8b` (chat, con citation forcing de citas literales
+  verificables y regla de precedencia temporal de los actos en el prompt).
 
 ## Estructura del proyecto
 
@@ -98,13 +131,18 @@ Notas:
 - `app/providers/`: un provider por fuente (Principio II): `arcgis.py` (Lote, contexto temático,
   Predio F3, obras por radio), `arcgis_utils.py` (`CapaConfig`, params/consulta compartidos),
   `mapas_bogota.py` (Mapas Bogotá), `upl.py` (capa UPL), `normativa.py` (RAG ChromaDB + Ollama).
-- `app/ingesta/corpus.py`: CLI con subcomandos `descargar` (HTML sisjur → JSONL + `.sha256`, SIN
-  Ollama), `indexar` (JSONL → ChromaDB), `full` (pipeline completo), `consultar` (debug).
+- `app/ingesta/`: `corpus.py` (CLI con subcomandos `descargar` (HTML sisjur → JSONL + `.sha256`, SIN
+  Ollama), `indexar` (JSONL → ChromaDB), `full` (pipeline completo), `consultar` (debug) y `acto`
+  (F4: ingesta de actos modificatorios del 555)) y `actos.py` (NUEVO, F4: detección de formato por
+  extensión + magic bytes, extracción genérica PDF/DOCX/MD/TXT, validación FR-014 y registro del
+  corpus consolidado).
 - `tests/`: `smoke/test_main.py` (arranque y registro de las 7 tools) y `tests/contract/`
   (14 archivos F1/F2 + 6 archivos F3: get_feasibility_report, validación, errores, normativa,
-  scoring y trazabilidad + `_f3_shared.py` con constantes compartidas). Fixtures con
+  scoring y trazabilidad + `_f3_shared.py` con constantes compartidas + 3 archivos F4:
+  test_ingesta_actos, test_corpus_consolidado, test_precedencia + extensiones aditivas de
+  test_consultar_normativa y test_get_feasibility_report). Fixtures con
   `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
-- `specs/001-*`, `specs/002-*`, `specs/003-*`: features Spec Kit (ver "Estado actual").
+- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`: features Spec Kit (ver "Estado actual").
 - `.specify/`: feature.json (feature activa), integration.json (opencode, separador `.`),
   memory/constitution.md, scripts/, templates/, workflows/.
 - `.opencode/`: commands/ (comandos `speckit.*`), opencode.json, package.json (plugin).
