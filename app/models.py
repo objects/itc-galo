@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 # Estado de un dato tematico por fuente (FR-007): un dato ausente o no aplicable
 # se reporta como "no_encontrado", nunca como cero ni vacio silencioso.
@@ -203,6 +203,28 @@ COLECCION_NORMATIVA = "decreto_555_2021"
 METADATA_CORPUS_SHA256 = "corpus_sha256"
 METADATA_EMBEDDING_MODEL = "embedding_model"
 
+# Vigencia del Decreto 555/2021 (FR-014): fecha mínima de expedición de un acto
+# que pretenda reglamentarlo o modificarlo. Es el dato del POT base (research
+# H4: Registro Distrital No. 7326, vigencia 30/12/2021).
+FECHA_VIGENCIA_555 = "2021-12-30"
+
+# Formato del archivo fuente de un acto normativo (FR-001): sisjur_html es el
+# formato recomendado; pdf/docx/markdown/txt se extraen de forma genérica (D5).
+FormatoDocumento = Literal["sisjur_html", "pdf", "docx", "markdown", "txt"]
+
+# Campos aditivos F4 de identificación de norma (data-model.md:88-111). Se
+# excluyen de la huella canónica del corpus (`hash_documento`) para que el
+# Decreto 555 conserve exactamente su hash actual (FR-012): el 555 los tiene en
+# None y el JSONL versionado NO se modifica; los actos los pueblan.
+CAMPOS_ADITIVOS_F4 = (
+    "norma_id",
+    "tipo_norma",
+    "numero_norma",
+    "año",
+    "fecha_vigencia",
+    "titulo_norma",
+)
+
 
 class UPL(BaseModel):
     """Unidad de Planeamiento Local del POT de Bogota (data-model.md:57-78).
@@ -263,6 +285,18 @@ class ArticuloNormativo(BaseModel):
     upls_mencionadas: list[str] = []
     articulos_derogados: list[int] = []
 
+    # --- Campos aditivos F4 (norma de origen, data-model.md:88-111) ---
+    # Opcionales con default None: el 555 conserva exactamente su esquema F2
+    # (FR-011, FR-012); los actos modificatorios los pueblan al integrarse al
+    # corpus consolidado. `numero_norma` evita colisionar con `numero` (número
+    # de ARTÍCULO, semántica F2 inalterable); el contrato JSONL usa ese nombre.
+    norma_id: str | None = None
+    tipo_norma: Literal["decreto", "resolucion"] | None = None
+    numero_norma: int | None = None
+    año: int | None = None
+    fecha_vigencia: str | None = None
+    titulo_norma: str | None = None
+
 
 class Chunk(BaseModel):
     """Pieza indexada en el vector store, derivada de un ArticuloNormativo
@@ -281,6 +315,20 @@ class Chunk(BaseModel):
     seccion: str | None = None
     texto: str
 
+    # --- Campos aditivos F4 (norma de origen + trazabilidad, data-model.md:113-130) ---
+    # Opcionales con default None: el 555 conserva su esquema F2 (FR-011); los
+    # actos los pueblan. `source_name`/`data_vigencia` son los campos FR-004 del
+    # SourceTrace por fragmento; `relacion_con_555` se hereda del documento.
+    norma_id: str | None = None
+    tipo_norma: Literal["decreto", "resolucion"] | None = None
+    numero_norma: int | None = None
+    año: int | None = None
+    fecha_vigencia: str | None = None
+    titulo_norma: str | None = None
+    source_name: str | None = None
+    data_vigencia: str | None = None
+    relacion_con_555: Literal["referencia_articulos", "sin_referencia"] | None = None
+
 
 class CorpusInfo(BaseModel):
     """Coleccion de articulos del Decreto 555/2021 indexada (data-model.md:106-126).
@@ -294,6 +342,55 @@ class CorpusInfo(BaseModel):
     vigencia: str
     hash_sha256: str
     total_articulos: int
+
+
+class DocumentoNormativo(BaseModel):
+    """Acto administrativo que reglamenta o modifica el Decreto 555/2021 (F4).
+
+    Entidad nueva del data-model.md:40-70: cada acto (decreto o resolución)
+    produce un JSONL versionado en git (FR-013) y un hash SHA-256 del ARCHIVO
+    fuente para deduplicación (FR-007, SC-003). `articulos_referenciados` son
+    los artículos del 555 enlazados desde sisjur (`Norma1.jsp?i=119582#NNN`,
+    H2): referencia verificable por máquina para `relacion_con_555` (FR-014).
+
+    Reglas de dominio:
+    - Rechazo FR-014: `fecha_expedicion < FECHA_VIGENCIA_555` (2021-12-30) -> el
+      acto NO puede reglamentar/modificar el 555 (validador + fail-fast tipificado
+      en `app/ingesta/actos.py` ANTES de construir el modelo).
+    - Advertencia FR-014: sin referencias verificables -> `relacion_con_555 =
+      "sin_referencia"` (se integra con warning, no se rechaza).
+    - Deduplicación FR-007: mismo `hash_sha256` en el registro -> no-op.
+    """
+
+    tipo_norma: Literal["decreto", "resolucion"]
+    numero: int
+    año: int
+    documento_id: str
+    titulo: str
+    fecha_expedicion: str
+    fecha_vigencia: str
+    url_origen: str
+    hash_sha256: str
+    formato: FormatoDocumento
+    relacion_con_555: Literal["referencia_articulos", "sin_referencia"]
+    articulos_referenciados: list[int] = []
+    estado_documento: Literal["vigente", "derogado"] | None = None
+    derogado_compilado_por: str | None = None
+
+    @field_validator("fecha_expedicion")
+    @classmethod
+    def _fecha_no_anterior_al_555(cls, valor: str) -> str:
+        """Defensa en profundidad del FR-014 (el rechazo tipificado ya ocurrió en la ingesta).
+
+        Comparación lexicográfica segura: ambas fechas son ISO 8601 (YYYY-MM-DD).
+        """
+        if valor < FECHA_VIGENCIA_555:
+            raise ValueError(
+                f"El acto no puede reglamentar ni modificar el Decreto 555 de 2021: "
+                f"fecha_expedicion {valor} es anterior a la vigencia del 555 "
+                f"({FECHA_VIGENCIA_555})."
+            )
+        return valor
 
 
 # --- Feature 3 (Informe de factibilidad orquestado, get_feasibility_report) ---
@@ -410,6 +507,13 @@ class ItemEvidenciaNormativa(BaseModel):
     parte: str | None = None
     texto_cita: str
     similitud: float | None = None
+
+    # --- Campos aditivos F4 (data-model.md:148-152) ---
+    # Identificación de la norma real del fragmento por ítem (FR-004/FR-005):
+    # `norma` (nombre legible) y `source_name` (trazabilidad FR-004). El
+    # `source_trace` de BLOQUE se conserva intacto.
+    norma: str | None = None
+    source_name: str | None = None
 
 
 class EvidenciaNormativa(BaseModel):

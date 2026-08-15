@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import chromadb
 import pytest
@@ -283,7 +283,12 @@ def test_coleccion_runtime_es_coleccion_normativa(chroma_tempdir, fake_ef):
 
 @pytest.mark.asyncio
 async def test_consultar_normativa_estructura_respuesta_coincide_con_contrato(servidor_normativa_rag):
-    """Valida que la respuesta real coincide con el contrato consultar-normativa.md."""
+    """Valida que la respuesta real coincide con el contrato consultar-normativa.md.
+
+    Extension ADITIVA F4 (SC-005): cada item de `resultados` gana `norma` y
+    `source_name` (FR-004/FR-005, data-model.md:139-146); los campos F2
+    conservan su semantica (FR-011).
+    """
     mock_llm = AsyncMock(
         return_value="El Artículo 1 regula los usos del suelo en la UPL17."
     )
@@ -297,13 +302,19 @@ async def test_consultar_normativa_estructura_respuesta_coincide_con_contrato(se
     assert isinstance(resp["sin_resultados"], bool)
 
     for resultado in resp["resultados"]:
-        assert set(resultado) == {"articulo", "titulo", "libro", "parte", "texto_cita", "similitud"}
+        assert set(resultado) == {
+            "articulo", "titulo", "libro", "parte", "texto_cita", "similitud",
+            # Campos aditivos F4 (SC-005): norma de origen por ítem.
+            "norma", "source_name",
+        }
         assert isinstance(resultado["articulo"], int) and resultado["articulo"] >= 1
         assert isinstance(resultado["titulo"], str)
         assert isinstance(resultado["libro"], str)
         assert resultado["parte"] in {"general", "urbano", "rural"}
         assert isinstance(resultado["texto_cita"], str)
         assert 0.0 <= resultado["similitud"] <= 1.0
+        assert isinstance(resultado["norma"], str) and resultado["norma"]
+        assert isinstance(resultado["source_name"], str) and resultado["source_name"]
 
     assert set(resp["trazabilidad"]) == {
         "source_name", "layer_id", "service_url", "data_vigencia", "query_timestamp",
@@ -320,3 +331,117 @@ def test_codigos_error_contrato():
         "FUENTE_5XX": "verificación/actualización de corpus responde 5xx",
     }
     assert len(codigos) == 4
+
+
+# --- Tests F4: identificación de norma por ítem (T016, FR-004/FR-005) ---
+# Extensiones ADITIVAS del contrato de F2 (SC-005): cada ítem de `resultados`
+# gana `norma` y `source_name` (data-model.md:139-146,
+# contracts/ingesta-actos-modificatorios.md:131-145). El provider aún no los
+# emite (T018): estos tests definen el shape objetivo y permanecen en RED hasta
+# que `_procesar_resultados` lea los metadatos extendidos del chunk
+# (`titulo_norma`, `source_name`, data-model.md:113-130) y `consultar` los
+# añada a cada ítem sin tocar los campos F2 (FR-011).
+
+
+def _respuesta_chroma_con_metadatos_norma() -> dict:
+    """Resultado sintético de `coleccion.query` con metadatos extendidos de norma.
+
+    Dos chunks que coexisten para el mismo tema: el artículo 1 del Decreto 555
+    de 2021 (usos del suelo) y el artículo 4 del Decreto 122 de 2023 (vivienda
+    colectiva). La coexistencia (FR-006/FR-012) exige que NINGUNO se oculte en
+    la respuesta.
+    """
+    return {
+        "ids": [["decreto555-2021-art-001", "Decreto_122_2023-art-004"]],
+        "documents": [
+            [
+                "El presente artículo regula los usos del suelo en la UPL17. "
+                "Permite vivienda y comercio.",
+                "El presente decreto reglamenta la vivienda colectiva en Bogotá.",
+            ]
+        ],
+        "metadatas": [
+            [
+                {
+                    "articulo": 1,
+                    "titulo": "Usos del suelo en UPL17",
+                    "libro": "II",
+                    "parte": "urbano",
+                    "titulo_norma": "Decreto 555 de 2021",
+                    "source_name": "Decreto 555 de 2021 (POT Bogotá)",
+                },
+                {
+                    "articulo": 4,
+                    "titulo": "Vivienda colectiva",
+                    "libro": "III",
+                    "parte": "urbano",
+                    "titulo_norma": "Decreto 122 de 2023",
+                    "source_name": "Decreto 122 de 2023",
+                },
+            ]
+        ],
+        "distances": [[0.0, 0.0]],
+    }
+
+
+async def _consultar_normativa_con_chunks_sinteticos(servidor, respuesta_llm: str) -> dict:
+    """Consulta F2 con resultados sintéticos de ChromaDB (metadatos de norma F4).
+
+    Reemplaza la recuperación vectorial real (los chunks del índice actual aún
+    no llevan los metadatos extendidos: T020) por un resultado que SÍ los lleva;
+    así el test fija el contrato de T018 de forma aislada y determinista.
+    """
+    coleccion_fake = MagicMock()
+    coleccion_fake.query.return_value = _respuesta_chroma_con_metadatos_norma()
+    with patch.object(NormativaProvider, "_get_coleccion", return_value=coleccion_fake), \
+         patch.object(NormativaProvider, "_verificar_ollama_chat", new=AsyncMock()), \
+         patch.object(
+             NormativaProvider,
+             "_generar_respuesta_llm",
+             new=AsyncMock(return_value=respuesta_llm),
+         ):
+        return await servidor.consultar_normativa(consulta="vivienda colectiva")
+
+
+@pytest.mark.asyncio
+async def test_fragmento_decreto_555_lleva_norma_y_source_name(servidor_normativa_rag):
+    """Un fragmento del 555 lleva `norma: "Decreto 555 de 2021"` y su source_name (FR-004/FR-005)."""
+    resp = await _consultar_normativa_con_chunks_sinteticos(
+        servidor_normativa_rag,
+        respuesta_llm="El Artículo 1 regula los usos del suelo en la UPL17.",
+    )
+    await servidor_normativa_rag.aclose()
+
+    fragmentos = {r["articulo"]: r for r in resp["resultados"]}
+    assert fragmentos[1]["norma"] == "Decreto 555 de 2021"
+    assert fragmentos[1]["source_name"] == "Decreto 555 de 2021 (POT Bogotá)"
+
+
+@pytest.mark.asyncio
+async def test_fragmento_de_acto_lleva_norma_decreto_122(servidor_normativa_rag):
+    """Un fragmento del Decreto 122 de 2023 lleva `norma: "Decreto 122 de 2023"` (FR-004/FR-005)."""
+    resp = await _consultar_normativa_con_chunks_sinteticos(
+        servidor_normativa_rag,
+        respuesta_llm="El Artículo 4 reglamenta la vivienda colectiva.",
+    )
+    await servidor_normativa_rag.aclose()
+
+    fragmentos = {r["articulo"]: r for r in resp["resultados"]}
+    assert fragmentos[4]["norma"] == "Decreto 122 de 2023"
+    assert fragmentos[4]["source_name"] == "Decreto 122 de 2023"
+
+
+@pytest.mark.asyncio
+async def test_decreto_555_y_acto_coexisten_sin_ocultarse(servidor_normativa_rag):
+    """555 y acto que cubren el mismo tema: AMBOS ítems están en resultados (FR-006, FR-012)."""
+    resp = await _consultar_normativa_con_chunks_sinteticos(
+        servidor_normativa_rag,
+        respuesta_llm="El Artículo 1 y el Artículo 4 regulan la vivienda colectiva.",
+    )
+    await servidor_normativa_rag.aclose()
+
+    assert {r["articulo"] for r in resp["resultados"]} == {1, 4}
+    assert {r["norma"] for r in resp["resultados"]} == {
+        "Decreto 555 de 2021",
+        "Decreto 122 de 2023",
+    }

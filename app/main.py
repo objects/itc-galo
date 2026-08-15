@@ -696,6 +696,11 @@ class ServidorLotes:
                     parte=item.get("parte"),
                     texto_cita=item.get("texto_cita", ""),
                     similitud=item.get("similitud"),
+                    # Campos aditivos F4 (FR-004/FR-005): norma real del fragmento
+                    # (555 o acto modificatorio) con su trazabilidad. Si el provider
+                    # no los emite, quedan None (degradacion F3 intacta).
+                    norma=item.get("norma"),
+                    source_name=item.get("source_name"),
                 )
                 for item in resultado_normativa.get("resultados", [])
             ]

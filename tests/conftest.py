@@ -5,6 +5,8 @@ Ninguna prueba hace llamadas de red reales (tasks.md: T013-T036).
 
 from __future__ import annotations
 
+import io
+
 import httpx
 
 from app.main import ServidorLotes
@@ -379,3 +381,229 @@ class NormativaProviderStub:
 
     async def aclose(self) -> None:
         return None
+
+
+# --- Fixtures Feature 4 (ingesta de actos modificatorios, T010) ---
+# Decreto 122 de 2023 (research H2/H7): reglamenta los artículos 233, 243 y 384
+# del Decreto 555 de 2021 (vivienda colectiva). Se sirve en los 5 formatos
+# soportados (HTML sisjur, PDF, DOCX, Markdown, TXT) con el mismo articulado:
+# 13 artículos con ordinal `Nº.`. Ninguna prueba hace llamadas de red reales.
+
+DECRETO_122_TITULOS = [
+    "Objeto y ámbito de aplicación.",
+    "Definiciones.",
+    "Reglas generales de la vivienda colectiva.",
+    "Soluciones habitacionales con servicios.",
+    "Estándares mínimos de vivienda VIS y VIP.",
+    "Cesiones urbanísticas.",
+    "Condiciones de edificabilidad.",
+    "Procedimiento de aprobación.",
+    "Obligaciones de los promotores.",
+    "Régimen de transición.",
+    "Seguimiento y control.",
+    "Sanciones.",
+    "Vigencia.",
+]
+
+# Metadatos canónicos del acto (H4/H7): el Decreto 122 se expidió tras la
+# vigencia del 555 (2021-12-30), referencia los artículos 233/243/384 y el
+# banner sisjur lo marca derogado/compilado por el DUDOT 670 de 2025.
+DECRETO_122_METADATA = {
+    "tipo_norma": "decreto",
+    "numero": 122,
+    "año": 2023,
+    "documento_id": "Decreto_122_2023",
+    "fecha_expedicion": "2023-03-30",
+    "fecha_vigencia": "2023-03-31",
+    "url_origen": "https://www.alcaldiabogota.gov.co/sisjur/normas/Norma1.jsp?i=139499",
+}
+
+BANNER_DEROGACION_122 = (
+    "Derogado y compilado por el art. 1526, Decreto Único Distrital de "
+    "Ordenamiento Territorial 670 de 2025"
+)
+
+
+def _parrafo_articulo_decreto_122(numero, titulo, cuerpo):
+    """Párrafo sisjur de un artículo del Decreto 122 (plantilla D4/H2).
+
+    `<span class="ancla" id="N">` marca el artículo; el número es un ordinal
+    (`<b>1º.</b>`, no el punto plano del 555) y el título vive en la variante
+    `<i style="font-weight: bold;">` en lugar del `<b>` del 555.
+    """
+    return (
+        f'<p class="MsoNormal"><b>Artículo</b><span style="font-size: 12pt;" '
+        f'class="ancla" id="{numero}"></span>\n'
+        f"<b>{numero}º.</b>&nbsp;<i style=\"font-weight: bold;\">{titulo}</i> {cuerpo}</p>"
+    )
+
+
+def html_decreto_122():
+    """HTML sisjur del Decreto 122: 13 anclas y el banner de derogación.
+
+    El artículo 1 enlaza los artículos 233/243/384 del 555 vía
+    `Norma1.jsp?i=119582#NNN` (H2, referencia verificable por máquina para
+    `relacion_con_555`); el banner vive FUERA de los `<p class="MsoNormal">`
+    del articulado (H7), como en la plantilla real.
+    """
+    articulos = []
+    for i, titulo in enumerate(DECRETO_122_TITULOS, start=1):
+        if i == 1:
+            cuerpo = (
+                "El presente decreto reglamenta los artículos "
+                '<a href="../normas/Norma1.jsp?i=119582#233">233</a>, '
+                '<a href="../normas/Norma1.jsp?i=119582#243">243</a> y '
+                '<a href="../normas/Norma1.jsp?i=119582#384">384</a> del Decreto '
+                "Distrital 555 de 2021, en lo relacionado con la vivienda colectiva."
+            )
+        else:
+            cuerpo = f"Cuerpo del artículo {i} del Decreto 122."
+        articulos.append(_parrafo_articulo_decreto_122(i, titulo, cuerpo))
+    return (
+        "<html><head><title>Decreto 122 de 2023</title></head><body>\n"
+        f'<div class="banner">{BANNER_DEROGACION_122}</div>\n'
+        + "\n".join(articulos)
+        + "\n</body></html>"
+    )
+
+
+def texto_decreto_122():
+    """Texto plano del Decreto 122: 'ARTÍCULO Nº. Título' + cuerpo por línea.
+
+    Es la fuente del formato TXT y el contenido incrustado en PDF y DOCX; la
+    variante Markdown solo añade los marcadores `##` que `_texto_markdown`
+    elimina antes de parsear.
+    """
+    lineas = []
+    for i, titulo in enumerate(DECRETO_122_TITULOS, start=1):
+        if i == 1:
+            cuerpo = (
+                "El presente decreto reglamenta los artículos 233, 243 y 384 del "
+                "Decreto Distrital 555 de 2021, en lo relacionado con la vivienda "
+                "colectiva."
+            )
+        else:
+            cuerpo = f"Cuerpo del artículo {i} del Decreto 122."
+        lineas.append(f"ARTÍCULO {i}º. {titulo}")
+        lineas.append(cuerpo)
+    return "\n".join(lineas)
+
+
+def md_decreto_122():
+    """Markdown del Decreto 122: los encabezados `## ARTÍCULO Nº.`."""
+    return "\n".join(
+        f"## {linea}" if linea.startswith("ARTÍCULO") else linea
+        for linea in texto_decreto_122().split("\n")
+    )
+
+
+def txt_decreto_122():
+    """TXT del Decreto 122 (idéntico al texto plano)."""
+    return texto_decreto_122()
+
+
+def _pdf_con_texto(texto):
+    """Construye un PDF mínimo con `texto` (contenido latin-1) y xref válida.
+
+    Una página con una fuente Type1 Helvetica (WinAnsi): cada línea del texto
+    se muestra con `Tj` y se baja con `Td` para que pypdf reconstruya los
+    saltos de línea y `_parsear_articulos_texto` pueda anclar los artículos.
+    """
+    lineas = texto.split("\n")
+    operadores = " ".join(f"({linea}) Tj 0 -14 Td" for linea in lineas)
+    contenido = f"BT /F1 10 Tf 72 720 Td {operadores} ET".encode("latin-1")
+    objetos = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length "
+        + str(len(contenido)).encode()
+        + b" >>\nstream\n"
+        + contenido
+        + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]
+    cuerpo = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for indice, objeto in enumerate(objetos, start=1):
+        offsets.append(len(cuerpo))
+        cuerpo.extend(f"{indice} 0 obj\n".encode())
+        cuerpo.extend(objeto)
+        cuerpo.extend(b"\nendobj\n")
+    posicion_xref = len(cuerpo)
+    cuerpo.extend(f"xref\n0 {len(objetos) + 1}\n".encode())
+    cuerpo.extend(b"0000000000 65535 f \n")
+    for offset in offsets:
+        cuerpo.extend(f"{offset:010d} 00000 n \n".encode())
+    cuerpo.extend(
+        f"trailer\n<< /Size {len(objetos) + 1} /Root 1 0 R >>\nstartxref\n{posicion_xref}\n%%EOF\n".encode()
+    )
+    return bytes(cuerpo)
+
+
+def pdf_decreto_122():
+    """PDF mínimo con el articulado del Decreto 122 (texto latin-1)."""
+    return _pdf_con_texto(texto_decreto_122())
+
+
+def docx_decreto_122():
+    """DOCX del Decreto 122: un párrafo por encabezado y por cuerpo.
+
+    python-docx se importa perezosamente (dependencia opcional `ingesta`);
+    los tests que no tocan F4 no cargan el módulo.
+    """
+    import docx
+
+    documento = docx.Document()
+    for i, titulo in enumerate(DECRETO_122_TITULOS, start=1):
+        if i == 1:
+            cuerpo = (
+                "El presente decreto reglamenta los artículos 233, 243 y 384 del "
+                "Decreto Distrital 555 de 2021, en lo relacionado con la vivienda "
+                "colectiva."
+            )
+        else:
+            cuerpo = f"Cuerpo del artículo {i} del Decreto 122."
+        documento.add_paragraph(f"ARTÍCULO {i}º. {titulo}")
+        documento.add_paragraph(cuerpo)
+    buffer = io.BytesIO()
+    documento.save(buffer)
+    return buffer.getvalue()
+
+
+# --- Registro del corpus consolidado para F4 (T010) ---
+# El registro `.corpus_consolidado.json` (FR-013, data-model.md:82-83) declara
+# el documento base y la lista de documentos; `entrada_registro_corpus` arma
+# una entrada canónica del Decreto 122 para inyectar duplicados o estados
+# previos sin tocar `data/` real.
+
+REGISTRO_CORPUS_PRUEBA = {
+    "documento_base": "Decreto_555_2021",
+    "documentos": [],
+}
+
+
+def entrada_registro_corpus(**campos):
+    """Entrada canónica de registro del Decreto 122 (overridable por `campos`).
+
+    `hash_sha256` por defecto es ficticio ('abc123'): los tests que simulan un
+    duplicado inyectan el hash del archivo de la fixture para que
+    `escribir_documento_acto` lo detecte como ya indexado (FR-007).
+    """
+    entrada = {
+        "documento_id": DECRETO_122_METADATA["documento_id"],
+        "hash_sha256": "abc123",
+        "tipo_norma": DECRETO_122_METADATA["tipo_norma"],
+        "numero": DECRETO_122_METADATA["numero"],
+        "año": DECRETO_122_METADATA["año"],
+        "fecha_expedicion": DECRETO_122_METADATA["fecha_expedicion"],
+        "fecha_vigencia": DECRETO_122_METADATA["fecha_vigencia"],
+        "url_origen": DECRETO_122_METADATA["url_origen"],
+        "formato": "sisjur_html",
+        "relacion_con_555": "referencia_articulos",
+        "articulos": 13,
+        "indexado": False,
+    }
+    entrada.update(campos)
+    return entrada

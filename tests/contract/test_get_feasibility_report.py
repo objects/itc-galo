@@ -7,10 +7,15 @@ PREAUSO) y determinismo del score (SC-003).
 
 Nota: la tool `get_feasibility_report` está implementada y registrada en
 app/main.py (commit 7e3b6c1); estos tests pasan.
+
+Nota F4 (T021, US3): los tests que exigen `norma`/`source_name` por ítem en
+normative_evidence (data-model.md:148-152) están en RED hasta T022, cuando el
+orquestador propague los campos aditivos que el provider F2 ya emite (T018).
 """
 
 from __future__ import annotations
 
+from app.errores import CorpusNoIngestadoError
 from tests.conftest import (
     CHIP_VALIDO,
     NormativaProviderStub,
@@ -36,6 +41,24 @@ TERMINOS_NORMATIVOS_INVENTADOS = [
     "edificabilidad",
     "aprovechamiento",
 ]
+
+
+def respuesta_normativa_con_norma(
+    norma: str = "Decreto 555 de 2021",
+    source_name: str = "Decreto 555 de 2021 (POT Bogotá)",
+) -> dict:
+    """Respuesta RAG del corpus consolidado: cada ítem declara su norma real (F4, US3).
+
+    Extiende `respuesta_normativa_ok()` con los campos aditivos que el provider F2
+    emite por ítem desde T018 (data-model.md:139-146, contracts:131-145). Por
+    defecto simula la norma base; pasando `norma`/`source_name` se simula un acto
+    modificatorio (p. ej. norma="Decreto 122 de 2023").
+    """
+    respuesta = respuesta_normativa_ok()
+    for item in respuesta["resultados"]:
+        item["norma"] = norma
+        item["source_name"] = source_name
+    return respuesta
 
 
 async def test_reporte_por_chip_devuelve_los_10_bloques():
@@ -172,7 +195,9 @@ async def test_administrative_context_con_upl24_chapinero_y_clasificacion():
 
 async def test_normative_evidence_tiene_shape_del_contrato():
     """normative_evidence es uno de los 10 bloques con shape (items, consulta, consulta_automatica, sin_resultados, causa, source_trace)."""
-    servidor = server_lotes_f3(normativa=NormativaProviderStub(respuesta=respuesta_normativa_ok()))
+    servidor = server_lotes_f3(
+        normativa=NormativaProviderStub(respuesta=respuesta_normativa_con_norma())
+    )
     try:
         reporte = await servidor.get_feasibility_report(chip=CHIP_VALIDO)
     finally:
@@ -189,11 +214,79 @@ async def test_normative_evidence_tiene_shape_del_contrato():
     assert item["articulo"] == "361"
     assert isinstance(item["articulo"], str)
     assert item["texto_cita"], "texto_cita no puede estar vacio (cita literal verificable)"
+    # Campos aditivos F4 por ítem (data-model.md:148-152): la norma real del fragmento.
+    assert isinstance(item["norma"], str) and item["norma"]
+    assert isinstance(item["source_name"], str) and item["source_name"]
     assert isinstance(evidencia["consulta"], str) and evidencia["consulta"]
     assert isinstance(evidencia["consulta_automatica"], bool)
     assert isinstance(evidencia["sin_resultados"], bool)
     assert evidencia["causa"] in {"CORPUS_NO_INGESTADO", "OLLAMA_NO_DISPONIBLE", "SIN_RESULTADOS", None}
     assert set(evidencia["source_trace"]) == CAMPOS_TRAZA
+
+
+async def test_normative_evidence_expone_norma_real_por_item():
+    """US3-AC1 (spec.md:82): cada item lleva norma/source_name aditivos; el source_trace de bloque intacto (SC-005/FR-004)."""
+    servidor = server_lotes_f3(
+        normativa=NormativaProviderStub(
+            respuesta=respuesta_normativa_con_norma(
+                norma="Decreto 122 de 2023",
+                source_name="Decreto 122 de 2023",
+            )
+        )
+    )
+    try:
+        reporte = await servidor.get_feasibility_report(chip=CHIP_VALIDO)
+    finally:
+        await servidor.aclose()
+
+    evidencia = reporte["normative_evidence"]
+    assert evidencia["items"], "con el corpus consolidado debe haber items"
+    for item in evidencia["items"]:
+        # La norma real del fragmento se expone a nivel de item (contracts:147-151).
+        assert item["norma"] == "Decreto 122 de 2023"
+        assert item["source_name"] == "Decreto 122 de 2023"
+    # Aditividad estricta (SC-005): el shape del bloque no cambia y la traza de bloque se conserva.
+    assert set(evidencia) == {
+        "items", "consulta", "consulta_automatica", "sin_resultados", "causa", "source_trace",
+    }
+    assert set(evidencia["source_trace"]) == CAMPOS_TRAZA
+
+
+async def test_normative_evidence_determinista_entre_ejecuciones():
+    """US3-AC2 (spec.md:83): dos informes con los mismos datos -> bloque normative_evidence identico."""
+    servidor = server_lotes_f3(
+        normativa=NormativaProviderStub(
+            respuesta=respuesta_normativa_con_norma(
+                norma="Decreto 122 de 2023",
+                source_name="Decreto 122 de 2023",
+            )
+        )
+    )
+    try:
+        reporte_1 = await servidor.get_feasibility_report(chip=CHIP_VALIDO)
+        reporte_2 = await servidor.get_feasibility_report(chip=CHIP_VALIDO)
+    finally:
+        await servidor.aclose()
+
+    assert reporte_1["normative_evidence"] == reporte_2["normative_evidence"]
+
+
+async def test_normative_evidence_degrada_sin_fallar_cuando_rag_no_disponible():
+    """US3-AC3 (spec.md:84): RAG no disponible -> evidencia vacia + causa + warning; reporte completo (FR-009/FR-012)."""
+    stub = NormativaProviderStub(error=CorpusNoIngestadoError())
+    servidor = server_lotes_f3(normativa=stub)
+    try:
+        reporte = await servidor.get_feasibility_report(chip=CHIP_VALIDO)
+    finally:
+        await servidor.aclose()
+
+    evidencia = reporte["normative_evidence"]
+    assert evidencia["items"] == []
+    assert evidencia["causa"] == "CORPUS_NO_INGESTADO"
+    codigos_warning = {w["codigo"] for w in reporte["warnings"]}
+    assert "NORMATIVA_NO_DISPONIBLE" in codigos_warning
+    assert set(reporte) == BLOQUES_RAIZ
+    assert 0 <= reporte["feasibility_score"]["score"] <= 100
 
 
 async def test_feasibility_score_shape_y_rango():
