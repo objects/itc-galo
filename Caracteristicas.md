@@ -60,8 +60,8 @@ El proyecto **no carga `.env` automáticamente**: las variables se leen del ento
 | Variable | Obligatoria | Descripción |
 |----------|-------------|-------------|
 | `MAPAS_BOGOTA_APIKEY` | Solo resolución/UPL por dirección | API key de Mapas Bogotá (`geocodificar`). Sin ella → `CREDENCIAL_FALTANTE`. |
-| `OLLAMA_HOST` | Solo F2 | Bind moderno de Ollama (verificación de disponibilidad). Default `http://192.168.40.91:11434`. |
-| `OLLAMA_BASE_URL` | Solo F2 | Endpoint que usa ChromaDB (`/api/embeddings`). Default `http://192.168.40.91:11434`. |
+| `OLLAMA_HOST` | Solo F2 | Bind moderno de Ollama (verificación de disponibilidad). Default `http://localhost:11434`. |
+| `OLLAMA_BASE_URL` | Solo F2 | Endpoint que usa ChromaDB (`/api/embeddings`). Default `http://localhost:11434`. |
 | `OLLAMA_EMBEDDING_MODEL` | Solo F2 | Embeddings (default `bge-m3`, 1024 dims). Al cambiar, la ingesta reconstruye el índice automáticamente. |
 | `OLLAMA_CHAT_MODEL` | Solo F2 | Modelo de chat (default `qwen3:8b`). |
 | `CORPUS_URL` | Ingesta | URL oficial del articulado en sisjur (Decreto 555/2021). |

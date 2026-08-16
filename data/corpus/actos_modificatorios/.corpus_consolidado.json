@@ -13,7 +13,7 @@
       "formato": "sisjur_html",
       "relacion_con_555": "referencia_articulos",
       "articulos": 13,
-      "indexado": false
+      "indexado": true
     }
   ]
 }

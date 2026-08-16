@@ -178,7 +178,7 @@ def test_provider_defaults_base_url_y_ruta_indice(monkeypatch):
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     monkeypatch.delenv("VECTOR_DB_PATH", raising=False)
     provider = NormativaProvider()
-    assert provider._base_url == "http://192.168.40.91:11434"
+    assert provider._base_url == "http://localhost:11434"
     assert provider._ruta_indice == ".data/chroma"
 
 

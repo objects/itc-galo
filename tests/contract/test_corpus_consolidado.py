@@ -30,6 +30,7 @@ from app.ingesta.actos import (
     extraer_articulos_referenciados,
     hash_archivo,
     leer_registro_corpus,
+    marcar_documento_indexado,
     validar_relacion_con_555,
 )
 from app.ingesta.corpus import (
@@ -180,6 +181,32 @@ def test_escribir_documento_acto_jsonl_y_sha256(
     assert lineas[0]["titulo"] == DECRETO_122_TITULOS[0]
 
 
+def test_archivos_del_acto_escriben_con_modo_0644(
+    tmp_path, contenido_html_122, articulos_122, documento_122
+):
+    """JSONL, `.sha256` y registro salen con modo 0644 (SC-001, cosmetico).
+
+    `mkstemp` crea el temporal con 0600; `_escribir_atomicamente` fija 0644
+    ANTES del replace para que el corpus versionado en git sea legible por
+    cualquier usuario del repo, no solo por el que ingirió.
+    """
+    ruta_registro = tmp_path / ".corpus_consolidado.json"
+    directorio_salida = tmp_path / "actos"
+    escribir_documento_acto(
+        contenido_html_122,
+        documento_122,
+        articulos_122,
+        ruta_registro=ruta_registro,
+        directorio_salida=directorio_salida,
+    )
+    for ruta in (
+        directorio_salida / "Decreto_122_2023.jsonl",
+        directorio_salida / "Decreto_122_2023.jsonl.sha256",
+        ruta_registro,
+    ):
+        assert ruta.stat().st_mode & 0o777 == 0o644
+
+
 # --- 3. Registro del corpus consolidado (FR-002, FR-007, FR-008) ---
 
 def test_registro_corpus_consolidado_con_metadatos(
@@ -218,6 +245,38 @@ def test_registro_corpus_consolidado_con_metadatos(
     assert entrada["indexado"] is False
     # Forma canónica de la entrada (fixture `entrada_registro_corpus` de T010).
     assert entrada == entrada_registro_corpus(hash_sha256=hash_archivo(contenido_html_122))
+
+
+def test_marcar_documento_indexado_tras_indexar(
+    tmp_path, contenido_html_122, articulos_122, documento_122
+):
+    """`marcar_documento_indexado` refleja en el registro la indexación real.
+
+    La ingesta escribe el registro con `indexado` según el `--indexar` de la
+    llamada (SC-001: quedaba `false` tras indexar por separado); el marcado
+    posterior actualiza la entrada del documento a `true` sin tocar las demás.
+    """
+    ruta_registro = tmp_path / ".corpus_consolidado.json"
+    escribir_documento_acto(
+        contenido_html_122,
+        documento_122,
+        articulos_122,
+        ruta_registro=ruta_registro,
+        directorio_salida=tmp_path / "actos",
+    )
+    marcar_documento_indexado("Decreto_122_2023", ruta_registro)
+
+    entrada = leer_registro_corpus(ruta_registro)["documentos"][0]
+    assert entrada["documento_id"] == "Decreto_122_2023"
+    assert entrada["indexado"] is True
+    assert len(leer_registro_corpus(ruta_registro)["documentos"]) == 1
+
+
+def test_marcar_documento_indexado_documento_ausente_no_op(tmp_path):
+    """Marcar un documento que no está en el registro no escribe nada (no-op)."""
+    ruta_registro = tmp_path / ".corpus_consolidado.json"
+    marcar_documento_indexado("Decreto_999_2099", ruta_registro)
+    assert not ruta_registro.exists()
 
 
 # --- 4. Re-ingesta duplicada: no-op sin duplicar artículos (SC-003) ---

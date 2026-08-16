@@ -459,6 +459,9 @@ def _escribir_atomicamente(ruta: Path, contenido: str) -> None:
 
     Escribe a un temporal del mismo directorio y lo renombra con os.replace:
     un fallo a mitad de escritura nunca deja un archivo parcial en la ruta final.
+    `mkstemp` crea el temporal con modo 0600; se fija 0644 ANTES del replace
+    para que el corpus versionado sea legible por cualquier usuario del repo
+    (SC-001: los JSONL/.sha256/registro salían 0600).
     """
     ruta.parent.mkdir(parents=True, exist_ok=True)
     descriptor, ruta_temporal = tempfile.mkstemp(
@@ -467,6 +470,7 @@ def _escribir_atomicamente(ruta: Path, contenido: str) -> None:
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as archivo:
             archivo.write(contenido)
+        os.chmod(ruta_temporal, 0o644)
         os.replace(ruta_temporal, ruta)
     except Exception:
         try:
@@ -501,6 +505,31 @@ def leer_registro_corpus(ruta_registro: str | Path) -> dict[str, Any]:
     registro.setdefault("documento_base", "Decreto_555_2021")
     registro.setdefault("documentos", [])
     return registro
+
+
+def marcar_documento_indexado(
+    documento_id: str, ruta_registro: str | Path = RUTA_REGISTRO_POR_DEFECTO
+) -> None:
+    """Marca `indexado: true` de un documento en el registro tras indexar (SC-001).
+
+    La ingesta escribe el registro con el estado de indexación conocido en ese
+    momento (el `--indexar` de la llamada); si la indexación se ejecuta después
+    (re-ingesta duplicada, indexado manual posterior), la entrada debe reflejar
+    el estado real. No-op si el documento no está en el registro o ya está
+    indexado.
+    """
+    registro = leer_registro_corpus(ruta_registro)
+    cambiado = False
+    for entrada in registro.get("documentos", []):
+        if entrada.get("documento_id") == documento_id and entrada.get("indexado") is not True:
+            entrada["indexado"] = True
+            cambiado = True
+            break
+    if cambiado:
+        _escribir_atomicamente(
+            Path(ruta_registro),
+            json.dumps(registro, ensure_ascii=False, indent=2) + "\n",
+        )
 
 
 def nombre_legible(documento: DocumentoNormativo) -> str:

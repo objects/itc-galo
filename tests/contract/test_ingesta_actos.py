@@ -248,6 +248,27 @@ def test_extraer_documento_sisjur_122_derogado(contenido_html_122):
     assert derogado_compilado_por == BANNER_DEROGACION_122
 
 
+def test_extraer_documento_sisjur_banner_dentro_de_articulado():
+    """El banner DENTRO de un `<p class="MsoNormal">` se captura por fallback.
+
+    En la plantilla REAL (SC-001, Decreto 122) el banner de derogación vive
+    dentro de un párrafo del articulado, no fuera: el fallback a HTML completo
+    de `_extraer_banner_derogacion` debe capturarlo igual sin romper el parseo
+    (13 anclas) ni confundirlo con una referencia del cuerpo.
+    """
+    html = html_decreto_122()
+    html_con_banner_en_articulado = html.replace(
+        f'<div class="banner">{BANNER_DEROGACION_122}</div>\n',
+        f'<p class="MsoNormal">{BANNER_DEROGACION_122}</p>\n',
+    )
+    articulos, estado_documento, derogado_compilado_por = extraer_documento_sisjur(
+        html_con_banner_en_articulado.encode("utf-8")
+    )
+    assert len(articulos) == 13
+    assert estado_documento == "derogado"
+    assert derogado_compilado_por == BANNER_DEROGACION_122
+
+
 # --- 7. Errores tipificados (data-model.md:178-191, contract:69-78) ---
 
 @pytest.mark.parametrize(

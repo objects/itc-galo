@@ -276,11 +276,19 @@ def _extraer_banner_derogacion(html: str) -> tuple[str | None, str | None]:
     por el art. 1526, Decreto Único Distrital de Ordenamiento Territorial 670
     de 2025". Devuelve (None, None) si el documento no trae banner; el acto
     derogado SIGUE formando parte del corpus consolidado (SC-001).
+
+    Primero se busca FUERA del articulado (anti falso positivo: una referencia
+    del cuerpo no debe confundirse con el banner); si no aparece, se busca en
+    el HTML completo como fallback porque en la plantilla REAL (SC-001,
+    Decreto 122) el banner puede vivir DENTRO de un `<p class="MsoNormal">`.
     """
     texto = _limpiar_html(_html_fuera_de_articulado(html))
     coincidencia = BANNER_DEROGACION_PATRON.search(texto)
     if coincidencia is None:
-        return None, None
+        texto_completo = _limpiar_html(html)
+        coincidencia = BANNER_DEROGACION_PATRON.search(texto_completo)
+        if coincidencia is None:
+            return None, None
     return "derogado", coincidencia.group(0).strip()
 
 
@@ -1080,7 +1088,7 @@ DEFAULT_INDICE = os.getenv("VECTOR_DB_PATH", ".data/chroma")
 
 def _crear_embedding_function() -> OllamaEmbeddingFunction:
     """Crea la embedding function por defecto usando variables de entorno."""
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://192.168.40.91:11434")
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     return OllamaEmbeddingFunction(
         model_name=_modelo_embedding_env(), url=f"{base_url}/api/embeddings"
     )
@@ -1269,7 +1277,11 @@ def indexar_acto(
     (FR-008). Importa `app.ingesta.actos` de forma perezosa (evita el ciclo de
     importación del módulo).
     """
-    from app.ingesta.actos import RUTA_REGISTRO_POR_DEFECTO, leer_registro_corpus
+    from app.ingesta.actos import (
+        RUTA_REGISTRO_POR_DEFECTO,
+        leer_registro_corpus,
+        marcar_documento_indexado,
+    )
 
     registro = leer_registro_corpus(ruta_registro or RUTA_REGISTRO_POR_DEFECTO)
     articulos_enriquecidos = [_articulo_enriquecido(a, documento) for a in articulos]
@@ -1320,21 +1332,26 @@ def indexar_acto(
                 f"{motivo}. Reconstruyendo la colección desde cero para no mezclar "
                 "vectores de corpus o modelos distintos."
             )
-        return _indexar_corpus_consolidado_completo(
+        info = _indexar_corpus_consolidado_completo(
             ruta_indice,
             embedding_function,
             batch_tamano,
             ruta_registro=ruta_registro,
             directorio_actos=directorio_actos,
         )
+    else:
+        info = indexar_corpus(
+            articulos_enriquecidos,
+            ruta_indice,
+            embedding_function,
+            batch_tamano,
+            ruta_registro=ruta_registro,
+        )
 
-    return indexar_corpus(
-        articulos_enriquecidos,
-        ruta_indice,
-        embedding_function,
-        batch_tamano,
-        ruta_registro=ruta_registro,
+    marcar_documento_indexado(
+        documento.documento_id, ruta_registro or RUTA_REGISTRO_POR_DEFECTO
     )
+    return info
 
 
 def cmd_indexar(ruta_indice: str) -> None:
@@ -1551,6 +1568,29 @@ def _formato_desde_contenido(contenido: bytes, url: str) -> str:
     return formato
 
 
+def _descargar_url_acto(url: str) -> bytes:
+    """Descarga `url` con reintento SSL contra el bundle de CA del sistema.
+
+    El venv usa certifi, que no valida la CA intermedia de Cloudflare de sisjur
+    (CERTIFICATE_VERIFY_FAILED, SC-001): si la descarga falla por verificación
+    de certificado y existe el bundle del sistema, se reintenta con él antes de
+    propagar el error.
+    """
+    try:
+        response = httpx.get(url, timeout=30.0)
+        response.raise_for_status()
+        return response.content
+    except Exception as error_inicial:
+        if "CERTIFICATE_VERIFY_FAILED" not in str(error_inicial):
+            raise
+        bundle_sistema = "/etc/ssl/certs/ca-certificates.crt"
+        if not Path(bundle_sistema).exists():
+            raise
+        response = httpx.get(url, timeout=30.0, verify=bundle_sistema)
+        response.raise_for_status()
+        return response.content
+
+
 def cmd_acto(args) -> None:
     """Ingesta un acto normativo que reglamenta o modifica el Decreto 555/2021.
 
@@ -1588,9 +1628,7 @@ def cmd_acto(args) -> None:
         url_origen = "cli"
     else:
         try:
-            response = httpx.get(args.url, timeout=30.0)
-            response.raise_for_status()
-            contenido = response.content
+            contenido = _descargar_url_acto(args.url)
         except Exception as e:
             print(
                 f"Error de ingesta [FUENTE_NO_DISPONIBLE]: no se pudo descargar el "

@@ -15,7 +15,7 @@ remitirse a [contracts/](contracts/) y [data-model.md](data-model.md).
    ```
    (instala `mcp>=1.0.0`, `httpx`, `pydantic`, `chromadb`, `pytest` según `pyproject.toml`).
 3. **Variables de entorno** (leídas desde `.env`; ver `.env.example`):
-   - `OLLAMA_BASE_URL=http://192.168.40.91:11434` (endpoint legado que usa ChromaDB).
+   - `OLLAMA_BASE_URL=http://localhost:11434` (endpoint legado que usa ChromaDB).
    - `OLLAMA_EMBEDDING_MODEL=bge-m3` (modelo de embeddings, 1024 dims).
    - `OLLAMA_CHAT_MODEL=qwen3:8b` (modelo de chat para generación de respuesta).
    - `VECTOR_DB_PATH=.data/chroma` (directorio del índice vectorial).

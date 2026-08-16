@@ -16,7 +16,7 @@ y [data-model.md](data-model.md).
    ```
    (añade `pypdf>=5` y `python-docx>=1.1` para la ingesta de PDF/DOCX; ver `pyproject.toml`).
 3. **Variables de entorno** (leídas del entorno; ver `.env.example`):
-   - `OLLAMA_BASE_URL=http://192.168.40.91:11434` (endpoint legado que usa ChromaDB).
+   - `OLLAMA_BASE_URL=http://localhost:11434` (endpoint legado que usa ChromaDB).
    - `OLLAMA_EMBEDDING_MODEL=bge-m3` (modelo de embeddings, 1024 dims).
    - `OLLAMA_CHAT_MODEL=qwen3:8b` (modelo de chat con citation forcing).
    - `VECTOR_DB_PATH=.data/chroma` (directorio del índice vectorial).

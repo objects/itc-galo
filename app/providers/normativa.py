@@ -27,7 +27,7 @@ from app.providers.upl import NOMBRE_UPL_A_LOCALIDAD
 # Configuracion por defecto (sobrescribible por entorno)
 EMBEDDING_MODEL_DEFAULT = "bge-m3"
 CHAT_MODEL_DEFAULT = "qwen3:8b"
-OLLAMA_BASE_URL_DEFAULT = "http://192.168.40.91:11434"
+OLLAMA_BASE_URL_DEFAULT = "http://localhost:11434"
 VECTOR_DB_PATH_DEFAULT = ".data/chroma"
 UMBRAL_SIMILITUD_DEFAULT = 0.35
 TOP_K_DEFAULT = 3
