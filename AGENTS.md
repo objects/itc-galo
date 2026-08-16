@@ -7,11 +7,13 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
-- **Repositorio en `master`; HEAD `398e094` (feature 4 implementada y commiteada:
-  `feat(feature4): implementar ingesta de actos modificatorios del 555 (US1-US3)`).** La aplicación
-  está implementada y probada: F1, F2,
-  F3 y F4 completas, **231 tests passing (132 contract F1/F2 + 54 F3 + 2 smoke + 43 F4), 0 failed**,
-  gate PASS, con las **7 tools** registradas (F4 no añade tools MCP).
+- **Repositorio en `master`; HEAD `7c55f82` (feature 4 completa con los fixes del SC-001:
+  `fix(feature4): corregir hallazgos SC-001 en ingesta de actos (SSL, banner, indexado, 0644)`).**
+  La aplicación está implementada y probada: F1, F2,
+  F3 y F4 completas, **235 tests passing (132 contract F1/F2 + 54 F3 + 2 smoke + 47 F4), 0 failed**,
+  gate PASS, con las **7 tools** registradas (F4 no añade tools MCP). **SC-001 verificado** con la
+  ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
+  precedencia temporal del acto sobre el 555.
 - **F1 — `specs/001-resolver-lote-contexto/`**: COMPLETA. spec.md, plan.md, research.md,
   data-model.md, contracts/, tasks.md (36 tareas T001–T036 marcadas completadas), quickstart.md,
   checklists/. Implementa las 4 tools de resolución de lote.
@@ -55,9 +57,11 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
     Dependencias CLI nuevas (solo ingesta): `pypdf>=5`, `python-docx>=1.1` (`pdfplumber` solo CLI como
     alternativa); sin variables de entorno nuevas.
   - Commits: de especificación/plan `ea9415e` (spec+checklist), `b8e328e` (correcciones de revisión
-    C1/M1/M2), `601570d` (plan) y de implementación `398e094` (implementación completa). La
-    implementación T001–T026 está completa y commiteada. Próximo paso: verificar la ingesta real del
-    Decreto 122 de 2023 (SC-001) con Ollama disponible.
+    C1/M1/M2), `601570d` (plan), de implementación `398e094` (implementación completa), `a977ad8`
+    (corpus real del Decreto 122, SC-001) y `7c55f82` (fixes SC-001). La implementación T001–T026
+    está completa y commiteada; **SC-001 verificado** con la ingesta real del Decreto 122 de 2023
+    (13 artículos, `estado_documento: "derogado"`, `indexado: true`, archivos 0644 y RAG con
+    precedencia temporal del acto sobre el 555).
 - `20260809-01-perplexity.md` es la **fuente de verdad del producto** (arquitectura, fuentes de
   datos, herramientas MCP, pipeline RAG). Léelo antes de especificar o planificar.
 
