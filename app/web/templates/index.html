@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block titulo %}Proyectos{% endblock %}
+{% block contenido %}
+<h2>Nuevo proyecto</h2>
+<form method="post" action="/proyectos">
+  <p>
+    <label>Nombre
+      <input type="text" name="nombre" required>
+    </label>
+  </p>
+  <p>
+    <label>Criterio
+      <select name="criterio_tipo">
+        <option value="chip">CHIP</option>
+        <option value="direccion">Dirección</option>
+        <option value="coordenadas">Coordenadas</option>
+      </select>
+    </label>
+  </p>
+  <p>
+    <label>Valor
+      <input type="text" name="criterio_valor" required
+             placeholder="AAA0072LRYN / Calle 26 # 69-76 / 4.665,-74.102">
+    </label>
+  </p>
+  <p>
+    <label>Consulta normativa (opcional)
+      <input type="text" name="consulta">
+    </label>
+  </p>
+  <p>
+    <label>top_k
+      <input type="number" name="top_k" value="3" min="1" max="6">
+    </label>
+  </p>
+  <button type="submit">Evaluar</button>
+</form>
+
+<h2>Proyectos</h2>
+<ul>
+  {% for proyecto in proyectos %}
+  <li>
+    <a href="/proyectos/{{ proyecto.id }}">{{ proyecto.nombre }}</a>
+    — {{ proyecto.estado }} — {{ proyecto.criterio_tipo }}: {{ proyecto.criterio_valor }}
+  </li>
+  {% else %}
+  <li>No hay proyectos todavía.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

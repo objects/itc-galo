@@ -37,7 +37,7 @@ class Proyecto(BaseModel):
     actualizado_en: str
 
 
-def _ahora_iso() -> str:
+def ahora_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

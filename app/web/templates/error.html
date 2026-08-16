@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block titulo %}Error {{ status_code }}{% endblock %}
+{% block contenido %}
+<h2>Error {{ status_code }}</h2>
+<p>{{ mensaje }}</p>
+<p><a href="/">← Volver al inicio</a></p>
+{% endblock %}

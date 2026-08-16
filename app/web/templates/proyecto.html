@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titulo %}{{ proyecto.nombre }}{% endblock %}
+{% block contenido %}
+<p><a href="/">← Volver</a></p>
+<h2>{{ proyecto.nombre }}</h2>
+<p>Criterio: {{ proyecto.criterio_tipo }} — {{ proyecto.criterio_valor }}</p>
+<p>Estado: {{ proyecto.estado }}</p>
+<p>Creado: {{ proyecto.creado_en }} · Actualizado: {{ proyecto.actualizado_en }}</p>
+
+{% if proyecto.estado == "fallido" %}
+<h3>Error de evaluación</h3>
+<p><strong>{{ proyecto.error.code }}</strong>: {{ proyecto.error.message }}</p>
+{% else %}
+<h3>Informe de factibilidad</h3>
+<p>Score: {{ proyecto.informe.feasibility_score.score }} / 100
+   (confianza {{ proyecto.informe.feasibility_score.confidence }})</p>
+<p><a href="/proyectos/{{ proyecto.id }}/json">Ver informe JSON</a></p>
+{% endif %}
+
+<form method="post" action="/proyectos/{{ proyecto.id }}/reevaluar">
+  <button type="submit">Reevaluar</button>
+</form>
+{% endblock %}
