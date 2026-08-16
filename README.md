@@ -11,6 +11,7 @@ consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
 - **Feature 2**: RAG normativo del POT + consulta de UPL (2 tools nuevas).
 - **Feature 3**: informe de factibilidad orquestado (1 tool nueva: `get_feasibility_report`).
 - **Feature 4**: ingesta de actos modificatorios del Decreto 555 (corpus consolidado; sin tools MCP nuevas).
+- **Feature 5**: interfaz web de prefactibilidad (FastAPI + Jinja2 + HTMX; sin tools MCP nuevas).
 
 ## Requisitos
 
@@ -192,19 +193,85 @@ Para una guía práctica de uso de las 7 herramientas (entrada y validación, sa
 fuentes consultadas, errores tipificados y ejemplos de invocación), ver
 [`Caracteristicas.md`](./Caracteristicas.md).
 
+## Interfaz web de prefactibilidad (Feature 5)
+
+La **Feature 5** añade una interfaz web (FastAPI + Jinja2 + HTMX) para crear,
+listar, ver y re-evaluar **proyectos de prefactibilidad** sin protocolo MCP. La
+capa web reutiliza la lógica de dominio de `ServidorLotes`
+(`get_feasibility_report`) con providers reales; **no añade tools MCP** (siguen
+las 7 de F1–F3).
+
+### Instalación
+
+La interfaz web usa el extra `web` (FastAPI, uvicorn, Jinja2, python-multipart):
+
+```bash
+pip install -e ".[web]"
+```
+
+### Ejecución
+
+```bash
+# Entrada de consola (uvicorn con la factory crear_app_web)
+web-mcp-bogota-factibilidad
+
+# O directamente con uvicorn
+uvicorn app.web.main:crear_app_web --factory --host 127.0.0.1 --port 8000
+```
+
+Configuración por entorno (ver `.env.example`): `WEB_HOST` (default
+`127.0.0.1`), `WEB_PORT` (default `8000`) y `PROYECTOS_DB_PATH` (default
+`.data/proyectos.db`, base SQLite de proyectos). Los proyectos se persisten con
+estado (`completado`/`fallido`), el informe o el error de evaluación y marcas de
+tiempo; se pueden re-evaluar conservando su id.
+
+### Rutas (US1 + US2)
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/` | Lista los proyectos y el formulario de nueva evaluación. |
+| `POST` | `/proyectos` | Crea y evalúa un proyecto (form: nombre, criterio_tipo, criterio_valor, consulta, top_k) → `303` a `/proyectos/{id}`. |
+| `GET` | `/proyectos/{id}` | Detalle del proyecto: anillo de score, UPL, warnings o error de evaluación. |
+| `POST` | `/proyectos/{id}/reevaluar` | Re-evalúa el proyecto → `303` a `/proyectos/{id}`. |
+| `GET` | `/proyectos/{id}/json` | Informe completo en JSON (o el error mapeado a HTTP). |
+
+- **Mapeo de errores** (Fase 5): los códigos canónicos de la taxonomía
+  (`app/errores.py`) se traducen a status HTTP — `PARAMETROS_INVALIDOS` → `400`;
+  `LOTE_NO_ENCONTRADO`/`DIRECCION_NO_LOCALIZADA`/`FUERA_DE_COBERTURA`/`LOTE_SIN_UPL`/
+  `DATO_NO_ENCONTRADO_POR_FUENTE` → `404`; `FUENTE_5XX` → `502` (un 5xx NUNCA se
+  degrada a "no encontrado", FR-009); `CREDENCIAL_FALTANTE`/`CORPUS_NO_INGESTADO`/
+  `OLLAMA_NO_DISPONIBLE` → `503`; desconocido → `500`. Los errores de evaluación
+  NO se lanzan: el proyecto se persiste `fallido` y el detalle/`/json` lo exponen.
+- **Validación de formulario** fail-fast (FR-012): nombre obligatorio, criterio
+  válido (`chip`/`direccion`/`coordenadas`), coordenadas en formato
+  `latitud,longitud`, `consulta` ≤ 500 caracteres y `top_k` entre 1 y 6 → `400`.
+- **Identidad visual** (Fase 6, 5 Pillars): tipografía **Fraunces** variable
+  (vendorizada en `app/web/static/fonts/`, sin CDN), paleta **"Bogotá
+  Reverdece"** (verde profundo + ámbar sobre crema), una única animación (el
+  anillo de score), composición asimétrica y textura de curvas de nivel SVG.
+  **HTMX 2.0.4** vendorizado (`app/web/static/htmx.min.js`) para interacción sin
+  recargas completas.
+- **Sin estado compartido con el MCP**: la app web construye SU PROPIO
+  `ServidorLotes` en el lifespan (providers reales) y lo cierra al terminar
+  (`aclose`); en pruebas se inyectan providers simulados y un repositorio
+  temporal vía `crear_app_web(servidor_lotes=..., repositorio=...)`.
+
 ## Pruebas
 
 ```bash
 python -m pytest -q
 ```
 
-- `tests/smoke/`: el servidor arranca y las 7 tools quedan registradas.
+- `tests/smoke/`: el servidor arranca y las 7 tools quedan registradas; la
+  interfaz web arranca, registra las rutas US1/US2 y sirve los estáticos
+  vendorizados (htmx + fuentes Fraunces) sin CDN.
 - `tests/contract/`: contratos de las tools, taxonomía de errores, validación
   FR-013, trazabilidad (5 campos por dato), estados `disponible`/`no_encontrado`,
-  ingesta del corpus (parseo, chunking, hash, indexación idempotente) y escenarios
-  del quickstart. Las pruebas usan respuestas simuladas (`httpx.MockTransport`) y
-  un embedding function determinista: **no** hacen llamadas de red reales ni
-  requieren Ollama.
+  ingesta del corpus (parseo, chunking, hash, indexación idempotente), escenarios
+  del quickstart y rutas web (crear/ver/re-evaluar proyectos, validación 400,
+  errores mapeados a HTTP). Las pruebas usan respuestas simuladas
+  (`httpx.MockTransport`) y un embedding function determinista: **no** hacen
+  llamadas de red reales ni requieren Ollama.
 
 ## Trazabilidad (Principio III, no negociable)
 
@@ -236,6 +303,11 @@ app/
 ├── models.py            # Modelos pydantic (Lote, contexto, UPL, ArticuloNormativo, Chunk, CorpusInfo, InformeFactibilidad)
 ├── errores.py           # Taxonomía de errores del contrato (10 códigos)
 ├── scoring.py           # F3: función pura calcular_score (score heurístico determinístico)
+├── web/                 # Feature 5: interfaz web de prefactibilidad (FastAPI + Jinja2 + HTMX)
+│   ├── main.py          # crear_app_web: rutas US1/US2, mapeo de errores a HTTP, lifespan con ServidorLotes propio
+│   ├── db.py            # Proyecto (pydantic) + ProyectoRepositorio (SQLite, sqlite3 stdlib)
+│   ├── templates/       # base/index/proyecto/error.html (identidad Bogotá Reverdece, 5 Pillars)
+│   └── static/          # htmx.min.js v2.0.4 + fonts.css + estilos.css + fonts/Fraunces (vendorizados, sin CDN)
 ├── providers/           # Un provider por fuente (Principio II)
 │   ├── mapas_bogota.py  # Mapas Bogotá API (direccion_chip, geocodificar)
 │   ├── arcgis.py        # ArcGIS REST (Lote=38 + temáticas; F3: capa Predio + obras por radio)
@@ -248,8 +320,8 @@ app/
 ├── data/corpus/         # Corpus versionado en git (JSONL + .sha256) — FR-009
 │   └── actos_modificatorios/  # F4: JSONL + .sha256 por acto + .corpus_consolidado.json
 └── tests/
-    ├── contract/        # Contratos de las tools, errores, validación, trazabilidad, ingesta
-    └── smoke/           # Smoke test de arranque (7 tools)
+    ├── contract/        # Contratos de las tools, errores, validación, trazabilidad, ingesta, rutas web
+    └── smoke/           # Smoke test de arranque (7 tools) + arranque web
 ```
 
 ## Docker

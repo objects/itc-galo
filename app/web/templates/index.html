@@ -1,50 +1,63 @@
 {% extends "base.html" %}
-{% block titulo %}Proyectos{% endblock %}
+{% block titulo %}Proyectos — Prefactibilidad Bogotá{% endblock %}
 {% block contenido %}
-<h2>Nuevo proyecto</h2>
-<form method="post" action="/proyectos">
-  <p>
-    <label>Nombre
-      <input type="text" name="nombre" required>
-    </label>
-  </p>
-  <p>
-    <label>Criterio
-      <select name="criterio_tipo">
-        <option value="chip">CHIP</option>
-        <option value="direccion">Dirección</option>
-        <option value="coordenadas">Coordenadas</option>
-      </select>
-    </label>
-  </p>
-  <p>
-    <label>Valor
-      <input type="text" name="criterio_valor" required
-             placeholder="AAA0072LRYN / Calle 26 # 69-76 / 4.665,-74.102">
-    </label>
-  </p>
-  <p>
-    <label>Consulta normativa (opcional)
-      <input type="text" name="consulta">
-    </label>
-  </p>
-  <p>
-    <label>top_k
-      <input type="number" name="top_k" value="3" min="1" max="6">
-    </label>
-  </p>
-  <button type="submit">Evaluar</button>
-</form>
+<div class="reticula">
+  <section class="tarjeta">
+    <h2 class="tarjeta__titulo">Nueva evaluación</h2>
+    <form method="post" action="/proyectos" hx-post="/proyectos" hx-target="body" hx-swap="outerHTML" hx-indicator="#indicador-evaluar">
+      <div class="campo">
+        <label for="nombre">Nombre del proyecto</label>
+        <input type="text" id="nombre" name="nombre" required placeholder="Ej. Lote Chapinero Alto">
+      </div>
+      <div class="campo">
+        <label for="criterio_tipo">Criterio de búsqueda</label>
+        <select id="criterio_tipo" name="criterio_tipo">
+          <option value="chip" selected>CHIP</option>
+          <option value="direccion">Dirección</option>
+          <option value="coordenadas">Coordenadas</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label for="criterio_valor">Valor</label>
+        <input type="text" id="criterio_valor" name="criterio_valor" required
+               placeholder="AAA0072LRYN / Calle 26 # 69-76 / 4.665,-74.102">
+        <p class="ayuda">CHIP (11 caracteres), dirección libre o coordenadas "latitud,longitud".</p>
+      </div>
+      <div class="campo">
+        <label for="consulta">Consulta normativa (opcional)</label>
+        <input type="text" id="consulta" name="consulta" maxlength="500"
+               placeholder="Ej. ¿Qué usos y tratamientos aplican a esta zona?">
+        <p class="ayuda">Máximo 500 caracteres; alimenta la evidencia normativa del informe.</p>
+      </div>
+      <div class="campo">
+        <label for="top_k">Resultados normativos (top_k)</label>
+        <input type="number" id="top_k" name="top_k" value="3" min="1" max="6">
+      </div>
+      <button class="boton boton--ambar" type="submit">
+        Evaluar lote
+        <span id="indicador-evaluar" class="htmx-indicator">…</span>
+      </button>
+    </form>
+  </section>
 
-<h2>Proyectos</h2>
-<ul>
-  {% for proyecto in proyectos %}
-  <li>
-    <a href="/proyectos/{{ proyecto.id }}">{{ proyecto.nombre }}</a>
-    — {{ proyecto.estado }} — {{ proyecto.criterio_tipo }}: {{ proyecto.criterio_valor }}
-  </li>
-  {% else %}
-  <li>No hay proyectos todavía.</li>
-  {% endfor %}
-</ul>
+  <section class="tarjeta">
+    <h2 class="tarjeta__titulo">Proyectos recientes</h2>
+    {% if proyectos %}
+    <ul class="lista-proyectos">
+      {% for proyecto in proyectos %}
+      <li>
+        <a class="proyecto-nombre" href="/proyectos/{{ proyecto.id }}">{{ proyecto.nombre }}</a>
+        <div class="proyecto-meta">
+          {{ proyecto.criterio_tipo }}: {{ proyecto.criterio_valor }}
+          {% if proyecto.consulta %} · “{{ proyecto.consulta }}”{% endif %}
+          · <span class="estado estado--{{ proyecto.estado }}">{{ proyecto.estado }}</span>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ayuda">No hay proyectos todavía. Crea el primero con el formulario.</p>
+    {% endif %}
+  </section>
+</div>
 {% endblock %}

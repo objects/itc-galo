@@ -1,23 +1,82 @@
 {% extends "base.html" %}
-{% block titulo %}{{ proyecto.nombre }}{% endblock %}
+{% block titulo %}{{ proyecto.nombre }} — Prefactibilidad Bogotá{% endblock %}
 {% block contenido %}
-<p><a href="/">← Volver</a></p>
-<h2>{{ proyecto.nombre }}</h2>
-<p>Criterio: {{ proyecto.criterio_tipo }} — {{ proyecto.criterio_valor }}</p>
-<p>Estado: {{ proyecto.estado }}</p>
-<p>Creado: {{ proyecto.creado_en }} · Actualizado: {{ proyecto.actualizado_en }}</p>
+<p><a href="/">← Volver a proyectos</a></p>
 
-{% if proyecto.estado == "fallido" %}
-<h3>Error de evaluación</h3>
-<p><strong>{{ proyecto.error.code }}</strong>: {{ proyecto.error.message }}</p>
-{% else %}
-<h3>Informe de factibilidad</h3>
-<p>Score: {{ proyecto.informe.feasibility_score.score }} / 100
-   (confianza {{ proyecto.informe.feasibility_score.confidence }})</p>
-<p><a href="/proyectos/{{ proyecto.id }}/json">Ver informe JSON</a></p>
-{% endif %}
+<div class="reticula">
+  <section class="tarjeta">
+    <h2 class="tarjeta__titulo">{{ proyecto.nombre }}</h2>
+    <div class="detalle-meta">
+      <span><strong>Criterio:</strong> {{ proyecto.criterio_tipo }} — {{ proyecto.criterio_valor }}</span>
+      {% if proyecto.consulta %}<span><strong>Consulta:</strong> “{{ proyecto.consulta }}”</span>{% endif %}
+      <span><strong>top_k:</strong> {{ proyecto.top_k }}</span>
+      <span><strong>Creado:</strong> {{ proyecto.creado_en }}</span>
+      <span><strong>Actualizado:</strong> {{ proyecto.actualizado_en }}</span>
+    </div>
 
-<form method="post" action="/proyectos/{{ proyecto.id }}/reevaluar">
-  <button type="submit">Reevaluar</button>
-</form>
+    {% if proyecto.estado == "fallido" %}
+    <div class="error-caja">
+      <p class="error-codigo">{{ (proyecto.error or {}).get("code", "ERROR") }}</p>
+      <p>{{ (proyecto.error or {}).get("message", "Error desconocido de evaluación.") }}</p>
+      <p>
+        <a href="/proyectos/{{ proyecto.id }}/json">Ver error JSON</a>
+      </p>
+    </div>
+    {% else %}
+    {% set score = proyecto.informe.feasibility_score.score %}
+    {% set confianza = proyecto.informe.feasibility_score.confidence %}
+    {% set destino = (345.58 * (1 - score / 100))|round(2) %}
+    <div class="anillo-score" style="--anillo-destino: {{ destino }}">
+      <svg viewBox="0 0 132 132" role="img" aria-label="Score {{ score }} de 100">
+        <circle class="fondo" cx="66" cy="66" r="55"></circle>
+        <circle class="progreso" cx="66" cy="66" r="55"></circle>
+      </svg>
+      <div>
+        <div class="valor">{{ score }}<small>/100</small></div>
+        <div class="etiqueta">Confianza {{ confianza }}</div>
+      </div>
+    </div>
+
+    <div class="bloque">
+      <h4>UPL</h4>
+      {% set administrativo = proyecto.informe.administrative_context %}
+      {% if administrativo and administrativo.upl %}
+      <p>{{ administrativo.upl.codigo }} — {{ administrativo.upl.nombre }} ({{ administrativo.localidad.nombre if administrativo.localidad else "localidad no disponible" }})</p>
+      {% else %}
+      <p class="ayuda">UPL no disponible (bloque degradado).</p>
+      {% endif %}
+    </div>
+
+    {% if proyecto.informe.warnings %}
+    <div class="bloque">
+      <h4>Advertencias</h4>
+      <ul>
+        {% for warning in proyecto.informe.warnings %}
+        <li>{{ warning }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% endif %}
+  </section>
+
+  <section class="tarjeta">
+    <h2 class="tarjeta__titulo">Acciones</h2>
+    <form method="post" action="/proyectos/{{ proyecto.id }}/reevaluar"
+          hx-post="/proyectos/{{ proyecto.id }}/reevaluar" hx-target="body" hx-swap="outerHTML"
+          hx-indicator="#indicador-reevaluar">
+      <button class="boton" type="submit">
+        Reevaluar
+        <span id="indicador-reevaluar" class="htmx-indicator">…</span>
+      </button>
+    </form>
+    <p>
+      <a href="/proyectos/{{ proyecto.id }}/json">Ver informe JSON</a>
+    </p>
+    <div class="bloque">
+      <h4>Consulta original</h4>
+      <pre>{{ proyecto.consulta or "—" }}</pre>
+    </div>
+  </section>
+</div>
 {% endblock %}

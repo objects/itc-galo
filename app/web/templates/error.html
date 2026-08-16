@@ -1,7 +1,14 @@
 {% extends "base.html" %}
-{% block titulo %}Error {{ status_code }}{% endblock %}
+{% block titulo %}Error {{ status_code }} — Prefactibilidad Bogotá{% endblock %}
 {% block contenido %}
-<h2>Error {{ status_code }}</h2>
-<p>{{ mensaje }}</p>
-<p><a href="/">← Volver al inicio</a></p>
+<div class="reticula reticula--invertida">
+  <section class="tarjeta">
+    <h2 class="tarjeta__titulo">Error {{ status_code }}</h2>
+    <div class="error-caja">
+      <p class="error-codigo">{{ status_code }}</p>
+      <p>{{ mensaje }}</p>
+    </div>
+    <p><a href="/">← Volver al inicio</a></p>
+  </section>
+</div>
 {% endblock %}

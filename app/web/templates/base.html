@@ -4,13 +4,36 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block titulo %}Prefactibilidad Bogotá{% endblock %}</title>
+  <link rel="stylesheet" href="/static/fonts.css">
+  <link rel="stylesheet" href="/static/estilos.css">
+  <script src="/static/htmx.min.js" defer></script>
 </head>
-<body>
-  <header>
-    <a href="/"><h1>Prefactibilidad Bogotá</h1></a>
+<body hx-boost="true">
+  <header class="cabecera">
+    <div class="cabecera__interior">
+      <div class="cabecera__marca">
+        <a href="/">
+          <p class="cabecera__kicker">POT · Bogotá Reverdece 2022–2035</p>
+          <h1 class="cabecera__titulo">Prefactibilidad de lotes</h1>
+          <p class="cabecera__subtitulo">
+            Evaluación heurística de un lote catastral con contexto geoespacial
+            y evidencia normativa del Decreto 555 de 2021.
+          </p>
+        </a>
+      </div>
+      <span class="cabecera__chip">Decreto 555 / 2021</span>
+    </div>
   </header>
-  <main>
+
+  <main class="contenido">
     {% block contenido %}{% endblock %}
   </main>
+
+  <footer class="pie">
+    <div class="pie__interior">
+      <span>mcp-bogota-factibilidad · interfaz web</span>
+      <span>Score heurístico determinístico — no constituye concepto urbanístico (FR-014).</span>
+    </div>
+  </footer>
 </body>
 </html>
