@@ -1,5 +1,20 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/qwen3.6-plus",
+  "agent": {
+    "build": {
+      "model": "opencode-go/qwen3.6-plus"
+    },
+    "general": {
+      "model": "opencode-go/qwen3.6-plus"
+    },
+    "explore": {
+      "model": "opencode-go/qwen3.6-plus"
+    },
+    "plan": {
+      "model": "opencode-go/qwen3.6-plus"
+    }
+  },
   "mcp": {
     "bogota-factibilidad": {
       "type": "local",
@@ -9,5 +24,8 @@
         "MAPAS_BOGOTA_APIKEY": "{env:MAPAS_BOGOTA_APIKEY}"
       }
     }
-  }
+	},
+	"permission": {
+		"task": "deny"
+	}
 }
