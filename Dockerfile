@@ -6,10 +6,12 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Instala el proyecto y sus dependencias (sin dev)
+# Instala el proyecto y sus dependencias (sin dev). Incluye el extra web
+# (Feature 5: FastAPI + Jinja2 + HTMX) para la interfaz de prefactibilidad;
+# el CMD por defecto sigue siendo el servidor MCP por stdio.
 COPY pyproject.toml README.md ./
 COPY app ./app
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[web]"
 
 # Etapa de runtime: imagen final minimizada con stdio como transporte MCP
 FROM python:3.11-slim AS runtime

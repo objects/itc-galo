@@ -24,6 +24,15 @@ ingesta = [
     "python-docx>=1.1",
     "pdfplumber>=0.11",
 ]
+# Feature 5 (interfaz web de prefactibilidad): FastAPI + Jinja2 + HTMX.
+# Dependencias SOLO de la capa web (app/web/), NO del runtime MCP: el servidor
+# MCP por stdio no las importa.
+web = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -34,13 +43,19 @@ dev = [
 
 [project.scripts]
 mcp-bogota-factibilidad = "app.main:main"
+web-mcp-bogota-factibilidad = "app.web.main:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["app", "app.providers"]
+packages = ["app", "app.providers", "app.web"]
+
+[tool.setuptools.package-data]
+# Feature 5: plantillas Jinja2 y estaticos del paquete web (se empaquetan
+# junto con el modulo para que la interfaz funcione instalada, no solo editable).
+"app.web" = ["templates/**/*", "static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
