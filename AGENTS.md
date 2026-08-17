@@ -7,11 +7,10 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
-- **Repositorio en `master`; HEAD `7c55f82` (feature 4 completa con los fixes del SC-001:
-  `fix(feature4): corregir hallazgos SC-001 en ingesta de actos (SSL, banner, indexado, 0644)`).**
+- **Repositorio en `master`; HEAD `15b4adb` (feature 6 completa con enriquecimiento de fuentes ArcGIS).**
   La aplicación está implementada y probada: F1, F2,
-  F3 y F4 completas, **235 tests passing (132 contract F1/F2 + 54 F3 + 2 smoke + 47 F4), 0 failed**,
-  gate PASS, con las **7 tools** registradas (F4 no añade tools MCP). **SC-001 verificado** con la
+  F3, F4 y F6 completas, **263 tests passing (132 contract F1/F2 + 54 F3 + 2 smoke + 47 F4 + 28 F6), 0 failed**,
+  gate PASS, con las **7 tools** registradas (F4 y F6 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
 - **F1 — `specs/001-resolver-lote-contexto/`**: COMPLETA. spec.md, plan.md, research.md,
@@ -62,6 +61,17 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
     está completa y commiteada; **SC-001 verificado** con la ingesta real del Decreto 122 de 2023
     (13 artículos, `estado_documento: "derogado"`, `indexado: true`, archivos 0644 y RAG con
     precedencia temporal del acto sobre el 555).
+- **F6 — `specs/006-enriquecimiento-fuentes-arcgis/`**: COMPLETA e implementada (feature activa,
+  `.specify/feature.json` → `specs/006-enriquecimiento-fuentes-arcgis`). spec.md, plan.md, research.md,
+  data-model.md, contracts/, quickstart.md y checklists/ (requirements.md 20/20). tasks.md con
+  30 tareas T001–T030 (6 fases) **TODAS marcadas `[x]`**.
+  - Añade 5 bloques adicionales al informe de factibilidad: geotechnical_risks (4 capas gestión riesgos),
+    socioeconomic_context (4 capas: estratificación, uso, altura, avalúo), regulatory_environment (licencias
+    + plusvalía), cultural_heritage (BIC + arqueológico), transit_access (TransMilenio 800m, SITP 500m, Metro 800m).
+    15 bloques en informe, 11 evaluables. Scoring: +5 contexto socio, +5 movilidad, −10 riesgo geotécnico alto,
+    −10 patrimonio cultural.
+  - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools).
+  - Commits: `15b4adb` (implementación completa + specs).
 - `20260809-01-perplexity.md` es la **fuente de verdad del producto** (arquitectura, fuentes de
   datos, herramientas MCP, pipeline RAG). Léelo antes de especificar o planificar.
 
@@ -146,7 +156,7 @@ Notas:
   test_ingesta_actos, test_corpus_consolidado, test_precedencia + extensiones aditivas de
   test_consultar_normativa y test_get_feasibility_report). Fixtures con
   `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
-- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`: features Spec Kit (ver "Estado actual").
+- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/006-*`: features Spec Kit (ver "Estado actual").
 - `.specify/`: feature.json (feature activa), integration.json (opencode, separador `.`),
   memory/constitution.md, scripts/, templates/, workflows/.
 - `.opencode/`: commands/ (comandos `speckit.*`), opencode.json, package.json (plugin).
