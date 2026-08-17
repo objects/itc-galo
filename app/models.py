@@ -494,6 +494,117 @@ class BloqueDestinoEconomico(BaseModel):
     source_trace: SourceTrace
 
 
+# --- Feature 5: Bloques adicionales del informe de factibilidad (riesgos geotecnicos,
+# contexto socioeconomico, entorno regulatorio, patrimonio cultural, acceso movilidad) ---
+
+
+class RiesgoGeotecnicos(BaseModel):
+    """Riesgos geotecnicos del lote (emergencias/gestionriesgos).
+
+    Consulta 4 capas en paralelo: amenaza movimientos en masa, geologia rural,
+    respuesta sismica y zonificacion geotecnica. Reporta la clasificacion
+    dominante y el nivel de amenaza.
+    """
+
+    amenaza_movimientos: str | None = None
+    geologia: str | None = None
+    respuesta_sismica: str | None = None
+    zonificacion_geotecnica: str | None = None
+    nivel_amenaza: Literal["alto", "medio", "bajo", "desconocido"] | None = None
+
+
+class ContextoSocioeconomico(BaseModel):
+    """Contexto socioeconomico del lote (estratificacion, uso predominante, altura, avaluo).
+
+    Consulta 4 capas en paralelo: cada sub-bloque degrada independientemente.
+    """
+
+    estrato: int | None = None
+    uso_predominante: str | None = None
+    altura_media: float | None = None
+    mediana_avaluo: float | None = None
+
+
+class EntornoRegulatorio(BaseModel):
+    """Entorno regulatorio del lote: licencias de construccion y zonas de plusvalia.
+
+    Consulta 2 capas en paralelo: licencias aprobadas y planes parciales de plusvalia.
+    """
+
+    licencias_encontradas: int | None = None
+    zona_plusvalia: bool | None = None
+    nombre_plan_plusvalia: str | None = None
+
+
+class PatrimonioCultural(BaseModel):
+    """Patrimonio cultural del lote: BIC y zonas arqueologicas.
+
+    Consulta 2 capas en paralelo: bienes de interes cultural y potencial arqueologico.
+    """
+
+    bic_cercano: bool | None = None
+    nombre_bic: str | None = None
+    zona_arqueologica: bool | None = None
+
+
+class AccesoMovilidad(BaseModel):
+    """Acceso a transporte publico del lote: TransMilenio, SITP y Metro.
+
+    Consulta 3 capas con radio: estaciones TransMilenio (800 m), paraderos SITP
+    (500 m) y estaciones Metro (800 m).
+    """
+
+    estaciones_transmilenio: int | None = None
+    paraderos_sitp: int | None = None
+    estaciones_metro: int | None = None
+    estacion_cercana: str | None = None
+
+
+class BloqueRiesgosGeotecnicos(BaseModel):
+    """Bloque geotechnical_risks con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: RiesgoGeotecnicos | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloqueContextoSocioeconomico(BaseModel):
+    """Bloque socioeconomic_context con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: ContextoSocioeconomico | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloqueEntornoRegulatorio(BaseModel):
+    """Bloque regulatory_environment con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: EntornoRegulatorio | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloquePatrimonioCultural(BaseModel):
+    """Bloque cultural_heritage con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: PatrimonioCultural | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloqueAccesoMovilidad(BaseModel):
+    """Bloque transit_access con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: AccesoMovilidad | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
 class ItemEvidenciaNormativa(BaseModel):
     """Articulo del POT citado literalmente en normative_evidence (shape del contrato).
 
@@ -542,12 +653,13 @@ class Warning(BaseModel):
         "BLOQUE_SIN_DATO",
         "NORMATIVA_NO_DISPONIBLE",
         "NORMATIVA_SIN_RESULTADOS",
+        "BLOQUE_DEGRADADO",
     ]
     mensaje: str
 
 
 class InformeFactibilidad(BaseModel):
-    """Entidad raiz del contrato get_feasibility_report: los 10 bloques (data-model.md:114-128).
+    """Entidad raiz del contrato get_feasibility_report: los 15 bloques.
 
     `query_timestamp` es ISO 8601 UTC de generacion del reporte; no participa
     del score (SC-003: el score es deterministico).
@@ -559,6 +671,11 @@ class InformeFactibilidad(BaseModel):
     market_context: BloqueValorReferencia
     environment_context: BloqueObrasPublicas
     economic_context: BloqueDestinoEconomico
+    geotechnical_risks: BloqueRiesgosGeotecnicos
+    socioeconomic_context: BloqueContextoSocioeconomico
+    regulatory_environment: BloqueEntornoRegulatorio
+    cultural_heritage: BloquePatrimonioCultural
+    transit_access: BloqueAccesoMovilidad
     normative_evidence: EvidenciaNormativa
     feasibility_score: FeasibilityScore
     warnings: list[Warning]

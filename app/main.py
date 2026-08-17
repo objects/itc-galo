@@ -48,16 +48,26 @@ from app.errores import (
     construir_error,
 )
 from app.models import (
+    AccesoMovilidad,
+    BloqueAccesoMovilidad,
+    BloqueContextoSocioeconomico,
     BloqueDestinoEconomico,
+    BloqueEntornoRegulatorio,
     BloqueObrasPublicas,
+    BloquePatrimonioCultural,
     BloqueReservaVial,
+    BloqueRiesgosGeotecnicos,
     BloqueValorReferencia,
     Centroide,
     ContextoAdministrativo,
+    ContextoSocioeconomico,
+    EntornoRegulatorio,
     EvidenciaNormativa,
     ItemEvidenciaNormativa,
     Localidad,
     Lote,
+    PatrimonioCultural,
+    RiesgoGeotecnicos,
     SourceTrace,
     UPL,
     Warning,
@@ -540,6 +550,41 @@ class ServidorLotes:
             return _error_de_fuente(r_destino)
         destino = r_destino
 
+        # --- Segunda ronda de consultas paralelas: 5 bloques adicionales F6 ---
+        # Cada bloque degrada independientemente (FR-012): un fallo en una fuente
+        # produce un bloque con estado "no_encontrado" y warning, sin interrumpir
+        # las demas consultas. Los errores 5xx se propagan como FUENTE_5XX fatal
+        # (FR-009) porque return_exceptions captura todas las excepciones.
+        t_geotecnia = self._arcgis.consultar_riesgos_geotecnicos(
+            lote.centroid.lng, lote.centroid.lat
+        )
+        t_socio = self._arcgis.consultar_contexto_socioeconomico(
+            lote.centroid.lng, lote.centroid.lat
+        )
+        t_regulatorio = self._arcgis.consultar_entorno_regulatorio(
+            lote.centroid.lng, lote.centroid.lat
+        )
+        t_patrimonio = self._arcgis.consultar_patrimonio_cultural(
+            lote.centroid.lng, lote.centroid.lat
+        )
+        t_movilidad = self._arcgis.consultar_acceso_movilidad(
+            lote.centroid.lng, lote.centroid.lat
+        )
+        (
+            r_geotecnia,
+            r_socio,
+            r_regulatorio,
+            r_patrimonio,
+            r_movilidad,
+        ) = await asyncio.gather(
+            t_geotecnia,
+            t_socio,
+            t_regulatorio,
+            t_patrimonio,
+            t_movilidad,
+            return_exceptions=True,
+        )
+
         # --- Bloques con el patron {estado, dato, interpretation, source_trace} ---
         reserva = contexto.reserva_vial
         if reserva.estado == "disponible":
@@ -651,6 +696,302 @@ class ServidorLotes:
             source_trace=destino.source_trace,
         )
 
+        # --- Bloques adicionales F6: construccion con patron {estado, dato, interpretation, source_trace} ---
+        # Cada bloque degrada independientemente (FR-012): errores tipados del
+        # provider se capturan con return_exceptions y producen "no_encontrado"
+        # con warning; un 5xx fatal se propagaria como FUENTE_5XX (FR-009).
+
+        # Bloque geotechnical_risks
+        if isinstance(r_geotecnia, BaseException):
+            bloque_geotecnia = BloqueRiesgosGeotecnicos(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los datos geotécnicos.",
+                source_trace=SourceTrace(
+                    source_name="emergencias/gestionriesgos",
+                    layer_id="2",
+                    service_url=f"{RAIZ_ARCGIS}/emergencias/gestionriesgos/MapServer",
+                    data_vigencia="2023",
+                    query_timestamp=_ahora_iso(),
+                ),
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": "Bloque geotechnical_risks degradado: error al consultar la fuente.",
+            })
+        else:
+            riesgos_geotec, trace_geotecnia = r_geotecnia
+            tiene_datos_geotec = any([
+                riesgos_geotec.amenaza_movimientos,
+                riesgos_geotec.geologia,
+                riesgos_geotec.respuesta_sismica,
+                riesgos_geotec.zonificacion_geotecnica,
+            ])
+            if tiene_datos_geotec:
+                partes_geotec = []
+                if riesgos_geotec.amenaza_movimientos:
+                    partes_geotec.append(f"amenaza: {riesgos_geotec.amenaza_movimientos}")
+                if riesgos_geotec.geologia:
+                    partes_geotec.append(f"geología: {riesgos_geotec.geologia}")
+                if riesgos_geotec.respuesta_sismica:
+                    partes_geotec.append(f"sísmica: {riesgos_geotec.respuesta_sismica}")
+                if riesgos_geotec.zonificacion_geotecnica:
+                    partes_geotec.append(
+                        f"zonificación: {riesgos_geotec.zonificacion_geotecnica}"
+                    )
+                interpretation_geotec = (
+                    f"Clasificación geotécnica del lote: {', '.join(partes_geotec)}."
+                )
+            else:
+                interpretation_geotec = (
+                    "No se encontraron datos geotécnicos para el lote en la fuente consultada."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque geotechnical_risks no encontrado: no se hallaron "
+                        "datos geotécnicos para el lote."
+                    ),
+                })
+            bloque_geotecnia = BloqueRiesgosGeotecnicos(
+                estado="disponible" if tiene_datos_geotec else "no_encontrado",
+                dato=riesgos_geotec if tiene_datos_geotec else None,
+                interpretation=interpretation_geotec,
+                source_trace=trace_geotecnia,
+            )
+
+        # Bloque socioeconomic_context
+        if isinstance(r_socio, BaseException):
+            bloque_socio = BloqueContextoSocioeconomico(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los datos socioeconómicos.",
+                source_trace=SourceTrace(
+                    source_name="Estratificación socioeconómica",
+                    layer_id="1",
+                    service_url=f"{RAIZ_ARCGIS}/ordenamientoterritorial/estratificacion/MapServer",
+                    data_vigencia="2024",
+                    query_timestamp=_ahora_iso(),
+                ),
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": "Bloque socioeconomic_context degradado: error al consultar la fuente.",
+            })
+        else:
+            contexto_socio, trace_socio = r_socio
+            tiene_datos_socio = any([
+                contexto_socio.estrato is not None,
+                contexto_socio.uso_predominante,
+                contexto_socio.altura_media is not None,
+                contexto_socio.mediana_avaluo is not None,
+            ])
+            partes_socio = []
+            if contexto_socio.estrato is not None:
+                partes_socio.append(f"estrato {contexto_socio.estrato}")
+            if contexto_socio.uso_predominante:
+                partes_socio.append(f"uso: {contexto_socio.uso_predominante}")
+            if contexto_socio.altura_media is not None:
+                partes_socio.append(f"altura media: {_formatear_numero(contexto_socio.altura_media)} pisos")
+            if contexto_socio.mediana_avaluo is not None:
+                partes_socio.append(
+                    f"avalúo catastral mediano: {_formatear_numero(contexto_socio.mediana_avaluo)} COP"
+                )
+            if partes_socio:
+                interpretation_socio = (
+                    f"Contexto socioeconómico del lote: {', '.join(partes_socio)}."
+                )
+            else:
+                interpretation_socio = (
+                    "No se encontraron datos socioeconómicos para el lote en la fuente consultada."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque socioeconomic_context no encontrado: no se hallaron "
+                        "datos socioeconómicos para el lote."
+                    ),
+                })
+            bloque_socio = BloqueContextoSocioeconomico(
+                estado="disponible" if tiene_datos_socio else "no_encontrado",
+                dato=contexto_socio if tiene_datos_socio else None,
+                interpretation=interpretation_socio,
+                source_trace=trace_socio,
+            )
+
+        # Bloque regulatory_environment
+        if isinstance(r_regulatorio, BaseException):
+            bloque_regulatorio = BloqueEntornoRegulatorio(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los datos regulatorios.",
+                source_trace=SourceTrace(
+                    source_name="Licencias de construcción aprobadas",
+                    layer_id="3",
+                    service_url=f"{RAIZ_ARCGIS}/ordenamientoterritorial/licenciasconstruccion/MapServer",
+                    data_vigencia="2025",
+                    query_timestamp=_ahora_iso(),
+                ),
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": "Bloque regulatory_environment degradado: error al consultar la fuente.",
+            })
+        else:
+            entorno_reg, trace_regulatorio = r_regulatorio
+            tiene_datos_reg = any([
+                entorno_reg.licencias_encontradas is not None,
+                entorno_reg.zona_plusvalia is not None,
+            ])
+            partes_reg = []
+            if entorno_reg.licencias_encontradas is not None:
+                plural_lic = "s" if entorno_reg.licencias_encontradas != 1 else ""
+                partes_reg.append(
+                    f"{entorno_reg.licencias_encontradas} licencia{plural_lic} aprobada{plural_lic}"
+                )
+            if entorno_reg.zona_plusvalia is True:
+                detalle_plan = ""
+                if entorno_reg.nombre_plan_plusvalia:
+                    detalle_plan = f" ({entorno_reg.nombre_plan_plusvalia})"
+                partes_reg.append(f"zona de plusvalía{detalle_plan}")
+            if partes_reg:
+                interpretation_reg = (
+                    f"Entorno regulatorio del lote: {', '.join(partes_reg)}."
+                )
+            else:
+                interpretation_reg = (
+                    "No se encontraron datos regulatorios para el lote en la fuente consultada."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque regulatory_environment no encontrado: no se hallaron "
+                        "datos regulatorios para el lote."
+                    ),
+                })
+            bloque_regulatorio = BloqueEntornoRegulatorio(
+                estado="disponible" if tiene_datos_reg else "no_encontrado",
+                dato=entorno_reg if tiene_datos_reg else None,
+                interpretation=interpretation_reg,
+                source_trace=trace_regulatorio,
+            )
+
+        # Bloque cultural_heritage
+        if isinstance(r_patrimonio, BaseException):
+            bloque_patrimonio = BloquePatrimonioCultural(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los datos de patrimonio cultural.",
+                source_trace=SourceTrace(
+                    source_name="Bienes de Interés Cultural",
+                    layer_id="1",
+                    service_url=f"{RAIZ_ARCGIS}/recreaciondeporte/bienesinterescultural/MapServer",
+                    data_vigencia="2023",
+                    query_timestamp=_ahora_iso(),
+                ),
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": "Bloque cultural_heritage degradado: error al consultar la fuente.",
+            })
+        else:
+            patrimonio, trace_patrimonio = r_patrimonio
+            tiene_datos_pat = any([
+                patrimonio.bic_cercano is not None,
+                patrimonio.zona_arqueologica is not None,
+            ])
+            partes_pat = []
+            if patrimonio.bic_cercano is True:
+                detalle_bic = ""
+                if patrimonio.nombre_bic:
+                    detalle_bic = f" ({patrimonio.nombre_bic})"
+                partes_pat.append(f"BIC cercano{detalle_bic}")
+            if patrimonio.zona_arqueologica is True:
+                partes_pat.append("zona arqueológica")
+            if partes_pat:
+                interpretation_pat = (
+                    f"Patrimonio cultural del lote: {', '.join(partes_pat)}."
+                )
+            else:
+                interpretation_pat = (
+                    "No se encontraron elementos de patrimonio cultural para el lote "
+                    "en la fuente consultada."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque cultural_heritage no encontrado: no se hallaron "
+                        "elementos de patrimonio cultural para el lote."
+                    ),
+                })
+            bloque_patrimonio = BloquePatrimonioCultural(
+                estado="disponible" if tiene_datos_pat else "no_encontrado",
+                dato=patrimonio if tiene_datos_pat else None,
+                interpretation=interpretation_pat,
+                source_trace=trace_patrimonio,
+            )
+
+        # Bloque transit_access
+        if isinstance(r_movilidad, BaseException):
+            bloque_movilidad = BloqueAccesoMovilidad(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los datos de transporte público.",
+                source_trace=SourceTrace(
+                    source_name="Transporte público — Estaciones TransMilenio",
+                    layer_id="1",
+                    service_url=f"{RAIZ_ARCGIS}/movilidad/transportepublico/MapServer",
+                    data_vigencia="2025",
+                    query_timestamp=_ahora_iso(),
+                ),
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": "Bloque transit_access degradado: error al consultar la fuente.",
+            })
+        else:
+            movilidad, trace_movilidad = r_movilidad
+            tiene_datos_mov = any([
+                movilidad.estaciones_transmilenio is not None,
+                movilidad.paraderos_sitp is not None,
+                movilidad.estaciones_metro is not None,
+            ])
+            partes_mov = []
+            if movilidad.estaciones_transmilenio is not None:
+                plural_tm = "s" if movilidad.estaciones_transmilenio != 1 else ""
+                partes_mov.append(
+                    f"{movilidad.estaciones_transmilenio} estación{plural_tm} TransMilenio"
+                )
+            if movilidad.paraderos_sitp is not None:
+                plural_sitp = "s" if movilidad.paraderos_sitp != 1 else ""
+                partes_mov.append(
+                    f"{movilidad.paraderos_sitp} paradero{plural_sitp} SITP"
+                )
+            if movilidad.estaciones_metro is not None:
+                plural_metro = "s" if movilidad.estaciones_metro != 1 else ""
+                partes_mov.append(
+                    f"{movilidad.estaciones_metro} estación{plural_metro} Metro"
+                )
+            if movilidad.estacion_cercana:
+                partes_mov.append(f"estación más cercana: {movilidad.estacion_cercana}")
+            if partes_mov:
+                interpretation_mov = (
+                    f"Acceso a transporte público del lote: {', '.join(partes_mov)}."
+                )
+            else:
+                interpretation_mov = (
+                    "No se encontraron estaciones de transporte público cercanas al lote "
+                    "en la fuente consultada."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque transit_access no encontrado: no se identificaron "
+                        "estaciones de transporte público cercanas al lote."
+                    ),
+                })
+            bloque_movilidad = BloqueAccesoMovilidad(
+                estado="disponible" if tiene_datos_mov else "no_encontrado",
+                dato=movilidad if tiene_datos_mov else None,
+                interpretation=interpretation_mov,
+                source_trace=trace_movilidad,
+            )
+
         # --- Evidencia normativa (consulta explicita o automatica; degradacion por bloque) ---
         consulta_automatica = consulta is None
         consulta_efectiva = (
@@ -733,6 +1074,11 @@ class ServidorLotes:
             market_context=bloque_market,
             environment_context=bloque_environment,
             economic_context=bloque_economic,
+            geotechnical_risks=bloque_geotecnia,
+            socioeconomic_context=bloque_socio,
+            regulatory_environment=bloque_regulatorio,
+            cultural_heritage=bloque_patrimonio,
+            transit_access=bloque_movilidad,
             normative_evidence=evidencia,
         )
         score = calcular_score(bloques_evaluables)
@@ -746,6 +1092,11 @@ class ServidorLotes:
                 bloque_environment, extra_dato={"radio_m": RADIO_OBRAS_M}
             ),
             "economic_context": _bloque_a_contrato(bloque_economic),
+            "geotechnical_risks": _bloque_a_contrato(bloque_geotecnia),
+            "socioeconomic_context": _bloque_a_contrato(bloque_socio),
+            "regulatory_environment": _bloque_a_contrato(bloque_regulatorio),
+            "cultural_heritage": _bloque_a_contrato(bloque_patrimonio),
+            "transit_access": _bloque_a_contrato(bloque_movilidad),
             "normative_evidence": evidencia.model_dump(),
             "feasibility_score": score.model_dump(),
             "warnings": warnings,

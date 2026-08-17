@@ -49,10 +49,15 @@ from pydantic import BaseModel
 
 from app.errores import FuenteDatosInvalidosError
 from app.models import (
+    AccesoMovilidad,
     ContextoTematico,
+    ContextoSocioeconomico,
     DestinoEconomico,
+    EntornoRegulatorio,
     ObraPublica,
+    PatrimonioCultural,
     ReservaVial,
+    RiesgoGeotecnicos,
     SourceTrace,
     UsoEconomico,
     ValorReferencia,
@@ -80,6 +85,21 @@ VIGENCIAS_DEFAULT: dict[str, str] = {
     "reservavial": "2019-08-15",
     "obraspublicas": "2025",
     "predio": "2026",
+    "geotecnia_amenaza": "2023",
+    "geotecnia_geologia": "2023",
+    "geotecnia_sismo": "2023",
+    "geotecnia_zonificacion": "2023",
+    "estratificacion": "2024",
+    "usopredominante": "2024",
+    "alturamedia": "2024",
+    "medianaavaluo": "2024",
+    "licencias": "2025",
+    "plusvalia": "2024",
+    "bic": "2023",
+    "planarqueologico": "2023",
+    "transmilenio": "2025",
+    "sitp": "2025",
+    "metro": "2025",
 }
 
 
@@ -103,6 +123,21 @@ _NOMBRES_CANONICOS = {
     "reservavial": "ordenamientoterritorial/reservavial",
     "obraspublicas": "gestionpublica/obraspublicas",
     "predio": "Predio (catastro/lote)",
+    "geotecnia_amenaza": "Gestión de Riesgos — Amenaza movimientos en masa urbano",
+    "geotecnia_geologia": "Gestión de Riesgos — Geología Rural",
+    "geotecnia_sismo": "Gestión de Riesgos — Respuesta Sísmica",
+    "geotecnia_zonificacion": "Gestión de Riesgos — Zonificación Geotécnica",
+    "estratificacion": "Estratificación socioeconómica",
+    "usopredominante": "Uso predominante",
+    "alturamedia": "Altura media",
+    "medianaavaluo": "Mediana avalúo catastral",
+    "licencias": "Licencias de construcción aprobadas",
+    "plusvalia": "Plusvalía — Planes parciales",
+    "bic": "Bienes de Interés Cultural",
+    "planarqueologico": "Plan Arqueológico",
+    "transmilenio": "Transporte público — Estaciones TransMilenio",
+    "sitp": "Transporte público — Paraderos SITP",
+    "metro": "Metro Bogotá",
 }
 
 _URLS_CANONICOS = {
@@ -111,6 +146,21 @@ _URLS_CANONICOS = {
     "reservavial": f"{RAIZ_ARCGIS}/ordenamientoterritorial/reservavial/MapServer",
     "obraspublicas": f"{RAIZ_ARCGIS}/gestionpublica/obraspublicas/MapServer",
     "predio": f"{RAIZ_ARCGIS}/catastro/lote/MapServer",
+    "geotecnia_amenaza": f"{RAIZ_ARCGIS}/emergencias/gestionriesgos/MapServer",
+    "geotecnia_geologia": f"{RAIZ_ARCGIS}/emergencias/gestionriesgos/MapServer",
+    "geotecnia_sismo": f"{RAIZ_ARCGIS}/emergencias/gestionriesgos/MapServer",
+    "geotecnia_zonificacion": f"{RAIZ_ARCGIS}/emergencias/gestionriesgos/MapServer",
+    "estratificacion": f"{RAIZ_ARCGIS}/ordenamientoterritorial/estratificacion/MapServer",
+    "usopredominante": f"{RAIZ_ARCGIS}/catastro/usopredominante/MapServer",
+    "alturamedia": f"{RAIZ_ARCGIS}/catastro/alturamedia/MapServer",
+    "medianaavaluo": f"{RAIZ_ARCGIS}/catastro/medianaavaluocatastral/MapServer",
+    "licencias": f"{RAIZ_ARCGIS}/ordenamientoterritorial/licenciasconstruccion/MapServer",
+    "plusvalia": f"{RAIZ_ARCGIS}/ordenamientoterritorial/plusvalia/MapServer",
+    "bic": f"{RAIZ_ARCGIS}/recreaciondeporte/bienesinterescultural/MapServer",
+    "planarqueologico": f"{RAIZ_ARCGIS}/recreaciondeporte/planarqueologico/MapServer",
+    "transmilenio": f"{RAIZ_ARCGIS}/movilidad/transportepublico/MapServer",
+    "sitp": f"{RAIZ_ARCGIS}/movilidad/transportepublico/MapServer",
+    "metro": f"{RAIZ_ARCGIS}/movilidad/metrobogota/MapServer",
 }
 
 _CAPAS_CANONICOS = {
@@ -121,6 +171,21 @@ _CAPAS_CANONICOS = {
     "reservavial": "2",
     "obraspublicas": "0",
     "predio": "3",
+    "geotecnia_amenaza": "2",
+    "geotecnia_geologia": "5",
+    "geotecnia_sismo": "7",
+    "geotecnia_zonificacion": "8",
+    "estratificacion": "1",
+    "usopredominante": "0",
+    "alturamedia": "0",
+    "medianaavaluo": "0",
+    "licencias": "3",
+    "plusvalia": "1",
+    "bic": "1",
+    "planarqueologico": "9",
+    "transmilenio": "1",
+    "sitp": "5",
+    "metro": "0",
 }
 
 # --- Dominios versionados de la capa Predio (catastro/lote/MapServer/3) ---
@@ -515,6 +580,327 @@ class ArcGISProvider:
             source_trace=_construir_trace(capa, data_vigencia=vigencia),
         )
 
+    # --- Feature 6: Consultas de los 5 nuevos bloques del informe de factibilidad ---
+
+    async def consultar_riesgos_geotecnicos(
+        self, lng: float, lat: float
+    ) -> tuple[RiesgoGeotecnicos, SourceTrace]:
+        """Consulta 4 capas de gestionriesgos en paralelo: amenaza, geologia, sismo, zonificacion.
+
+        Retorna la tupla (riesgos, source_trace) con la clasificacion dominante
+        de cada capa y el nivel de amenaza mas critico encontrado.
+        """
+        claves = [
+            ("geotecnia_amenaza", "amenaza_movimientos"),
+            ("geotecnia_geologia", "geologia"),
+            ("geotecnia_sismo", "respuesta_sismica"),
+            ("geotecnia_zonificacion", "zonificacion_geotecnica"),
+        ]
+        tareas = [
+            self._consultar_feature_punto(self._capas[clave], lng, lat)
+            for clave, _ in claves
+        ]
+        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+
+        campos: dict[str, str | None] = {}
+        traza = _construir_trace(self._capas["geotecnia_amenaza"])
+        for (_, campo), resultado in zip(claves, resultados):
+            if isinstance(resultado, BaseException):
+                campos[campo] = None
+            else:
+                features = resultado.get("features") or []
+                if features:
+                    propiedades = features[0].get("properties") or {}
+                    campos[campo] = _primer_texto(
+                        propiedades, ["GEOTECNIA", "NOMBRE", "TIPO", "DESCRIPCION"]
+                    )
+                    vig = _vigencia_del_feature(propiedades)
+                    if vig:
+                        traza = _construir_trace(
+                            self._capas["geotecnia_amenaza"], data_vigencia=vig
+                        )
+                else:
+                    campos[campo] = None
+
+        nivel = _inferir_nivel_amenaza(campos.get("amenaza_movimientos"))
+        return (
+            RiesgoGeotecnicos(
+                amenaza_movimientos=campos.get("amenaza_movimientos"),
+                geologia=campos.get("geologia"),
+                respuesta_sismica=campos.get("respuesta_sismica"),
+                zonificacion_geotecnica=campos.get("zonificacion_geotecnica"),
+                nivel_amenaza=nivel,
+            ),
+            traza,
+        )
+
+    async def consultar_contexto_socioeconomico(
+        self, lng: float, lat: float
+    ) -> tuple[ContextoSocioeconomico, SourceTrace]:
+        """Consulta 4 capas socioeconomicas en paralelo: estratificacion, uso, altura, avaluo.
+
+        Retorna la tupla (contexto, source_trace) con el primer source_trace
+        disponible.
+        """
+        tareas = [
+            self._consultar_feature_punto(self._capas["estratificacion"], lng, lat),
+            self._consultar_feature_punto(self._capas["usopredominante"], lng, lat),
+            self._consultar_feature_punto(self._capas["alturamedia"], lng, lat),
+            self._consultar_feature_punto(self._capas["medianaavaluo"], lng, lat),
+        ]
+        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+
+        estrato: int | None = None
+        uso: str | None = None
+        altura: float | None = None
+        avaluo: float | None = None
+        traza = _construir_trace(self._capas["estratificacion"])
+
+        # Estratificacion (layer 1, SR PCS_CarMAGBOG)
+        r_estrat = resultados[0]
+        if not isinstance(r_estrat, BaseException):
+            features = r_estrat.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                estrato = _extraer_numero(propiedades, ["ESTRATO", "ESTRATA", "ESTRAT"])
+                if estrato is not None:
+                    estrato = int(estrato)
+                vig = _vigencia_del_feature(propiedades)
+                if vig:
+                    traza = _construir_trace(self._capas["estratificacion"], data_vigencia=vig)
+
+        # Uso predominante
+        r_uso = resultados[1]
+        if not isinstance(r_uso, BaseException):
+            features = r_uso.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                uso = _primer_texto(propiedades, ["GRUPOUSOECON", "USO", "GRUPO"])
+
+        # Altura media
+        r_altura = resultados[2]
+        if not isinstance(r_altura, BaseException):
+            features = r_altura.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                altura = _extraer_numero(propiedades, ["ALTURA", "ALTURAMEDIA", "PISOS"])
+
+        # Mediana avaluo
+        r_avaluo = resultados[3]
+        if not isinstance(r_avaluo, BaseException):
+            features = r_avaluo.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                avaluo = _extraer_numero(
+                    propiedades, ["MED_VALOR_CATAS", "VALOR", "AVALUO"]
+                )
+
+        return (
+            ContextoSocioeconomico(
+                estrato=estrato,
+                uso_predominante=uso,
+                altura_media=altura,
+                mediana_avaluo=avaluo,
+            ),
+            traza,
+        )
+
+    async def consultar_entorno_regulatorio(
+        self, lng: float, lat: float
+    ) -> tuple[EntornoRegulatorio, SourceTrace]:
+        """Consulta 2 capas regulatorias en paralelo: licencias y plusvalia.
+
+        Retorna la tupla (entorno, source_trace).
+        """
+        tareas = [
+            self._consultar_feature_punto(self._capas["licencias"], lng, lat),
+            self._consultar_feature_punto(self._capas["plusvalia"], lng, lat),
+        ]
+        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+
+        licencias_count: int | None = None
+        zona_plusvalia: bool | None = None
+        nombre_plan: str | None = None
+        traza = _construir_trace(self._capas["licencias"])
+
+        # Licencias
+        r_licencias = resultados[0]
+        if not isinstance(r_licencias, BaseException):
+            features = r_licencias.get("features") or []
+            if features:
+                licencias_count = len(features)
+                propiedades = features[0].get("properties") or {}
+                vig = _vigencia_del_feature(propiedades)
+                if vig:
+                    traza = _construir_trace(self._capas["licencias"], data_vigencia=vig)
+
+        # Plusvalia
+        r_plusvalia = resultados[1]
+        if not isinstance(r_plusvalia, BaseException):
+            features = r_plusvalia.get("features") or []
+            if features:
+                zona_plusvalia = True
+                propiedades = features[0].get("properties") or {}
+                nombre_plan = _primer_texto(
+                    propiedades, ["NOMBRE", "CODIGO_PLAN_PARCIAL", "NOMBRE_PLAN"]
+                )
+
+        return (
+            EntornoRegulatorio(
+                licencias_encontradas=licencias_count,
+                zona_plusvalia=zona_plusvalia,
+                nombre_plan_plusvalia=nombre_plan,
+            ),
+            traza,
+        )
+
+    async def consultar_patrimonio_cultural(
+        self, lng: float, lat: float
+    ) -> tuple[PatrimonioCultural, SourceTrace]:
+        """Consulta 2 capas de patrimonio cultural en paralelo: BIC y plan arqueologico.
+
+        Retorna la tupla (patrimonio, source_trace).
+        """
+        tareas = [
+            self._consultar_feature_punto(self._capas["bic"], lng, lat),
+            self._consultar_feature_punto(self._capas["planarqueologico"], lng, lat),
+        ]
+        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+
+        bic_cercano: bool | None = None
+        nombre_bic: str | None = None
+        zona_arqueologica: bool | None = None
+        traza = _construir_trace(self._capas["bic"])
+
+        # BIC
+        r_bic = resultados[0]
+        if not isinstance(r_bic, BaseException):
+            features = r_bic.get("features") or []
+            if features:
+                bic_cercano = True
+                propiedades = features[0].get("properties") or {}
+                nombre_bic = _primer_texto(propiedades, ["NOMBRE", "CATEGORIA", "DENOMINACION"])
+                vig = _vigencia_del_feature(propiedades)
+                if vig:
+                    traza = _construir_trace(self._capas["bic"], data_vigencia=vig)
+
+        # Plan arqueologico
+        r_arq = resultados[1]
+        if not isinstance(r_arq, BaseException):
+            features = r_arq.get("features") or []
+            if features:
+                zona_arqueologica = True
+
+        return (
+            PatrimonioCultural(
+                bic_cercano=bic_cercano,
+                nombre_bic=nombre_bic,
+                zona_arqueologica=zona_arqueologica,
+            ),
+            traza,
+        )
+
+    async def consultar_acceso_movilidad(
+        self, lng: float, lat: float
+    ) -> tuple[AccesoMovilidad, SourceTrace]:
+        """Consulta 3 capas de transporte publico con radio: TransMilenio, SITP, Metro.
+
+        Usa distance + units=esriSRUnit_Meter para busqueda por proximidad
+        (patron consultar_obras_publicas_radio).
+        """
+        tareas = [
+            self._consultar_radio(
+                self._capas["transmilenio"], lng, lat, 800,
+                ["ETRNOMBRE", "NOMBRE", "ESTACION"],
+            ),
+            self._consultar_radio(
+                self._capas["sitp"], lng, lat, 500,
+                ["PSINOMBRE", "NOMBRE", "PARADERO"],
+            ),
+            self._consultar_radio(
+                self._capas["metro"], lng, lat, 800,
+                ["REFNAME", "NOMBRE", "ESTACION"],
+            ),
+        ]
+        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+
+        count_tm: int | None = None
+        count_sitp: int | None = None
+        count_metro: int | None = None
+        estacion_cercana: str | None = None
+        traza = _construir_trace(self._capas["transmilenio"])
+
+        # TransMilenio
+        r_tm = resultados[0]
+        if not isinstance(r_tm, BaseException):
+            features = r_tm.get("features") or []
+            if features:
+                count_tm = len(features)
+                propiedades = features[0].get("properties") or {}
+                nombre_tm = _primer_texto(propiedades, ["ETRNOMBRE", "NOMBRE", "ESTACION"])
+                if nombre_tm and estacion_cercana is None:
+                    estacion_cercana = nombre_tm
+                vig = _vigencia_del_feature(propiedades)
+                if vig:
+                    traza = _construir_trace(self._capas["transmilenio"], data_vigencia=vig)
+
+        # SITP
+        r_sitp = resultados[1]
+        if not isinstance(r_sitp, BaseException):
+            features = r_sitp.get("features") or []
+            if features:
+                count_sitp = len(features)
+
+        # Metro
+        r_metro = resultados[2]
+        if not isinstance(r_metro, BaseException):
+            features = r_metro.get("features") or []
+            if features:
+                count_metro = len(features)
+                propiedades = features[0].get("properties") or {}
+                nombre_metro = _primer_texto(propiedades, ["REFNAME", "NOMBRE", "ESTACION"])
+                if nombre_metro and estacion_cercana is None:
+                    estacion_cercana = nombre_metro
+
+        return (
+            AccesoMovilidad(
+                estaciones_transmilenio=count_tm,
+                paraderos_sitp=count_sitp,
+                estaciones_metro=count_metro,
+                estacion_cercana=estacion_cercana,
+            ),
+            traza,
+        )
+
+    async def _consultar_feature_punto(
+        self, capa: CapaConfig, lng: float, lat: float
+    ) -> dict[str, Any]:
+        """Consulta un feature por punto usando los params estandar (inSR=4326)."""
+        return await self._consultar(capa, self._params_punto(lng, lat))
+
+    async def _consultar_radio(
+        self,
+        capa: CapaConfig,
+        lng: float,
+        lat: float,
+        radio_m: int,
+        campos_nombre: list[str],
+    ) -> dict[str, Any]:
+        """Consulta features en un radio alrededor del punto (patron obras_publicas_radio)."""
+        params = {
+            "f": "geojson",
+            "geometry": f"{lng},{lat}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "distance": str(radio_m),
+            "units": "esriSRUnit_Meter",
+            "outSR": "4326",
+            "returnGeometry": "false",
+            "outFields": "*",
+        }
+        return await self._consultar(capa, params)
+
     async def _consultar(self, capa: CapaConfig, params: dict[str, Any]) -> dict[str, Any]:
         """Consulta la capa ArcGIS delegando en las utilidades compartidas.
 
@@ -655,3 +1041,22 @@ def _traducir_dominio(dominio: dict[str, str], codigo: str | None) -> str | None
     if codigo is None:
         return None
     return dominio.get(codigo, codigo)
+
+
+def _inferir_nivel_amenaza(amenaza: str | None) -> str:
+    """Infiere el nivel de amenaza geotecnicos desde el campo GEOTECNIA.
+
+    Clasificacion basada en la terminologia comun de las capas de gestion de
+    riesgos de Bogota. Si no hay dato o la amenaza es None, retorna "desconocido".
+    Nunca inventa clasificaciones (FR-014).
+    """
+    if amenaza is None:
+        return "desconocido"
+    amenaza_lower = amenaza.lower()
+    if any(p in amenaza_lower for p in ["alto", "alto riesgo", "critico"]):
+        return "alto"
+    if any(p in amenaza_lower for p in ["medio", "medio riesgo", "moderado"]):
+        return "medio"
+    if any(p in amenaza_lower for p in ["bajo", "bajo riesgo", "normal"]):
+        return "bajo"
+    return "desconocido"

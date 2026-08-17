@@ -12,7 +12,7 @@ Reglas (data-model.md:205-227, research D3):
 - Negativas: reserva vial que afecta el lote -15; UPL ausente -5; cada bloque
   tematico/economico en no_encontrado -5; evidencia normativa vacia -5.
 - `score = clamp(50 + Σ, 0, 100)` entero.
-- `confidence` por cobertura de los 6 bloques evaluables: high >= 5 disponibles,
+- `confidence` por cobertura de los 11 bloques evaluables: high >= 5 disponibles,
   medium 3-4, low <= 2. Con confidence low, las reasons enumeran los faltantes.
 - `reasons`: textos fijos por regla con el dato interpolado y el source_name.
 - `rules_applied`: codigos de regla aplicados (auditoria interna).
@@ -25,9 +25,14 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from app.models import (
+    BloqueAccesoMovilidad,
+    BloqueContextoSocioeconomico,
     BloqueDestinoEconomico,
+    BloqueEntornoRegulatorio,
     BloqueObrasPublicas,
+    BloquePatrimonioCultural,
     BloqueReservaVial,
+    BloqueRiesgosGeotecnicos,
     BloqueValorReferencia,
     ContextoAdministrativo,
     EvidenciaNormativa,
@@ -40,30 +45,44 @@ PUNTOS_LOCALIDAD = 5
 PUNTOS_MERCADO = 10
 PUNTOS_ECONOMICO = 10
 PUNTOS_EVIDENCIA = 5
+PUNTOS_CONTEXTO_SOCIO = 5
+PUNTOS_ACCESO_MOVILIDAD = 5
 PENALIZACION_RESERVA_VIAL = 15
 PENALIZACION_UPL_AUSENTE = 5
 PENALIZACION_BLOQUE_NO_ENCONTRADO = 5
 PENALIZACION_EVIDENCIA_VACIA = 5
+PENALIZACION_RIESGO_GEOTECNICO_ALTO = 10
+PENALIZACION_PATRIMONIO_CULTURAL = 10
 
-# Los 6 bloques evaluables del confidence (research D3, data-model.md:221-223).
+# Los bloques evaluables del confidence (6 originales F3 + 5 nuevos F6).
 BLOQUES_EVALUABLES = (
     "administrative_context",
     "planning_constraints",
     "market_context",
     "environment_context",
     "economic_context",
+    "geotechnical_risks",
+    "socioeconomic_context",
+    "regulatory_environment",
+    "cultural_heritage",
+    "transit_access",
     "normative_evidence",
 )
 
 
 class BloquesEvaluables(BaseModel):
-    """Estructura tipada de los 6 bloques evaluables del score (data-model.md:99-113)."""
+    """Estructura tipada de los bloques evaluables del score (data-model)."""
 
     administrative_context: ContextoAdministrativo
     planning_constraints: BloqueReservaVial
     market_context: BloqueValorReferencia
     environment_context: BloqueObrasPublicas
     economic_context: BloqueDestinoEconomico
+    geotechnical_risks: BloqueRiesgosGeotecnicos
+    socioeconomic_context: BloqueContextoSocioeconomico
+    regulatory_environment: BloqueEntornoRegulatorio
+    cultural_heritage: BloquePatrimonioCultural
+    transit_access: BloqueAccesoMovilidad
     normative_evidence: EvidenciaNormativa
 
 
@@ -158,6 +177,29 @@ def _reglas_positivas(
             f"({bloques.normative_evidence.source_trace.source_name})."
         )
 
+    # Contexto socioeconomico disponible: mas datos = mejor confidence (F6)
+    if bloques.socioeconomic_context.estado == "disponible":
+        puntos += PUNTOS_CONTEXTO_SOCIO
+        reglas.append("r_contexto_socio")
+        razones.append(
+            "Contexto socioeconómico disponible: más datos para evaluar factibilidad."
+        )
+
+    # Acceso a movilidad con al menos una estacion (F6)
+    if (
+        bloques.transit_access.estado == "disponible"
+        and bloques.transit_access.dato is not None
+        and (
+            (bloques.transit_access.dato.estaciones_transmilenio or 0) > 0
+            or (bloques.transit_access.dato.estaciones_metro or 0) > 0
+        )
+    ):
+        puntos += PUNTOS_ACCESO_MOVILIDAD
+        reglas.append("r_acceso_movilidad")
+        razones.append(
+            "Acceso a transporte público disponible: estaciones de TransMilenio o Metro cercanas."
+        )
+
     return puntos, reglas, razones
 
 
@@ -206,6 +248,31 @@ def _reglas_negativas(
             f"Evidencia normativa vacía: penalización −{PENALIZACION_EVIDENCIA_VACIA}."
         )
 
+    # Riesgo geotecnico alto: penalizacion fuerte (F6)
+    if (
+        bloques.geotechnical_risks.estado == "disponible"
+        and bloques.geotechnical_risks.dato is not None
+        and bloques.geotechnical_risks.dato.nivel_amenaza == "alto"
+    ):
+        puntos += PENALIZACION_RIESGO_GEOTECNICO_ALTO
+        reglas.append("r_riesgo_geotec_alto")
+        razones.append(
+            f"Riesgo geotécnico alto: penalización −{PENALIZACION_RIESGO_GEOTECNICO_ALTO}."
+        )
+
+    # Patrimonio cultural: penalizacion si BIC o zona arqueologica (F6)
+    if bloques.cultural_heritage.estado == "disponible" and bloques.cultural_heritage.dato is not None:
+        tiene_patrimonio = (
+            bloques.cultural_heritage.dato.bic_cercano is True
+            or bloques.cultural_heritage.dato.zona_arqueologica is True
+        )
+        if tiene_patrimonio:
+            puntos += PENALIZACION_PATRIMONIO_CULTURAL
+            reglas.append("r_patrimonio_cultural")
+            razones.append(
+                f"Elementos de patrimonio cultural cercanos: penalización −{PENALIZACION_PATRIMONIO_CULTURAL}."
+            )
+
     return puntos, reglas, razones
 
 
@@ -218,6 +285,11 @@ def _bloques_con_estado(
         ("market_context", bloques.market_context),
         ("environment_context", bloques.environment_context),
         ("economic_context", bloques.economic_context),
+        ("geotechnical_risks", bloques.geotechnical_risks),
+        ("socioeconomic_context", bloques.socioeconomic_context),
+        ("regulatory_environment", bloques.regulatory_environment),
+        ("cultural_heritage", bloques.cultural_heritage),
+        ("transit_access", bloques.transit_access),
     ]
 
 
@@ -244,6 +316,11 @@ def _contar_bloques_disponibles(bloques: BloquesEvaluables) -> int:
             bloques.market_context.estado == "disponible",
             bloques.environment_context.estado == "disponible",
             bloques.economic_context.estado == "disponible",
+            bloques.geotechnical_risks.estado == "disponible",
+            bloques.socioeconomic_context.estado == "disponible",
+            bloques.regulatory_environment.estado == "disponible",
+            bloques.cultural_heritage.estado == "disponible",
+            bloques.transit_access.estado == "disponible",
             bool(bloques.normative_evidence.items),
         ]
     )
@@ -258,6 +335,11 @@ def _reasons_datos_faltantes(bloques: BloquesEvaluables) -> list[str]:
         "market_context": bloques.market_context.estado == "disponible",
         "environment_context": bloques.environment_context.estado == "disponible",
         "economic_context": bloques.economic_context.estado == "disponible",
+        "geotechnical_risks": bloques.geotechnical_risks.estado == "disponible",
+        "socioeconomic_context": bloques.socioeconomic_context.estado == "disponible",
+        "regulatory_environment": bloques.regulatory_environment.estado == "disponible",
+        "cultural_heritage": bloques.cultural_heritage.estado == "disponible",
+        "transit_access": bloques.transit_access.estado == "disponible",
         "normative_evidence": bool(bloques.normative_evidence.items),
     }
     return [f"Dato faltante: {nombre}." for nombre in BLOQUES_EVALUABLES if not disponibles[nombre]]

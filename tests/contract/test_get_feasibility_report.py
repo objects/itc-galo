@@ -61,8 +61,8 @@ def respuesta_normativa_con_norma(
     return respuesta
 
 
-async def test_reporte_por_chip_devuelve_los_10_bloques():
-    """CHIP valido -> reporte con exactamente los 10 bloques del contrato (FR-001)."""
+async def test_reporte_por_chip_devuelve_los_bloques():
+    """CHIP valido -> reporte con exactamente los bloques del contrato (FR-001)."""
     servidor = server_lotes_f3(normativa=NormativaProviderStub(respuesta=respuesta_normativa_ok()))
     try:
         reporte = await servidor.get_feasibility_report(chip=CHIP_VALIDO)

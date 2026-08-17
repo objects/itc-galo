@@ -180,6 +180,31 @@ def provider_arcgis_estandar(
                 if obras is not None
                 else [feature_obra("Parque Metropolitano"), feature_obra("Avenida Ciudad de Cali")]
             )
+        if "catastro/lote/MapServer/3/query" in url:
+            return respuesta_de(PAYLOAD_PREDIO)
+        # Bloques F5: retornar features vacias para URLs nuevas (degradacion no_encontrado)
+        if "emergencias/gestionriesgos" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "estratificacion" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "usopredominante" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "alturamedia" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "medianaavaluo" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "licenciasconstruccion" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "plusvalia" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "bienesinterescultural" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "planarqueologico" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "transportepublico" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "metrobogota" in url:
+            return httpx.Response(200, json=geojson([]))
         return httpx.Response(404, json={"error": f"sin respuesta simulada para {url}"})
 
     return ArcGISProvider(transport=httpx.MockTransport(handler))
@@ -280,6 +305,29 @@ def provider_arcgis_f3(lotes=None, valor=None, reserva=None, obras=None, predio=
             return respuesta_de(obras if obras is not None else PAYLOAD_OBRAS_BUFFER_500)
         if "catastro/lote/MapServer/3/query" in url:
             return respuesta_de(predio if predio is not None else PAYLOAD_PREDIO)
+        # Bloques F5: retornar features vacias para URLs nuevas (degradacion no_encontrado)
+        if "emergencias/gestionriesgos" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "estratificacion" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "usopredominante" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "alturamedia" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "medianaavaluo" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "licenciasconstruccion" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "plusvalia" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "bienesinterescultural" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "planarqueologico" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "transportepublico" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "metrobogota" in url:
+            return httpx.Response(200, json=geojson([]))
         return httpx.Response(404, json={"error": f"sin respuesta simulada para {url}"})
 
     return ArcGISProvider(transport=httpx.MockTransport(handler))
