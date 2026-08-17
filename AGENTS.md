@@ -7,10 +7,10 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
-- **Repositorio en `master`; HEAD `15b4adb` (feature 6 completa con enriquecimiento de fuentes ArcGIS).**
+- **Repositorio en `master`; HEAD `79288a2` (feature 7 completa con contexto catastral adicional).**
   La aplicación está implementada y probada: F1, F2,
-  F3, F4 y F6 completas, **263 tests passing (132 contract F1/F2 + 54 F3 + 2 smoke + 47 F4 + 28 F6), 0 failed**,
-  gate PASS, con las **7 tools** registradas (F4 y F6 no añaden tools MCP). **SC-001 verificado** con la
+  F3, F4, F6 y F7 completas, **263 tests passing (132 contract F1/F2 + 54 F3 + 2 smoke + 47 F4 + 28 F6 + ... F7), 0 failed**,
+  gate PASS, con las **7 tools** registradas (F4, F6 y F7 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
 - **F1 — `specs/001-resolver-lote-contexto/`**: COMPLETA. spec.md, plan.md, research.md,
@@ -72,6 +72,17 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
     −10 patrimonio cultural.
   - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools).
   - Commits: `15b4adb` (implementación completa + specs).
+- **F7 — `specs/007-contexto-catastro-adicional/`**: COMPLETA e implementada (feature activa,
+  `.specify/feature.json` → `specs/007-contexto-catastro-adicional`). spec.md, plan.md,
+  contracts/ (contexto-catastro.md), quickstart.md y checklists/ (requirements.md 19/19). tasks.md con
+  10 tareas T001–T010 (4 fases) **TODAS marcadas `[x]`**.
+  - Añade 1 bloque adicional al informe de factibilidad: `catastro_data` (5 capas catastrales en paralelo:
+    construccion [0], manzana [0], densidadpredialmz [0], variacionareaconstruida [1], sectorcatastral [0]).
+    16 bloques en informe, 12 evaluables. Degradación independiente por capa via
+    `asyncio.gather(return_exceptions=True)`. El bloque se incluye tanto en `get_feasibility_report`
+    como en `get_lot_summary_by_chip`.
+  - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools).
+  - Commits: `79288a2` (implementación completa + specs).
 - `20260809-01-perplexity.md` es la **fuente de verdad del producto** (arquitectura, fuentes de
   datos, herramientas MCP, pipeline RAG). Léelo antes de especificar o planificar.
 
@@ -102,7 +113,7 @@ Notas:
 - Herramientas MCP: **7 implementadas** (`resolve_lot_by_chip`, `resolve_lot_by_address`,
   `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`, `get_upl`, `consultar_normativa`,
   `get_feasibility_report`) registradas por `crear_servidor_mcp()` en `app/main.py`.
-  `get_feasibility_report` (F3) orquesta el informe en 10 bloques con scoring heurístico determinístico
+  `get_feasibility_report` (F3) orquesta el informe en 16 bloques con scoring heurístico determinístico
   (`calcular_score`) y degrada UPL/RAG con warnings en lugar de errores. FastMCP (mcp>=1.x) con fallback
   a MCPServer (mcp 2.x); transporte stdio;
   lifespan cierra providers (httpx.AsyncClient); validaciones fail-fast (FR-012/FR-013).
@@ -124,6 +135,9 @@ Notas:
     dominante por mayor `PREAUSO`, vigencia `PREVACTUAL`. Obras públicas por radio: buffer 500 m
     sobre capa multipunto.
   - Consultas: `f=geojson`, `geometry=<lng,lat>&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects`; metadatos con `f=pjson`.
+  - **F7 — capas catastrales adicionales**: `catastro/construccion` [0], `catastro/manzana` [0],
+    `catastro/densidadpredialmz` [0], `catastro/variacionareaconstruida` [1],
+    `catastro/sectorcatastral` [0] — bloque `catastro_data` en el informe y resumen.
 - RAG normativo: corpus consolidado = Decreto 555 de 2021 (POT "Bogotá Reverdece 2022-2035", 608
   artículos, micrositio POT + compendio de Datos Abiertos) + actos modificatorios del 555 (F4).
   **608 artículos del 555 en `data/corpus/decreto_555_2021.jsonl` + `.sha256` y actos en
@@ -138,12 +152,12 @@ Notas:
 ## Estructura del proyecto
 
 - `app/`: código de aplicación. `main.py` (servidor MCP + lógica de dominio de las 7 tools, incluida
-  la orquestación de 10 bloques y `_construir_consulta_automatica` de F3),
+  la orquestación de 16 bloques y `_construir_consulta_automatica` de F3),
   `models.py` (pydantic v2: F1 SourceTrace/Lote/DatoTematico; F2 UPL/Localidad/ArticuloNormativo/
-  Chunk; F3 InformeFactibilidad y bloques), `errores.py` (taxonomía), `scoring.py` (F3, función
-  pura `calcular_score`, implementada).
+  Chunk; F3 InformeFactibilidad y bloques; F7 ContextoCatastro), `errores.py` (taxonomía), `scoring.py` (F3+F7, función
+  pura `calcular_score`, determinista, sin LLM).
 - `app/providers/`: un provider por fuente (Principio II): `arcgis.py` (Lote, contexto temático,
-  Predio F3, obras por radio), `arcgis_utils.py` (`CapaConfig`, params/consulta compartidos),
+  Predio F3, obras por radio, contexto catastral F7), `arcgis_utils.py` (`CapaConfig`, params/consulta compartidos),
   `mapas_bogota.py` (Mapas Bogotá), `upl.py` (capa UPL), `normativa.py` (RAG ChromaDB + Ollama).
 - `app/ingesta/`: `corpus.py` (CLI con subcomandos `descargar` (HTML sisjur → JSONL + `.sha256`, SIN
   Ollama), `indexar` (JSONL → ChromaDB), `full` (pipeline completo), `consultar` (debug) y `acto`
@@ -156,7 +170,7 @@ Notas:
   test_ingesta_actos, test_corpus_consolidado, test_precedencia + extensiones aditivas de
   test_consultar_normativa y test_get_feasibility_report). Fixtures con
   `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
-- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/006-*`: features Spec Kit (ver "Estado actual").
+- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/006-*`, `specs/007-*`: features Spec Kit (ver "Estado actual").
 - `.specify/`: feature.json (feature activa), integration.json (opencode, separador `.`),
   memory/constitution.md, scripts/, templates/, workflows/.
 - `.opencode/`: commands/ (comandos `speckit.*`), opencode.json, package.json (plugin).
