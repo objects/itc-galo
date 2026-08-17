@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from app.models import (
     BloqueAccesoMovilidad,
+    BloqueCatastroData,
     BloqueContextoSocioeconomico,
     BloqueDestinoEconomico,
     BloqueEntornoRegulatorio,
@@ -54,7 +55,7 @@ PENALIZACION_EVIDENCIA_VACIA = 5
 PENALIZACION_RIESGO_GEOTECNICO_ALTO = 10
 PENALIZACION_PATRIMONIO_CULTURAL = 10
 
-# Los bloques evaluables del confidence (6 originales F3 + 5 nuevos F6).
+# Los bloques evaluables del confidence (6 originales F3 + 6 nuevos F6/F7).
 BLOQUES_EVALUABLES = (
     "administrative_context",
     "planning_constraints",
@@ -66,6 +67,7 @@ BLOQUES_EVALUABLES = (
     "regulatory_environment",
     "cultural_heritage",
     "transit_access",
+    "catastro_data",
     "normative_evidence",
 )
 
@@ -83,6 +85,7 @@ class BloquesEvaluables(BaseModel):
     regulatory_environment: BloqueEntornoRegulatorio
     cultural_heritage: BloquePatrimonioCultural
     transit_access: BloqueAccesoMovilidad
+    catastro_data: BloqueCatastroData
     normative_evidence: EvidenciaNormativa
 
 
@@ -290,6 +293,7 @@ def _bloques_con_estado(
         ("regulatory_environment", bloques.regulatory_environment),
         ("cultural_heritage", bloques.cultural_heritage),
         ("transit_access", bloques.transit_access),
+        ("catastro_data", bloques.catastro_data),
     ]
 
 
@@ -321,6 +325,7 @@ def _contar_bloques_disponibles(bloques: BloquesEvaluables) -> int:
             bloques.regulatory_environment.estado == "disponible",
             bloques.cultural_heritage.estado == "disponible",
             bloques.transit_access.estado == "disponible",
+            bloques.catastro_data.estado == "disponible",
             bool(bloques.normative_evidence.items),
         ]
     )
@@ -340,6 +345,7 @@ def _reasons_datos_faltantes(bloques: BloquesEvaluables) -> list[str]:
         "regulatory_environment": bloques.regulatory_environment.estado == "disponible",
         "cultural_heritage": bloques.cultural_heritage.estado == "disponible",
         "transit_access": bloques.transit_access.estado == "disponible",
+        "catastro_data": bloques.catastro_data.estado == "disponible",
         "normative_evidence": bool(bloques.normative_evidence.items),
     }
     return [f"Dato faltante: {nombre}." for nombre in BLOQUES_EVALUABLES if not disponibles[nombre]]

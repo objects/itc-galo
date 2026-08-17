@@ -113,6 +113,11 @@ def _bloque_no_encontrado(tipo: str):
         return BloqueAccesoMovilidad(
             estado="no_encontrado", dato=None, interpretation="...", source_trace=_trace("transmilenio")
         )
+    if tipo == "catastro":
+        from app.models import BloqueCatastroData
+        return BloqueCatastroData(
+            estado="no_encontrado", dato=None, interpretation="...", source_trace=_trace("construccion")
+        )
     return BloqueDestinoEconomico(
         estado="no_encontrado", dato=None, interpretation="...", source_trace=_trace("predio")
     )
@@ -193,6 +198,7 @@ def _bloques_felices() -> BloquesEvaluables:
         regulatory_environment=_bloque_no_encontrado("regulatory"),
         cultural_heritage=_bloque_no_encontrado("cultural"),
         transit_access=_bloque_no_encontrado("transit"),
+        catastro_data=_bloque_no_encontrado("catastro"),
         normative_evidence=_evidencia_con_item(),
     )
 
@@ -235,6 +241,7 @@ def _bloques_completos() -> BloquesEvaluables:
         regulatory_environment=_bloque_no_encontrado("regulatory"),
         cultural_heritage=_bloque_no_encontrado("cultural"),
         transit_access=_bloque_no_encontrado("transit"),
+        catastro_data=_bloque_no_encontrado("catastro"),
         normative_evidence=_evidencia_con_item(),
     )
 
@@ -245,7 +252,7 @@ def test_score_base_es_50():
 
 
 def test_score_con_todo_no_encontrado_y_sin_upl_aplica_penalizaciones():
-    """Sin UPL, 4 bloques no_encontrado y evidencia vacia: 50 - 5 - 20 - 5 = 20."""
+    """Sin UPL, 10 bloques no_encontrado y evidencia vacia: 50 - 5 - 50 - 5 = -10 -> 0."""
     bloques = BloquesEvaluables(
         administrative_context=_contexto_sin_upl(),
         planning_constraints=_bloque_no_encontrado("planning"),
@@ -257,11 +264,12 @@ def test_score_con_todo_no_encontrado_y_sin_upl_aplica_penalizaciones():
         regulatory_environment=_bloque_no_encontrado("regulatory"),
         cultural_heritage=_bloque_no_encontrado("cultural"),
         transit_access=_bloque_no_encontrado("transit"),
+        catastro_data=_bloque_no_encontrado("catastro"),
         normative_evidence=_evidencia_vacia(),
     )
     resultado = calcular_score(bloques)
 
-    # 50 - 5 (UPL) - 9*5 (9 bloques no_encontrado: 4 originales + 5 nuevos) - 5 (evidencia vacia) = -5 -> 0
+    # 50 - 5 (UPL) - 10*5 (10 bloques no_encontrado: 5 originales + 5 nuevos) - 5 (evidencia vacia) = -10 -> 0
     assert resultado.score == 0
     assert resultado.confidence == "low"
     assert "r_upl_ausente" in resultado.rules_applied
@@ -299,11 +307,12 @@ def test_reserva_vial_que_afecta_penaliza_15_con_razon_trazable():
         regulatory_environment=_bloque_no_encontrado("regulatory"),
         cultural_heritage=_bloque_no_encontrado("cultural"),
         transit_access=_bloque_no_encontrado("transit"),
+        catastro_data=_bloque_no_encontrado("catastro"),
         normative_evidence=_evidencia_vacia(),
     )
     resultado = calcular_score(bloques)
 
-    # 50 - reserva 15 - UPL ausente 5 - 8 bloques no_encontrado 40 - evidencia vacia 5 = -15 -> 0
+    # 50 - reserva 15 - UPL ausente 5 - 9 bloques no_encontrado 45 - evidencia vacia 5 = -20 -> 0
     assert resultado.score == 0
     assert "r_reserva_vial" in resultado.rules_applied
     razon = next(r for r in resultado.reasons if "Reserva vial afecta" in r)
@@ -312,10 +321,10 @@ def test_reserva_vial_que_afecta_penaliza_15_con_razon_trazable():
 
 
 def test_puntos_positivos_por_upl_localidad_mercado_economico_y_evidencia():
-    """Flujo feliz parcial: 50 + 10 + 5 + 10 + 10 + 5 - 35 (7 no_encontrado) = 55."""
+    """Flujo feliz parcial: 50 + 10 + 5 + 10 + 10 + 5 - 40 (8 no_encontrado) = 50."""
     resultado = calcular_score(_bloques_felices())
 
-    assert resultado.score == 55
+    assert resultado.score == 50
     assert resultado.confidence == "medium"  # 4 de 11 bloques evaluables disponibles (admin, market, economic, evidence)
     razones = "\n".join(resultado.reasons)
     assert "UPL resuelta: UPL24 Chapinero" in razones
@@ -328,15 +337,15 @@ def test_puntos_positivos_por_upl_localidad_mercado_economico_y_evidencia():
 
 
 def test_confidence_high_con_6_bloques_disponibles():
-    """Cobertura de los bloques evaluables -> high (6 de 11 disponibles).
+    """Cobertura de los bloques evaluables -> high (6 de 12 disponibles).
 
     Maximo del contrato con estos bloques: 50 + 10 (upl) + 5 (localidad) + 10 (mercado)
-    + 10 (economico) + 5 (evidencia) - 25 (5 no_encontrado nuevos) = 65.
+    + 10 (economico) + 5 (evidencia) - 30 (6 no_encontrado nuevos) = 60.
     """
     resultado = calcular_score(_bloques_completos())
 
     assert resultado.confidence == "high"
-    assert resultado.score == 65
+    assert resultado.score == 60
     assert "r_environment" not in resultado.rules_applied
 
 
@@ -353,13 +362,14 @@ def test_confidence_low_con_2_o_menos_bloques_y_reasons_de_datos_faltantes():
         regulatory_environment=_bloque_no_encontrado("regulatory"),
         cultural_heritage=_bloque_no_encontrado("cultural"),
         transit_access=_bloque_no_encontrado("transit"),
+        catastro_data=_bloque_no_encontrado("catastro"),
         normative_evidence=_evidencia_vacia(),
     )
     resultado = calcular_score(bloques)
 
     assert resultado.confidence == "low"
     faltantes = [r for r in resultado.reasons if r.startswith("Dato faltante:")]
-    assert len(faltantes) == 10
+    assert len(faltantes) == 11
     nombres_faltantes = {f.replace("Dato faltante: ", "").rstrip(".") for f in faltantes}
     assert nombres_faltantes == {
         "administrative_context",
@@ -371,6 +381,7 @@ def test_confidence_low_con_2_o_menos_bloques_y_reasons_de_datos_faltantes():
         "regulatory_environment",
         "cultural_heritage",
         "transit_access",
+        "catastro_data",
         "normative_evidence",
     }
 

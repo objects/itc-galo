@@ -50,6 +50,7 @@ from pydantic import BaseModel
 from app.errores import FuenteDatosInvalidosError
 from app.models import (
     AccesoMovilidad,
+    ContextoCatastro,
     ContextoTematico,
     ContextoSocioeconomico,
     DestinoEconomico,
@@ -100,6 +101,11 @@ VIGENCIAS_DEFAULT: dict[str, str] = {
     "transmilenio": "2025",
     "sitp": "2025",
     "metro": "2025",
+    "construccion": "2024",
+    "manzana_catastro": "2024",
+    "densidad_predial": "2024",
+    "variacion_area": "2024",
+    "sector_catastral": "2024",
 }
 
 
@@ -138,6 +144,11 @@ _NOMBRES_CANONICOS = {
     "transmilenio": "Transporte público — Estaciones TransMilenio",
     "sitp": "Transporte público — Paraderos SITP",
     "metro": "Metro Bogotá",
+    "construccion": "Catastro — Construcción",
+    "manzana_catastro": "Catastro — Manzana",
+    "densidad_predial": "Catastro — Densidad Predial",
+    "variacion_area": "Catastro — Variación Área Construida",
+    "sector_catastral": "Catastro — Sector Catastral",
 }
 
 _URLS_CANONICOS = {
@@ -161,6 +172,11 @@ _URLS_CANONICOS = {
     "transmilenio": f"{RAIZ_ARCGIS}/movilidad/transportepublico/MapServer",
     "sitp": f"{RAIZ_ARCGIS}/movilidad/transportepublico/MapServer",
     "metro": f"{RAIZ_ARCGIS}/movilidad/metrobogota/MapServer",
+    "construccion": f"{RAIZ_ARCGIS}/catastro/construccion/MapServer",
+    "manzana_catastro": f"{RAIZ_ARCGIS}/catastro/manzana/MapServer",
+    "densidad_predial": f"{RAIZ_ARCGIS}/catastro/densidadpredialmz/MapServer",
+    "variacion_area": f"{RAIZ_ARCGIS}/catastro/variacionareaconstruida/MapServer",
+    "sector_catastral": f"{RAIZ_ARCGIS}/catastro/sectorcatastral/MapServer",
 }
 
 _CAPAS_CANONICOS = {
@@ -186,6 +202,11 @@ _CAPAS_CANONICOS = {
     "transmilenio": "1",
     "sitp": "5",
     "metro": "0",
+    "construccion": "0",
+    "manzana_catastro": "0",
+    "densidad_predial": "0",
+    "variacion_area": "1",
+    "sector_catastral": "0",
 }
 
 # --- Dominios versionados de la capa Predio (catastro/lote/MapServer/3) ---
@@ -868,6 +889,112 @@ class ArcGISProvider:
                 paraderos_sitp=count_sitp,
                 estaciones_metro=count_metro,
                 estacion_cercana=estacion_cercana,
+            ),
+            traza,
+        )
+
+    async def consultar_contexto_catastro(
+        self, lng: float, lat: float
+    ) -> tuple[ContextoCatastro, SourceTrace]:
+        """Consulta 5 capas catastrales en paralelo: construccion, manzana, densidad, variacion, sector.
+
+        Retorna la tupla (contexto_catastro, source_trace) con el primer
+        source_trace disponible. Cada capa se degrade independientemente
+        via asyncio.gather(return_exceptions=True).
+        """
+        claves = [
+            "construccion",
+            "manzana_catastro",
+            "densidad_predial",
+            "variacion_area",
+            "sector_catastral",
+        ]
+        tareas = [
+            self._consultar_feature_punto(self._capas[clave], lng, lat)
+            for clave in claves
+        ]
+        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+
+        construccion: dict[str, Any] | None = None
+        manzana: dict[str, Any] | None = None
+        densidad_predial: dict[str, Any] | None = None
+        variacion_area: dict[str, Any] | None = None
+        sector_catastral: str | None = None
+        traza = _construir_trace(self._capas["construccion"])
+
+        # Construccion (layer 0): CONCODIGO, CONNPISOS, CONALTURA, etc.
+        r_construccion = resultados[0]
+        if not isinstance(r_construccion, BaseException):
+            features = r_construccion.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                construccion = {
+                    "codigo": _primer_texto(propiedades, ["CONCODIGO"]),
+                    "pisos": _extraer_numero(propiedades, ["CONNPISOS"]),
+                    "sotanos": _extraer_numero(propiedades, ["CONNSOTANO"]),
+                    "semisotanos": _extraer_numero(propiedades, ["CONTSEMIS"]),
+                    "altura": _extraer_numero(propiedades, ["CONALTURA"]),
+                    "elevacion_cota": _extraer_numero(propiedades, ["CONELEVACI"]),
+                    "mejoras": _extraer_numero(propiedades, ["CONMEJORA"]),
+                    "voladizo": _extraer_numero(propiedades, ["CONVOLADIZ"]),
+                }
+                vig = _vigencia_del_feature(propiedades)
+                if vig:
+                    traza = _construir_trace(self._capas["construccion"], data_vigencia=vig)
+
+        # Manzana catastro (layer 0): MANCODIGO, SECCODIGO
+        r_manzana = resultados[1]
+        if not isinstance(r_manzana, BaseException):
+            features = r_manzana.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                manzana = {
+                    "codigo_manzana": _primer_texto(propiedades, ["MANCODIGO"]),
+                    "codigo_seccion": _primer_texto(propiedades, ["SECCODIGO"]),
+                }
+
+        # Densidad predial (layer 0): MANCODIGO, N_PREDIOS, ANO
+        r_densidad = resultados[2]
+        if not isinstance(r_densidad, BaseException):
+            features = r_densidad.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                densidad_predial = {
+                    "codigo_manzana": _primer_texto(propiedades, ["MANCODIGO"]),
+                    "num_predios": _extraer_numero(propiedades, ["N_PREDIOS"]),
+                    "ano": _extraer_numero(propiedades, ["ANO"]),
+                }
+
+        # Variacion area construida (layer 1): MANCODIGO, AC_M2_MZ_INIC, AC_M2_MZ_FIN, etc.
+        r_variacion = resultados[3]
+        if not isinstance(r_variacion, BaseException):
+            features = r_variacion.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                variacion_area = {
+                    "codigo_manzana": _primer_texto(propiedades, ["MANCODIGO"]),
+                    "area_inicial_m2": _extraer_numero(propiedades, ["AC_M2_MZ_INIC"]),
+                    "area_final_m2": _extraer_numero(propiedades, ["AC_M2_MZ_FIN"]),
+                    "variacion_m2": _extraer_numero(propiedades, ["VAR_M2_AC"]),
+                    "variacion_porcentual": _extraer_numero(propiedades, ["PVAR_M2_AC"]),
+                    "periodo": _primer_texto(propiedades, ["PERIODO"]),
+                }
+
+        # Sector catastral (layer 0): SCACODIGO, SCATIPO, SCANOMBRE
+        r_sector = resultados[4]
+        if not isinstance(r_sector, BaseException):
+            features = r_sector.get("features") or []
+            if features:
+                propiedades = features[0].get("properties") or {}
+                sector_catastral = _primer_texto(propiedades, ["SCANOMBRE"])
+
+        return (
+            ContextoCatastro(
+                construccion=construccion,
+                manzana=manzana,
+                densidad_predial=densidad_predial,
+                variacion_area=variacion_area,
+                sector_catastral=sector_catastral,
             ),
             traza,
         )

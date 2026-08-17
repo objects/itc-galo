@@ -50,6 +50,7 @@ from app.errores import (
 from app.models import (
     AccesoMovilidad,
     BloqueAccesoMovilidad,
+    BloqueCatastroData,
     BloqueContextoSocioeconomico,
     BloqueDestinoEconomico,
     BloqueEntornoRegulatorio,
@@ -60,6 +61,7 @@ from app.models import (
     BloqueValorReferencia,
     Centroide,
     ContextoAdministrativo,
+    ContextoCatastro,
     ContextoSocioeconomico,
     EntornoRegulatorio,
     EvidenciaNormativa,
@@ -233,9 +235,36 @@ class ServidorLotes:
         contexto, error = await self._consultar_contexto_seguro(lote)
         if error:
             return error
+        # Consulta catastro data en paralelo (F7)
+        try:
+            contexto_catastro, trace_catastro = await self._arcgis.consultar_contexto_catastro(
+                lote.centroid.lng, lote.centroid.lat
+            )
+            catastro_disponible = contexto_catastro.construccion is not None or contexto_catastro.manzana is not None or contexto_catastro.densidad_predial is not None or contexto_catastro.variacion_area is not None or contexto_catastro.sector_catastral is not None
+        except Exception:
+            contexto_catastro = ContextoCatastro()
+            trace_catastro = SourceTrace(
+                source_name="Catastro — Construcción",
+                layer_id="0",
+                service_url=f"{RAIZ_ARCGIS}/catastro/construccion/MapServer",
+                data_vigencia="2024",
+                query_timestamp=_ahora_iso(),
+            )
+            catastro_disponible = False
         return {
             "identidad": _identidad_a_contrato(lote),
             "contexto_por_fuente": contexto.a_lista_por_fuente(),
+            "catastro_data": {
+                "estado": "disponible" if catastro_disponible else "no_encontrado",
+                "dato": {
+                    "construccion": contexto_catastro.construccion,
+                    "manzana": contexto_catastro.manzana,
+                    "densidad_predial": contexto_catastro.densidad_predial,
+                    "variacion_area": contexto_catastro.variacion_area,
+                    "sector_catastral": contexto_catastro.sector_catastral,
+                } if catastro_disponible else None,
+                "source_trace": trace_catastro.model_dump(),
+            },
         }
 
     # --- F2: Tools de UPL y Normativa ---
@@ -570,18 +599,23 @@ class ServidorLotes:
         t_movilidad = self._arcgis.consultar_acceso_movilidad(
             lote.centroid.lng, lote.centroid.lat
         )
+        t_catastro = self._arcgis.consultar_contexto_catastro(
+            lote.centroid.lng, lote.centroid.lat
+        )
         (
             r_geotecnia,
             r_socio,
             r_regulatorio,
             r_patrimonio,
             r_movilidad,
+            r_catastro,
         ) = await asyncio.gather(
             t_geotecnia,
             t_socio,
             t_regulatorio,
             t_patrimonio,
             t_movilidad,
+            t_catastro,
             return_exceptions=True,
         )
 
@@ -992,6 +1026,74 @@ class ServidorLotes:
                 source_trace=trace_movilidad,
             )
 
+        # Bloque catastro_data
+        if isinstance(r_catastro, BaseException):
+            bloque_catastro = BloqueCatastroData(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los datos catastrales adicionales.",
+                source_trace=SourceTrace(
+                    source_name="Catastro — Construcción",
+                    layer_id="0",
+                    service_url=f"{RAIZ_ARCGIS}/catastro/construccion/MapServer",
+                    data_vigencia="2024",
+                    query_timestamp=_ahora_iso(),
+                ),
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": "Bloque catastro_data degradado: error al consultar la fuente.",
+            })
+        else:
+            contexto_catastro, trace_catastro = r_catastro
+            tiene_datos_catastro = any([
+                contexto_catastro.construccion is not None,
+                contexto_catastro.manzana is not None,
+                contexto_catastro.densidad_predial is not None,
+                contexto_catastro.variacion_area is not None,
+                contexto_catastro.sector_catastral is not None,
+            ])
+            partes_catastro = []
+            if contexto_catastro.sector_catastral:
+                partes_catastro.append(f"sector: {contexto_catastro.sector_catastral}")
+            if contexto_catastro.manzana:
+                codigo_mz = contexto_catastro.manzana.get("codigo_manzana")
+                if codigo_mz:
+                    partes_catastro.append(f"manzana: {codigo_mz}")
+            if contexto_catastro.densidad_predial:
+                num_predios = contexto_catastro.densidad_predial.get("num_predios")
+                if num_predios is not None:
+                    partes_catastro.append(f"predios en manzana: {int(num_predios)}")
+            if contexto_catastro.construccion:
+                pisos = contexto_catastro.construccion.get("pisos")
+                if pisos is not None:
+                    partes_catastro.append(f"pisos: {int(pisos)}")
+            if contexto_catastro.variacion_area:
+                periodo = contexto_catastro.variacion_area.get("periodo")
+                if periodo:
+                    partes_catastro.append(f"variación: {periodo}")
+            if partes_catastro:
+                interpretation_catastro = (
+                    f"Datos catastrales del lote: {', '.join(partes_catastro)}."
+                )
+            else:
+                interpretation_catastro = (
+                    "No se encontraron datos catastrales adicionales para el lote "
+                    "en la fuente consultada."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque catastro_data no encontrado: no se hallaron "
+                        "datos catastrales adicionales para el lote."
+                    ),
+                })
+            bloque_catastro = BloqueCatastroData(
+                estado="disponible" if tiene_datos_catastro else "no_encontrado",
+                dato=contexto_catastro if tiene_datos_catastro else None,
+                interpretation=interpretation_catastro,
+                source_trace=trace_catastro,
+            )
+
         # --- Evidencia normativa (consulta explicita o automatica; degradacion por bloque) ---
         consulta_automatica = consulta is None
         consulta_efectiva = (
@@ -1079,6 +1181,7 @@ class ServidorLotes:
             regulatory_environment=bloque_regulatorio,
             cultural_heritage=bloque_patrimonio,
             transit_access=bloque_movilidad,
+            catastro_data=bloque_catastro,
             normative_evidence=evidencia,
         )
         score = calcular_score(bloques_evaluables)
@@ -1097,6 +1200,7 @@ class ServidorLotes:
             "regulatory_environment": _bloque_a_contrato(bloque_regulatorio),
             "cultural_heritage": _bloque_a_contrato(bloque_patrimonio),
             "transit_access": _bloque_a_contrato(bloque_movilidad),
+            "catastro_data": _bloque_a_contrato(bloque_catastro),
             "normative_evidence": evidencia.model_dump(),
             "feasibility_score": score.model_dump(),
             "warnings": warnings,

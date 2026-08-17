@@ -205,6 +205,17 @@ def provider_arcgis_estandar(
             return httpx.Response(200, json=geojson([]))
         if "metrobogota" in url:
             return httpx.Response(200, json=geojson([]))
+        # Bloques F7: catastro data
+        if "catastro/construccion" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "catastro/manzana" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "catastro/densidadpredialmz" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "catastro/variacionareaconstruida" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "catastro/sectorcatastral" in url:
+            return httpx.Response(200, json=geojson([]))
         return httpx.Response(404, json={"error": f"sin respuesta simulada para {url}"})
 
     return ArcGISProvider(transport=httpx.MockTransport(handler))
@@ -327,6 +338,17 @@ def provider_arcgis_f3(lotes=None, valor=None, reserva=None, obras=None, predio=
         if "transportepublico" in url:
             return httpx.Response(200, json=geojson([]))
         if "metrobogota" in url:
+            return httpx.Response(200, json=geojson([]))
+        # Bloques F7: catastro data
+        if "catastro/construccion" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "catastro/manzana" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "catastro/densidadpredialmz" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "catastro/variacionareaconstruida" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "catastro/sectorcatastral" in url:
             return httpx.Response(200, json=geojson([]))
         return httpx.Response(404, json={"error": f"sin respuesta simulada para {url}"})
 

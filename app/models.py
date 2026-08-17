@@ -605,6 +605,30 @@ class BloqueAccesoMovilidad(BaseModel):
     source_trace: SourceTrace
 
 
+class ContextoCatastro(BaseModel):
+    """Datos catastrales adicionales del lote: construccion, manzana, densidad, variacion, sector.
+
+    Consulta 5 capas del catastro en paralelo para enriquecer la respuesta
+    del lote con informacion de construccion, manzana, densidad predial,
+    variacion de area construida y sector catastral.
+    """
+
+    construccion: dict[str, Any] | None = None  # Building footprint data from catastro/construccion
+    manzana: dict[str, Any] | None = None  # Block data from catastro/manzana
+    densidad_predial: dict[str, Any] | None = None  # Property density from catastro/densidadpredialmz
+    variacion_area: dict[str, Any] | None = None  # Built area variation from catastro/variacionareaconstruida
+    sector_catastral: str | None = None  # Cadastral sector from catastro/sectorcatastral
+
+
+class BloqueCatastroData(BaseModel):
+    """Bloque catastro_data con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: ContextoCatastro | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
 class ItemEvidenciaNormativa(BaseModel):
     """Articulo del POT citado literalmente en normative_evidence (shape del contrato).
 
@@ -676,6 +700,7 @@ class InformeFactibilidad(BaseModel):
     regulatory_environment: BloqueEntornoRegulatorio
     cultural_heritage: BloquePatrimonioCultural
     transit_access: BloqueAccesoMovilidad
+    catastro_data: BloqueCatastroData
     normative_evidence: EvidenciaNormativa
     feasibility_score: FeasibilityScore
     warnings: list[Warning]
