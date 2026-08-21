@@ -325,7 +325,7 @@ def test_puntos_positivos_por_upl_localidad_mercado_economico_y_evidencia():
     resultado = calcular_score(_bloques_felices())
 
     assert resultado.score == 50
-    assert resultado.confidence == "medium"  # 4 de 11 bloques evaluables disponibles (admin, market, economic, evidence)
+    assert resultado.confidence == "low"  # 4 de 13 bloques evaluables disponibles (admin, market, economic, evidence) → <= 4 = low
     razones = "\n".join(resultado.reasons)
     assert "UPL resuelta: UPL24 Chapinero" in razones
     assert "Localidad derivada: Chapinero" in razones
@@ -337,14 +337,15 @@ def test_puntos_positivos_por_upl_localidad_mercado_economico_y_evidencia():
 
 
 def test_confidence_high_con_6_bloques_disponibles():
-    """Cobertura de los bloques evaluables -> high (6 de 12 disponibles).
+    """Cobertura de los bloques evaluables -> medium (6 de 13 disponibles).
 
     Maximo del contrato con estos bloques: 50 + 10 (upl) + 5 (localidad) + 10 (mercado)
     + 10 (economico) + 5 (evidencia) - 30 (6 no_encontrado nuevos) = 60.
+    6 bloques disponibles es medium (5-9), no high (>= 10).
     """
     resultado = calcular_score(_bloques_completos())
 
-    assert resultado.confidence == "high"
+    assert resultado.confidence == "medium"
     assert resultado.score == 60
     assert "r_environment" not in resultado.rules_applied
 
@@ -369,7 +370,7 @@ def test_confidence_low_con_2_o_menos_bloques_y_reasons_de_datos_faltantes():
 
     assert resultado.confidence == "low"
     faltantes = [r for r in resultado.reasons if r.startswith("Dato faltante:")]
-    assert len(faltantes) == 11
+    assert len(faltantes) == 12  # 13 evaluables - 1 disponible (economic_context)
     nombres_faltantes = {f.replace("Dato faltante: ", "").rstrip(".") for f in faltantes}
     assert nombres_faltantes == {
         "administrative_context",
@@ -383,6 +384,7 @@ def test_confidence_low_con_2_o_menos_bloques_y_reasons_de_datos_faltantes():
         "transit_access",
         "catastro_data",
         "normative_evidence",
+        "urbanistic_parameters",
     }
 
 

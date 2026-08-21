@@ -629,6 +629,57 @@ class BloqueCatastroData(BaseModel):
     source_trace: SourceTrace
 
 
+# --- Feature 8: Parámetros urbanísticos del lote (tratamiento, edificabilidad, retiros, estacionamientos) ---
+
+
+class TratamientoUrbanistico(BaseModel):
+    """Tratamiento urbanístico del lote (SINUPOT layer 2)."""
+
+    denominacion: str  # Nombre legible del tratamiento
+    codigo_capa: str | None = None  # Código del atributo en la capa SINUPOT
+
+
+class ParametrosEdificabilidad(BaseModel):
+    """Parámetros numéricos de edificabilidad (RAG art. 281 + SDP layer 14)."""
+
+    cos: float | None = None  # Coeficiente de Ocupación del Suelo
+    cus: float | None = None  # Coeficiente de Utilización del Suelo
+    altura_maxima_m: float | None = None  # Altura máxima permitida en metros
+
+
+class RetirosLote(BaseModel):
+    """Retiros obligatorios del lote (RAG Anexo 5)."""
+
+    frontal_m: float | None = None  # Retiro frontal en metros
+    laterales_m: float | None = None  # Retiros laterales en metros
+    posteriores_m: float | None = None  # Retiro posterior en metros
+
+
+class EstacionamientosRequeridos(BaseModel):
+    """Estacionamientos requeridos por el lote (RAG art. 389)."""
+
+    requeridos: int | None = None  # Cantidad de estacionamientos
+    criterio: str | None = None  # Criterio de cálculo (texto del RAG)
+
+
+class ParametrosUrbanisticos(BaseModel):
+    """Contenedor de los parámetros urbanísticos del lote."""
+
+    tratamiento: TratamientoUrbanistico | None = None
+    edificabilidad: ParametrosEdificabilidad | None = None
+    retiros: RetirosLote | None = None
+    estacionamientos: EstacionamientosRequeridos | None = None
+
+
+class BloqueParametrosUrbanisticos(BaseModel):
+    """Bloque urbanistic_parameters con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: ParametrosUrbanisticos | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
 class ItemEvidenciaNormativa(BaseModel):
     """Articulo del POT citado literalmente en normative_evidence (shape del contrato).
 
@@ -683,7 +734,7 @@ class Warning(BaseModel):
 
 
 class InformeFactibilidad(BaseModel):
-    """Entidad raiz del contrato get_feasibility_report: los 15 bloques.
+    """Entidad raiz del contrato get_feasibility_report: los 16 bloques.
 
     `query_timestamp` es ISO 8601 UTC de generacion del reporte; no participa
     del score (SC-003: el score es deterministico).
@@ -701,6 +752,7 @@ class InformeFactibilidad(BaseModel):
     cultural_heritage: BloquePatrimonioCultural
     transit_access: BloqueAccesoMovilidad
     catastro_data: BloqueCatastroData
+    urbanistic_parameters: BloqueParametrosUrbanisticos | None = None
     normative_evidence: EvidenciaNormativa
     feasibility_score: FeasibilityScore
     warnings: list[Warning]

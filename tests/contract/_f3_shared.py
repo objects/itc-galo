@@ -13,7 +13,7 @@ CAMPOS_TRAZA = {
     "query_timestamp",
 }
 
-# Los 16 bloques raiz del reporte (FR-001, F3 + F5 + F7).
+# Los 17 bloques raiz del reporte (FR-001, F3 + F5 + F7 + F8).
 BLOQUES_RAIZ = {
     "lot_identity",
     "administrative_context",
@@ -27,6 +27,7 @@ BLOQUES_RAIZ = {
     "cultural_heritage",
     "transit_access",
     "catastro_data",
+    "urbanistic_parameters",
     "normative_evidence",
     "feasibility_score",
     "warnings",
@@ -45,4 +46,5 @@ BLOQUES_CON_ESTADO = {
     "cultural_heritage",
     "transit_access",
     "catastro_data",
+    "urbanistic_parameters",
 }

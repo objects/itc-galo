@@ -8,12 +8,16 @@ ninguna regla inventa normativa urbanistica ausente.
 Reglas (data-model.md:205-227, research D3):
 - Base 50.
 - Positivas: UPL resuelta +10; localidad derivada +5; market_context disponible
-  +10; economic_context disponible +10; normative_evidence con items +5.
+  +10; economic_context disponible +10; normative_evidence con items +5;
+  urbanistic_parameters con tratamiento+edificabilidad +10;
+  estacionamientos requeridos > 0 +5.
 - Negativas: reserva vial que afecta el lote -15; UPL ausente -5; cada bloque
-  tematico/economico en no_encontrado -5; evidencia normativa vacia -5.
+  tematico/economico en no_encontrado -5; evidencia normativa vacia -5;
+  riesgo geotecncico alto -10; patrimonio cultural -10; tratamiento de
+  conservacion -15.
 - `score = clamp(50 + Σ, 0, 100)` entero.
-- `confidence` por cobertura de los 11 bloques evaluables: high >= 5 disponibles,
-  medium 3-4, low <= 2. Con confidence low, las reasons enumeran los faltantes.
+- `confidence` por cobertura de los 13 bloques evaluables: high >= 10 disponibles,
+  medium 5-9, low <= 4. Con confidence low, las reasons enumeran los faltantes.
 - `reasons`: textos fijos por regla con el dato interpolado y el source_name.
 - `rules_applied`: codigos de regla aplicados (auditoria interna).
 """
@@ -31,6 +35,7 @@ from app.models import (
     BloqueDestinoEconomico,
     BloqueEntornoRegulatorio,
     BloqueObrasPublicas,
+    BloqueParametrosUrbanisticos,
     BloquePatrimonioCultural,
     BloqueReservaVial,
     BloqueRiesgosGeotecnicos,
@@ -48,14 +53,17 @@ PUNTOS_ECONOMICO = 10
 PUNTOS_EVIDENCIA = 5
 PUNTOS_CONTEXTO_SOCIO = 5
 PUNTOS_ACCESO_MOVILIDAD = 5
+PUNTOS_PARAMETROS_URBANISTICOS = 10  # F8: parámetros urbanísticos disponibles
+PUNTOS_ESTACIONAMIENTOS = 5  # F8: estacionamientos calculados
 PENALIZACION_RESERVA_VIAL = 15
 PENALIZACION_UPL_AUSENTE = 5
 PENALIZACION_BLOQUE_NO_ENCONTRADO = 5
 PENALIZACION_EVIDENCIA_VACIA = 5
 PENALIZACION_RIESGO_GEOTECNICO_ALTO = 10
 PENALIZACION_PATRIMONIO_CULTURAL = 10
+PENALIZACION_CONSERVACION = 15  # F8: tratamiento de conservación
 
-# Los bloques evaluables del confidence (6 originales F3 + 6 nuevos F6/F7).
+# Los bloques evaluables del confidence (6 originales F3 + 6 nuevos F6/F7 + 1 F8).
 BLOQUES_EVALUABLES = (
     "administrative_context",
     "planning_constraints",
@@ -69,6 +77,7 @@ BLOQUES_EVALUABLES = (
     "transit_access",
     "catastro_data",
     "normative_evidence",
+    "urbanistic_parameters",
 )
 
 
@@ -87,6 +96,7 @@ class BloquesEvaluables(BaseModel):
     transit_access: BloqueAccesoMovilidad
     catastro_data: BloqueCatastroData
     normative_evidence: EvidenciaNormativa
+    urbanistic_parameters: BloqueParametrosUrbanisticos | None = None
 
 
 def calcular_score(bloques: BloquesEvaluables) -> FeasibilityScore:
@@ -203,6 +213,40 @@ def _reglas_positivas(
             "Acceso a transporte público disponible: estaciones de TransMilenio o Metro cercanas."
         )
 
+    # --- F8: Parámetros urbanísticos del lote ---
+    # Regla r_parametros_urbanisticos: tratamiento + edificabilidad disponibles
+    if (
+        bloques.urbanistic_parameters is not None
+        and bloques.urbanistic_parameters.estado == "disponible"
+        and bloques.urbanistic_parameters.dato is not None
+        and bloques.urbanistic_parameters.dato.tratamiento is not None
+        and bloques.urbanistic_parameters.dato.edificabilidad is not None
+    ):
+        puntos += PUNTOS_PARAMETROS_URBANISTICOS
+        reglas.append("r_parametros_urbanisticos")
+        nombre_trat = bloques.urbanistic_parameters.dato.tratamiento.denominacion
+        razones.append(
+            f"Parámetros urbanísticos disponibles: tratamiento {nombre_trat} "
+            f"con parámetros de edificabilidad (SINUPOT)."
+        )
+
+    # Regla r_estacionamientos_calculados: estacionamientos requeridos > 0
+    if (
+        bloques.urbanistic_parameters is not None
+        and bloques.urbanistic_parameters.estado == "disponible"
+        and bloques.urbanistic_parameters.dato is not None
+        and bloques.urbanistic_parameters.dato.estacionamientos is not None
+        and bloques.urbanistic_parameters.dato.estacionamientos.requeridos is not None
+        and bloques.urbanistic_parameters.dato.estacionamientos.requeridos > 0
+    ):
+        puntos += PUNTOS_ESTACIONAMIENTOS
+        reglas.append("r_estacionamientos_calculados")
+        num_est = bloques.urbanistic_parameters.dato.estacionamientos.requeridos
+        razones.append(
+            f"Estacionamientos requeridos calculados: {num_est} "
+            f"(criterio del POT)."
+        )
+
     return puntos, reglas, razones
 
 
@@ -276,6 +320,21 @@ def _reglas_negativas(
                 f"Elementos de patrimonio cultural cercanos: penalización −{PENALIZACION_PATRIMONIO_CULTURAL}."
             )
 
+    # --- F8: Penalización por tratamiento de conservación ---
+    # Regla r_tratamiento_conservacion: tratamiento == "Conservación" -> −15
+    if (
+        bloques.urbanistic_parameters is not None
+        and bloques.urbanistic_parameters.estado == "disponible"
+        and bloques.urbanistic_parameters.dato is not None
+        and bloques.urbanistic_parameters.dato.tratamiento is not None
+        and bloques.urbanistic_parameters.dato.tratamiento.denominacion.lower() == "conservación"
+    ):
+        puntos += PENALIZACION_CONSERVACION
+        reglas.append("r_tratamiento_conservacion")
+        razones.append(
+            f"Tratamiento de conservación: penalización −{PENALIZACION_CONSERVACION}."
+        )
+
     return puntos, reglas, razones
 
 
@@ -283,7 +342,7 @@ def _bloques_con_estado(
     bloques: BloquesEvaluables,
 ) -> list[tuple[str, Any]]:
     """Pares (nombre, bloque) de los bloques con patron {estado, dato, ...}."""
-    return [
+    items = [
         ("planning_constraints", bloques.planning_constraints),
         ("market_context", bloques.market_context),
         ("environment_context", bloques.environment_context),
@@ -295,18 +354,23 @@ def _bloques_con_estado(
         ("transit_access", bloques.transit_access),
         ("catastro_data", bloques.catastro_data),
     ]
+    # F8: urbanistic_parameters es opcional (puede ser None si el provider no
+    # se inyecta); solo se incluye cuando está presente.
+    if bloques.urbanistic_parameters is not None:
+        items.append(("urbanistic_parameters", bloques.urbanistic_parameters))
+    return items
 
 
 def _confidence_por_cobertura(bloques: BloquesEvaluables) -> Literal["high", "medium", "low"]:
-    """Confidence por cobertura de los 6 bloques evaluables (data-model.md:221-223).
+    """Confidence por cobertura de los 13 bloques evaluables (data-model.md:102-108).
 
     Disponible = bloque con dato (upl o localidad, estado == "disponible",
-    items no vacios). high >= 5, medium 3-4, low <= 2.
+    items no vacios). high >= 10, medium 5-9, low <= 4.
     """
     disponibles = _contar_bloques_disponibles(bloques)
-    if disponibles >= 5:
+    if disponibles >= 10:
         return "high"
-    if disponibles >= 3:
+    if disponibles >= 5:
         return "medium"
     return "low"
 
@@ -327,6 +391,9 @@ def _contar_bloques_disponibles(bloques: BloquesEvaluables) -> int:
             bloques.transit_access.estado == "disponible",
             bloques.catastro_data.estado == "disponible",
             bool(bloques.normative_evidence.items),
+            # F8: urbanistic_parameters disponible si tratamiento poblado
+            bloques.urbanistic_parameters is not None
+            and bloques.urbanistic_parameters.estado == "disponible",
         ]
     )
 
@@ -347,6 +414,10 @@ def _reasons_datos_faltantes(bloques: BloquesEvaluables) -> list[str]:
         "transit_access": bloques.transit_access.estado == "disponible",
         "catastro_data": bloques.catastro_data.estado == "disponible",
         "normative_evidence": bool(bloques.normative_evidence.items),
+        "urbanistic_parameters": (
+            bloques.urbanistic_parameters is not None
+            and bloques.urbanistic_parameters.estado == "disponible"
+        ),
     }
     return [f"Dato faltante: {nombre}." for nombre in BLOQUES_EVALUABLES if not disponibles[nombre]]
 
