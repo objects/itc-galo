@@ -1,8 +1,9 @@
 {
-  "ai": "opencode",
+  "ai": "copilot",
+  "ai_skills": true,
   "feature_numbering": "sequential",
   "here": false,
-  "integration": "opencode",
+  "integration": "copilot",
   "script": "sh",
-  "speckit_version": "0.16.1"
+  "speckit_version": "0.16.4"
 }
