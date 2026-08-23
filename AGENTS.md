@@ -7,10 +7,11 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
-- **Repositorio en `master`; HEAD `79288a2` (feature 7 completa con contexto catastral adicional).**
+- **Repositorio en `master`; HEAD `37b0175` (implementación F8) + commit de cierre (correcciones de
+  revisión y documentación de F8).**
   La aplicación está implementada y probada: F1, F2,
-  F3, F4, F6 y F7 completas, **263 tests passing (132 contract F1/F2 + 54 F3 + 2 smoke + 47 F4 + 28 F6 + ... F7), 0 failed**,
-  gate PASS, con las **7 tools** registradas (F4, F6 y F7 no añaden tools MCP). **SC-001 verificado** con la
+  F3, F4, F6, F7 y F8 completas, **293 tests passing (suite completa: smoke 6 + contract), 0 failed**,
+  gate PASS, con las **7 tools** registradas (F4, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
 - **F1 — `specs/001-resolver-lote-contexto/`**: COMPLETA. spec.md, plan.md, research.md,
@@ -83,6 +84,26 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
     como en `get_lot_summary_by_chip`.
   - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools).
   - Commits: `79288a2` (implementación completa + specs).
+- **F8 — `specs/008-parametros-urbanisticos-lote/`**: COMPLETA e implementada (feature activa,
+  `.specify/feature.json` → `specs/008-parametros-urbanisticos-lote`). spec.md (2 US, 22 FR), plan.md,
+  research.md, data-model.md, contracts/ (urbanistic-parameters.md), quickstart.md y checklists/
+  (requirements.md 24/24). tasks.md con 29 tareas T001–T029 (6 fases) **TODAS marcadas `[x]`**.
+  - Añade 1 bloque adicional al informe de factibilidad: `urbanistic_parameters` — tratamiento
+    urbanístico espacial vía SINUPOT/SDP (`sinu.sdp.gov.co`, `POT555/NORMA_URBANÍSTICA_Y_OT/MapServer`,
+    layer 2, CRS EPSG:4686), edificabilidad oficial en capa 14 con **precedencia sobre el RAG**, y
+    retiros/estacionamientos vía parsing regex determinista del texto RAG (art. 281 + art. 389 +
+    Anexo 5 del Decreto 555/2021). 17 bloques en informe, 13 evaluables. Scoring: +10 parámetros
+    urbanísticos (`r_parametros_urbanisticos`), +5 estacionamientos calculados
+    (`r_estacionamientos_calculados`), −15 tratamiento Conservación (`r_tratamiento_conservacion`).
+  - Provider nuevo `app/providers/sdp.py` (Principio II): `consultar_tratamiento` (layer 2) y
+    `consultar_edificabilidad` (layer 14, complementaria) sobre `httpx.AsyncClient`.
+  - Degradación por bloque: 5xx SDP → `no_encontrado` + warning `BLOQUE_DEGRADADO` (nunca fatal,
+    nunca `FUENTE_5XX`); SDP sin features → warning `BLOQUE_SIN_DATO`; fallo RAG → campos numéricos
+    en `None` conservando el tratamiento + warning. El bloque lleva UN solo `source_trace` (SDP,
+    fuente primaria; patrón F6/F7); la proveniencia RAG queda en `interpretation`/warnings.
+  - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools).
+  - Commits: `37b0175` (implementación completa + specs) + commit de cierre (correcciones de revisión
+    M1–M6, tests T027 ampliados y documentación).
 - `20260809-01-perplexity.md` es la **fuente de verdad del producto** (arquitectura, fuentes de
   datos, herramientas MCP, pipeline RAG). Léelo antes de especificar o planificar.
 
@@ -113,7 +134,7 @@ Notas:
 - Herramientas MCP: **7 implementadas** (`resolve_lot_by_chip`, `resolve_lot_by_address`,
   `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`, `get_upl`, `consultar_normativa`,
   `get_feasibility_report`) registradas por `crear_servidor_mcp()` en `app/main.py`.
-  `get_feasibility_report` (F3) orquesta el informe en 16 bloques con scoring heurístico determinístico
+  `get_feasibility_report` (F3) orquesta el informe en 17 bloques con scoring heurístico determinístico
   (`calcular_score`) y degrada UPL/RAG con warnings en lugar de errores. FastMCP (mcp>=1.x) con fallback
   a MCPServer (mcp 2.x); transporte stdio;
   lifespan cierra providers (httpx.AsyncClient); validaciones fail-fast (FR-012/FR-013).
@@ -138,6 +159,10 @@ Notas:
   - **F7 — capas catastrales adicionales**: `catastro/construccion` [0], `catastro/manzana` [0],
     `catastro/densidadpredialmz` [0], `catastro/variacionareaconstruida` [1],
     `catastro/sectorcatastral` [0] — bloque `catastro_data` en el informe y resumen.
+  - **F8 — SINUPOT/SDP**: `https://sinu.sdp.gov.co/serverp/rest/services/POT555/NORMA_URBANÍSTICA_Y_OT/MapServer`
+    → tratamiento urbanístico = **layer 2**, edificabilidad (complementaria) = **layer 14**;
+    CRS EPSG:4686 (MAGNA-SIRGAS), consulta con `inSR=4326&outSR=4686` — bloque
+    `urbanistic_parameters` en el informe y resumen (ver `app/providers/sdp.py`).
 - RAG normativo: corpus consolidado = Decreto 555 de 2021 (POT "Bogotá Reverdece 2022-2035", 608
   artículos, micrositio POT + compendio de Datos Abiertos) + actos modificatorios del 555 (F4).
   **608 artículos del 555 en `data/corpus/decreto_555_2021.jsonl` + `.sha256` y actos en
@@ -152,13 +177,15 @@ Notas:
 ## Estructura del proyecto
 
 - `app/`: código de aplicación. `main.py` (servidor MCP + lógica de dominio de las 7 tools, incluida
-  la orquestación de 16 bloques y `_construir_consulta_automatica` de F3),
+  la orquestación de 17 bloques y `_construir_consulta_automatica` de F3),
   `models.py` (pydantic v2: F1 SourceTrace/Lote/DatoTematico; F2 UPL/Localidad/ArticuloNormativo/
-  Chunk; F3 InformeFactibilidad y bloques; F7 ContextoCatastro), `errores.py` (taxonomía), `scoring.py` (F3+F7, función
+  Chunk; F3 InformeFactibilidad y bloques; F7 ContextoCatastro; F8 BloqueParametrosUrbanisticos),
+  `errores.py` (taxonomía), `scoring.py` (F3+F7+F8, función
   pura `calcular_score`, determinista, sin LLM).
 - `app/providers/`: un provider por fuente (Principio II): `arcgis.py` (Lote, contexto temático,
   Predio F3, obras por radio, contexto catastral F7), `arcgis_utils.py` (`CapaConfig`, params/consulta compartidos),
-  `mapas_bogota.py` (Mapas Bogotá), `upl.py` (capa UPL), `normativa.py` (RAG ChromaDB + Ollama).
+  `mapas_bogota.py` (Mapas Bogotá), `upl.py` (capa UPL), `normativa.py` (RAG ChromaDB + Ollama),
+  `sdp.py` (F8: capas SINUPOT/SDP del POT — tratamiento layer 2 y edificabilidad layer 14).
 - `app/ingesta/`: `corpus.py` (CLI con subcomandos `descargar` (HTML sisjur → JSONL + `.sha256`, SIN
   Ollama), `indexar` (JSONL → ChromaDB), `full` (pipeline completo), `consultar` (debug) y `acto`
   (F4: ingesta de actos modificatorios del 555)) y `actos.py` (NUEVO, F4: detección de formato por
@@ -168,9 +195,10 @@ Notas:
   (14 archivos F1/F2 + 6 archivos F3: get_feasibility_report, validación, errores, normativa,
   scoring y trazabilidad + `_f3_shared.py` con constantes compartidas + 3 archivos F4:
   test_ingesta_actos, test_corpus_consolidado, test_precedencia + extensiones aditivas de
-  test_consultar_normativa y test_get_feasibility_report). Fixtures con
-  `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
-- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/006-*`, `specs/007-*`: features Spec Kit (ver "Estado actual").
+  test_consultar_normativa y test_get_feasibility_report + test_urbanistic_parameters.py F8).
+  Fixtures con `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
+- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/006-*`, `specs/007-*`,
+  `specs/008-*`: features Spec Kit (ver "Estado actual").
 - `.specify/`: feature.json (feature activa), integration.json (opencode, separador `.`),
   memory/constitution.md, scripts/, templates/, workflows/.
 - `.opencode/`: commands/ (comandos `speckit.*`), opencode.json, package.json (plugin).

@@ -128,7 +128,7 @@ class BloquesEvaluables(BaseModel):
 
 ## Relaciones con entidades existentes
 
-- **SourceTrace**: el bloque `urbanistic_parameters` tiene un `SourceTrace` principal que documenta la fuente SDP (tratamiento espacial). Los datos del RAG normativo NO generan un source_trace adicional en el contrato (patrón F6: un solo source_trace por bloque).
+- **SourceTrace**: el bloque `urbanistic_parameters` tiene UN solo `SourceTrace`, que documenta la fuente primaria del tratamiento espacial (SINUPOT/SDP, layer 2). Los datos del RAG normativo NO generan un source_trace adicional en el contrato (patrón F6/F7: un solo source_trace por bloque); su proveniencia queda registrada en `interpretation` (mención de la norma/artículo consultado) y en los warnings del informe cuando el RAG falla o se degrada.
 - **UPL**: la consulta RAG para parámetros urbanísticos puede filtrar por UPL (opcional). El tratamiento espacial NO depende de la UPL (consulta puramente espacial).
 - **InformeFactibilidad**: el bloque se añade como campo `urbanistic_parameters` en el modelo `InformeFactibilidad`.
 - **Bloques existentes**: sin cambios a los 15 bloques actuales (F3/F6/F7). Solo se añade el bloque 16.

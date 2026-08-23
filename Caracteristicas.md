@@ -18,7 +18,7 @@ normativa** del POT (RAG local sobre el Decreto 555 de 2021).
 - **100 % determinista sin LLM** en la resolución de lote, el contexto temático y el
   `feasibility_score` (`app/scoring.py`, función pura). El LLM se usa **solo** en el RAG
   normativo opcional (`consultar_normativa` y la evidencia de `get_feasibility_report`).
-- Suite: **231 tests passing, 0 failed** (132 contract F1/F2 + 54 F3 + 2 smoke + 43 F4; sin red
+- Suite: **293 tests passing, 0 failed** (suite completa: smoke 6 + contract; sin red
   real ni Ollama).
 
 Las 7 tools:
@@ -31,7 +31,7 @@ Las 7 tools:
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo por CHIP. |
 | `get_upl` | UPL + localidad del lote por CHIP, dirección o coordenadas. |
 | `consultar_normativa` | Consulta RAG en lenguaje natural sobre el POT, con citas literales. |
-| `get_feasibility_report` | Informe de factibilidad orquestado en 10 bloques. |
+| `get_feasibility_report` | Informe de factibilidad orquestado en 17 bloques. |
 
 ## 2. Requisitos previos
 
@@ -286,17 +286,23 @@ lugar de fallar (ver sección 7).
   | `consulta` | string | No | 1–500 caracteres, no vacía tras strip. Si se omite, se construye automáticamente (UPL + localidad + clasificación de suelo). |
   | `top_k` | integer | No | 1–6, default 3. |
 
-- **Salida (10 bloques)**: `lot_identity`, `administrative_context` (`upl` + `localidad` +
+- **Salida (17 bloques)**: `lot_identity`, `administrative_context` (`upl` + `localidad` +
   `clasificacion_suelo`), `planning_constraints`, `market_context`, `environment_context`
   (`dato.radio_m` = 500), `economic_context` (`codigo_destino`, `descripcion_destino`,
   `uso`, `area_uso`, `usos[]`, `area_terreno`, `area_construccion`, `direccion`, `barrio`,
-  `vigencia` = `PREVACTUAL`), `normative_evidence` (`items`, `consulta`,
+  `vigencia` = `PREVACTUAL`), `geotechnical_risks`, `socioeconomic_context`,
+  `regulatory_environment`, `cultural_heritage`, `transit_access` (F6), `catastro_data`
+  (F7), `urbanistic_parameters` (F8: tratamiento SINUPOT/SDP layer 2, edificabilidad capa
+  14 con precedencia sobre el RAG, retiros y estacionamientos vía parsing regex del texto
+  RAG), `normative_evidence` (`items`, `consulta`,
   `consulta_automatica`, `sin_resultados`, `causa`, `source_trace`), `feasibility_score`
   (`score` 0–100, `confidence` ∈ {high, medium, low}, `reasons`, `rules_applied`),
   `warnings[]`, `query_timestamp`. Cada bloque con `source_trace` de 5 campos.
 - **Fuentes**: capa Lote 38; capa UPL (`unidadplaneamientolocal.0`); `catastro/valorreferencia`;
   `ordenamientoterritorial/reservavial`; `gestionpublica/obraspublicas`; **capa tabular Predio**
-  `catastro/lote/MapServer/3` (join por `PRECHIP` o `BARMANPRE`, `f=pjson`); `Decreto 555 de 2021`.
+  `catastro/lote/MapServer/3` (join por `PRECHIP` o `BARMANPRE`, `f=pjson`); capas catastrales F7;
+  **SINUPOT/SDP** (`sinu.sdp.gov.co`, layer 2 tratamiento + layer 14 edificabilidad, CRS EPSG:4686);
+  `Decreto 555 de 2021`.
 - **Errores fatales (6)**: `PARAMETROS_INVALIDOS`, `LOTE_NO_ENCONTRADO`,
   `FUERA_DE_COBERTURA`, `DIRECCION_NO_LOCALIZADA`, `CREDENCIAL_FALTANTE`, `FUENTE_5XX`.
   Un 5xx nunca se degrada a `no_encontrado`.
@@ -368,7 +374,7 @@ cat data/corpus/decreto_555_2021.jsonl.sha256
   `NORMATIVA_NO_DISPONIBLE`; sin resultados → `causa: "SIN_RESULTADOS"` + warning
   `NORMATIVA_SIN_RESULTADOS`. Un 5xx NUNCA se degrada a "no encontrado".
 - **Warnings canónicos** del reporte: `LOTE_SIN_CHIP`, `UPL_NO_ENCONTRADA`,
-  `LOCALIDAD_NO_DERIVADA`, `BLOQUE_SIN_DATO`, `NORMATIVA_NO_DISPONIBLE`,
+  `LOCALIDAD_NO_DERIVADA`, `BLOQUE_SIN_DATO`, `BLOQUE_DEGRADADO`, `NORMATIVA_NO_DISPONIBLE`,
   `NORMATIVA_SIN_RESULTADOS`.
 - **Idioma**: el dominio va en español (atributos `codigo`, `nombre`, `codigo_destino`,
   `descripcion_destino`, `usos`, `estado`, `dato`), mientras que los nombres técnicos de los
@@ -387,3 +393,8 @@ cat data/corpus/decreto_555_2021.jsonl.sha256
   `consultar_normativa`; por debajo → abstención explícita (`sin_resultados: true`).
 - **F4 no añade tools MCP**: la feature 4 (ingesta de actos modificatorios del 555) amplía el
   corpus RAG a un corpus consolidado (Decreto 555 + actos), sin cambiar las 7 tools.
+- **F6/F7/F8 no añaden tools MCP**: enriquecen el informe de factibilidad con bloques
+  adicionales (F6: geotecnia, socioeconomía, regulatorio, patrimonio, movilidad; F7:
+  `catastro_data`; F8: `urbanistic_parameters` vía SINUPOT/SDP + RAG) y extienden el scoring
+  (+10 parámetros urbanísticos, +5 estacionamientos calculados, −15 tratamiento Conservación;
+  confidence sobre 13 bloques evaluables), sin cambiar las 7 tools.

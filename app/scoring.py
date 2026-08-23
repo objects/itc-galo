@@ -214,7 +214,10 @@ def _reglas_positivas(
         )
 
     # --- F8: Parámetros urbanísticos del lote ---
-    # Regla r_parametros_urbanisticos: tratamiento + edificabilidad disponibles
+    # Regla r_parametros_urbanisticos: tratamiento + edificabilidad disponibles.
+    # El orquestador solo construye ParametrosEdificabilidad cuando extrajo al
+    # menos un valor real (capa 14 SINUPOT o RAG); edificabilidad no None
+    # implica datos reales (hallazgo M6 del code review).
     if (
         bloques.urbanistic_parameters is not None
         and bloques.urbanistic_parameters.estado == "disponible"

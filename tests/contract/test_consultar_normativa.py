@@ -13,7 +13,7 @@ import pytest
 from app.errores import CorpusNoIngestadoError, OllamaNoDisponibleError
 from app.models import COLECCION_NORMATIVA
 from app.providers.normativa import NormativaProvider, UPL_VALIDAS
-from tests.conftest import construir_servidor, provider_arcgis_estandar
+from tests.conftest import construir_servidor, provider_arcgis_estandar, provider_sdp_f3
 
 
 class FakeEmbeddingFunction:
@@ -112,6 +112,7 @@ def _construir_servidor_normativa(chroma_path: Path, ef, indexar: bool = True):
         provider_arcgis_estandar(),
         UPLProvider(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"type": "FeatureCollection", "features": []}))),
         provider_norm,
+        provider_sdp_f3(),  # SDP mockeado: consultar_normativa no lo consulta (hallazgo M5)
     )
 
 

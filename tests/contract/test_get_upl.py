@@ -16,6 +16,7 @@ from tests.conftest import (
     geocodificar_vacia,
     provider_arcgis_estandar,
     provider_mapas_estandar,
+    provider_sdp_f3,
 )
 from app.providers.upl import NOMBRE_UPL_A_LOCALIDAD
 
@@ -60,6 +61,7 @@ def _crear_servidor_con_upl(upl_handler, arcgis=None):
         arcgis if arcgis is not None else provider_arcgis_estandar(),
         UPLProvider(transport=httpx.MockTransport(upl_handler)),
         __import__('app.providers.normativa', fromlist=['NormativaProvider']).NormativaProvider(),
+        provider_sdp_f3(),  # SDP mockeado: get_upl no lo consulta (hallazgo M5)
     )
 
 
@@ -143,6 +145,7 @@ async def test_get_upl_direccion_sin_api_key_devuelve_credencial_faltante():
         ArcGISProvider(),
         UPLProvider(transport=httpx.MockTransport(handler_upl_ok)),
         __import__('app.providers.normativa', fromlist=['NormativaProvider']).NormativaProvider(),
+        provider_sdp_f3(),  # SDP mockeado: get_upl no lo consulta (hallazgo M5)
     )
     try:
         resp = await servidor.get_upl(direccion="Calle 26 # 69-76")
@@ -170,6 +173,7 @@ async def test_get_upl_direccion_no_localizada_devuelve_direccion_no_localizada(
         ArcGISProvider(),
         UPLProvider(transport=httpx.MockTransport(handler_upl_ok)),
         __import__('app.providers.normativa', fromlist=['NormativaProvider']).NormativaProvider(),
+        provider_sdp_f3(),  # SDP mockeado: get_upl no lo consulta (hallazgo M5)
     )
     try:
         resp = await servidor.get_upl(direccion="Direccion Inexistente 999")
@@ -197,6 +201,7 @@ async def test_get_upl_direccion_multiples_candidatos_devuelve_candidatos():
         ArcGISProvider(),
         UPLProvider(transport=httpx.MockTransport(handler_upl_ok)),
         __import__('app.providers.normativa', fromlist=['NormativaProvider']).NormativaProvider(),
+        provider_sdp_f3(),  # SDP mockeado: get_upl no lo consulta (hallazgo M5)
     )
     try:
         resp = await servidor.get_upl(direccion="Calle 26 # 69-76")

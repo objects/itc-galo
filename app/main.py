@@ -1613,7 +1613,7 @@ def _construir_prompt_parametros_urbanisticos(
     partes = [
         (
             f'¿Cuáles son los valores de COS, CUS, altura máxima (en metros), '
-            f'retiro frontal, retiro lateral y retiro posterior (en metros), '
+            f'retiros frontales, laterales y posteriores (en metros), '
             f'y estacionamientos requeridos para un lote con tratamiento '
             f'urbanístico "{tratamiento}"'
         ),
@@ -1631,15 +1631,24 @@ def _parsear_parametros_rag(respuesta_rag: str) -> dict[str, Any]:
 
     Contrato (contracts/urbanistic-parameters.md:Parsing regex): 7 patrones
     que extraen COS, CUS, altura, retiros frontales/laterales/posteriores y
-    estacionamientos desde el texto del LLM. Si un patrón no matchea, el
-    campo queda None (FR-014: sin LLM para interpretaciones).
+    estacionamientos desde el texto del LLM. Los patrones de retiros aceptan
+    singular y plural ("retiro lateral" / "retiros laterales", "posterior" /
+    "posteriores") para tolerar la formulación del LLM (hallazgo m2). Si un
+    patrón no matchea, el campo queda None (FR-014: sin LLM para
+    interpretaciones).
     """
     cos = _extraer_float_patron(respuesta_rag, r"COS[:\s]+(\d+\.?\d*)")
     cus = _extraer_float_patron(respuesta_rag, r"CUS[:\s]+(\d+\.?\d*)")
     altura = _extraer_float_patron(respuesta_rag, r"altura[:\s]+(\d+\.?\d*)\s*m")
-    frontal = _extraer_float_patron(respuesta_rag, r"frontal[:\s]+(\d+\.?\d*)\s*m")
-    laterales = _extraer_float_patron(respuesta_rag, r"laterales[:\s]+(\d+\.?\d*)\s*m")
-    posterior = _extraer_float_patron(respuesta_rag, r"posterior[:\s]+(\d+\.?\d*)\s*m")
+    frontal = _extraer_float_patron(
+        respuesta_rag, r"(?:frontales|frontal)[:\s]+(\d+\.?\d*)\s*m"
+    )
+    laterales = _extraer_float_patron(
+        respuesta_rag, r"(?:laterales|lateral)[:\s]+(\d+\.?\d*)\s*m"
+    )
+    posterior = _extraer_float_patron(
+        respuesta_rag, r"(?:posteriores|posterior)[:\s]+(\d+\.?\d*)\s*m"
+    )
     estacionamientos = _extraer_int_patron(respuesta_rag, r"(\d+)\s*estacionamiento")
     return {
         "cos": cos,
@@ -1674,6 +1683,61 @@ def _extraer_int_patron(texto: str, patron: str) -> int | None:
     return None
 
 
+def _trace_sdp_de_config(config: Any) -> SourceTrace:
+    """SourceTrace de fallback desde una CapaConfig del provider SDP (SC-002).
+
+    Usado cuando el bloque se degrada y no hay trace de una consulta exitosa;
+    evita acceder a atributos privados del provider (hallazgo m4).
+    """
+    return SourceTrace(
+        source_name=config.source_name,
+        layer_id=config.layer_id,
+        service_url=config.service_url,
+        data_vigencia=config.data_vigencia,
+        query_timestamp=_ahora_iso(),
+    )
+
+
+def _bloque_urbanistic_degradado(
+    provider_sdp: SDPProvider,
+    warnings: list[dict[str, str]],
+    causa: str,
+) -> BloqueParametrosUrbanisticos:
+    """Bloque urbanistic_parameters en estado no_encontrado por fallo de SDP.
+
+    Emite warning BLOQUE_DEGRADADO con la causa registrada (FR-009 enmendada,
+    FR-016) y retorna el bloque con traza de fallback; nunca es fatal para el
+    resto del informe (FR-008, SC-004).
+    """
+    warnings.append({
+        "codigo": "BLOQUE_DEGRADADO",
+        "mensaje": f"Bloque urbanistic_parameters degradado: {causa}.",
+    })
+    return BloqueParametrosUrbanisticos(
+        estado="no_encontrado",
+        interpretation="No se encontró un tratamiento urbanístico para el lote en la fuente consultada.",
+        source_trace=_trace_sdp_de_config(provider_sdp.configuracion_tratamiento()),
+    )
+
+
+def _extraer_criterio_normativo(texto_rag: str) -> str | None:
+    """Extrae la referencia normativa presente en la respuesta del RAG (FR-015).
+
+    El criterio de estacionamientos DEBE derivarse del texto real del RAG
+    (data-model.md:EstacionamientosRequeridos); nunca se hardcodea. Retorna
+    None si el texto no cita ninguna referencia verificable.
+    """
+    referencia_completa = re.search(
+        r"[Aa]rt[íi]culo\s+\d+\s+del\s+Decreto\s+[\d/]+", texto_rag
+    )
+    if referencia_completa:
+        return referencia_completa.group(0)
+    referencia_simple = re.search(r"[Aa]rt[íi]culo\s+\d+", texto_rag)
+    if referencia_simple:
+        return referencia_simple.group(0)
+    return None
+
+
 async def _bloque_parametros_urbanisticos(
     lng: float,
     lat: float,
@@ -1685,101 +1749,126 @@ async def _bloque_parametros_urbanisticos(
     """Construye el bloque urbanistic_parameters con degradación independiente.
 
     Orquestación (T016, plan.md Phase 3):
-    1. Consulta SDP (tratamiento espacial via SINUPOT layer 2)
-    2. Si tratamiento OK → consulta RAG normativo para parámetros numéricos
-    3. Parsing regex determinista de la respuesta (FR-014)
-    4. Degradación independiente por fuente: SDP falla → no_encontrado; RAG falla → tratamiento OK + campos None
+    1. Consulta SDP capa 2 (tratamiento espacial): fallo → BLOQUE_DEGRADADO;
+       respuesta sin features/denominación → BLOQUE_SIN_DATO (contrato:62-67)
+    2. Si tratamiento OK → consulta RAG normativo para parámetros numéricos;
+       fallo del RAG → warning BLOQUE_DEGRADADO deduplicado sin perder el
+       tratamiento (FR-008, FR-016)
+    3. Consulta capa 14 SINUPOT (edificabilidad oficial, FR-006/FR-021): sus
+       valores tienen precedencia sobre el parsing RAG; los campos que la capa
+       no entregue se complementan con el RAG. Degradación independiente.
+    4. Parsing regex determinista de la respuesta (FR-014)
 
     Contrato (contracts/urbanistic-parameters.md:Degradación por fuente).
     """
+    # --- 1. SDP capa 2: tratamiento espacial ---
     try:
         tratamiento, trace_sdp = await provider_sdp.consultar_tratamiento(lng, lat)
-    except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError):
-        # SDP falla → bloque no_encontrado + warning BLOQUE_DEGRADADO (FR-009)
-        warnings.append({
-            "codigo": "BLOQUE_DEGRADADO",
-            "mensaje": (
-                "Bloque urbanistic_parameters degradado: "
-                "error al consultar la capa SINUPOT/SDP."
-            ),
-        })
-        trace_fallback = SourceTrace(
-            source_name="SINUPOT — Norma Urbanística y OT",
-            layer_id="2",
-            service_url=provider_sdp._tratamiento.service_url,
-            data_vigencia="2021",
-            query_timestamp=_ahora_iso(),
-        )
-        return BloqueParametrosUrbanisticos(
-            estado="no_encontrado",
-            interpretation="No se encontró un tratamiento urbanístico para el lote en la fuente consultada.",
-            source_trace=trace_fallback,
+    except (Fuente5xxError, Fuente4xxError):
+        return _bloque_urbanistic_degradado(
+            provider_sdp, warnings, "error al consultar la capa SINUPOT/SDP"
         )
     except Exception:
-        # Excepción inesperada del SDP → no_encontrado + warning
+        return _bloque_urbanistic_degradado(
+            provider_sdp, warnings, "error inesperado al consultar la capa SINUPOT/SDP"
+        )
+
+    if tratamiento is None:
+        # SDP responde pero sin features/denominación → BLOQUE_SIN_DATO (FR-016)
         warnings.append({
-            "codigo": "BLOQUE_DEGRADADO",
+            "codigo": "BLOQUE_SIN_DATO",
             "mensaje": (
-                "Bloque urbanistic_parameters degradado: "
-                "error inesperado al consultar la capa SINUPOT/SDP."
+                "Bloque urbanistic_parameters sin dato: la capa SINUPOT/SDP "
+                "no reporta tratamiento urbanístico para el lote."
             ),
         })
-        trace_fallback = SourceTrace(
-            source_name="SINUPOT — Norma Urbanística y OT",
-            layer_id="2",
-            service_url=provider_sdp._tratamiento.service_url,
-            data_vigencia="2021",
-            query_timestamp=_ahora_iso(),
-        )
         return BloqueParametrosUrbanisticos(
             estado="no_encontrado",
             interpretation="No se encontró un tratamiento urbanístico para el lote en la fuente consultada.",
-            source_trace=trace_fallback,
+            source_trace=_trace_sdp_de_config(provider_sdp.configuracion_tratamiento()),
         )
 
-    # --- SDP OK: tratamiento resuelto espacialmente ---
+    # --- 2. RAG normativo: parámetros numéricos (FR-003, FR-018) ---
     prompt_rag = _construir_prompt_parametros_urbanisticos(
         tratamiento.denominacion, upl_codigo
     )
-    parametros_rag = None
+    respuesta_texto = ""
+    parametros_rag: dict[str, Any] | None = None
     try:
         resultado_normativa = await provider_normativa.consultar(
             consulta=prompt_rag, upl=upl_codigo, top_k=3
         )
         respuesta_texto = resultado_normativa.get("respuesta", "")
         parametros_rag = _parsear_parametros_rag(respuesta_texto)
+    except (CorpusNoIngestadoError, OllamaNoDisponibleError):
+        # Fallo de infraestructura del RAG → warning BLOQUE_DEGRADADO (FR-016);
+        # el tratamiento se conserva y los campos numéricos quedan en None (FR-008).
+        warnings.append({
+            "codigo": "BLOQUE_DEGRADADO",
+            "mensaje": (
+                "Bloque urbanistic_parameters degradado: el RAG normativo no "
+                "está disponible (corpus no ingestado u Ollama caído); los "
+                "parámetros numéricos quedan en None."
+            ),
+        })
     except Exception:
-        # RAG falla → tratamiento OK, campos numéricos None (FR-009)
-        pass
+        warnings.append({
+            "codigo": "BLOQUE_DEGRADADO",
+            "mensaje": (
+                "Bloque urbanistic_parameters degradado: error inesperado al "
+                "consultar el RAG normativo; los parámetros numéricos quedan "
+                "en None."
+            ),
+        })
 
-    # --- Construcción del bloque con patrón {estado, dato, interpretation, source_trace} ---
-    cos = None
-    cus = None
-    altura = None
-    frontal = None
-    laterales = None
-    posterior = None
-    estacionamientos_req = None
-    solo_tratamiento = False
+    # --- 3. Capa 14 SINUPOT: edificabilidad oficial (FR-006, FR-021) ---
+    # Los valores oficiales de la capa tienen precedencia sobre el parsing RAG;
+    # los campos que la capa no entregue se complementan con el RAG. La capa 14
+    # es complementaria: su ausencia de features NO genera warning (no es una
+    # fuente requerida del bloque), pero su fallo sí (degradación independiente).
+    cos_capa14 = cus_capa14 = altura_capa14 = None
+    try:
+        edif_capa14, _ = await provider_sdp.consultar_edificabilidad(lng, lat)
+        if edif_capa14 is not None:
+            cos_capa14 = edif_capa14.cos
+            cus_capa14 = edif_capa14.cus
+            altura_capa14 = edif_capa14.altura_maxima_m
+    except (Fuente5xxError, Fuente4xxError):
+        warnings.append({
+            "codigo": "BLOQUE_DEGRADADO",
+            "mensaje": (
+                "Bloque urbanistic_parameters degradado parcialmente: error al "
+                "consultar la capa de edificabilidad (layer 14) del SINUPOT."
+            ),
+        })
+    except Exception:
+        warnings.append({
+            "codigo": "BLOQUE_DEGRADADO",
+            "mensaje": (
+                "Bloque urbanistic_parameters degradado parcialmente: error "
+                "inesperado al consultar la capa de edificabilidad (layer 14)."
+            ),
+        })
 
-    if parametros_rag is not None:
-        cos = parametros_rag["cos"]
-        cus = parametros_rag["cus"]
-        altura = parametros_rag["altura_maxima_m"]
-        frontal = parametros_rag["frontal_m"]
-        laterales = parametros_rag["laterales_m"]
-        posterior = parametros_rag["posteriores_m"]
-        estacionamientos_req = parametros_rag["estacionamientos_requeridos"]
-        tiene_datos_numericos = any(v is not None for v in [
-            cos, cus, altura, frontal, laterales, posterior, estacionamientos_req
-        ])
-        if not tiene_datos_numericos:
-            solo_tratamiento = True
-    else:
-        solo_tratamiento = True
+    cos = cos_capa14 if cos_capa14 is not None else (parametros_rag or {}).get("cos")
+    cus = cus_capa14 if cus_capa14 is not None else (parametros_rag or {}).get("cus")
+    altura = (
+        altura_capa14
+        if altura_capa14 is not None
+        else (parametros_rag or {}).get("altura_maxima_m")
+    )
+    frontal = (parametros_rag or {}).get("frontal_m")
+    laterales = (parametros_rag or {}).get("laterales_m")
+    posterior = (parametros_rag or {}).get("posteriores_m")
+    estacionamientos_req = (parametros_rag or {}).get("estacionamientos_requeridos")
+
+    tiene_datos_numericos = any(
+        v is not None
+        for v in [cos, cus, altura, frontal, laterales, posterior, estacionamientos_req]
+    )
 
     # --- Interpretación determinista (FR-014) ---
-    if solo_tratamiento:
+    if not tiene_datos_numericos:
         interpretation = (
             f"Tratamiento urbanístico del lote: {tratamiento.denominacion}. "
             "Los parámetros numéricos (COS, CUS, altura, retiros, estacionamientos) "
@@ -1799,19 +1888,25 @@ async def _bloque_parametros_urbanisticos(
         interpretation = " ".join(partes)
 
     # --- Sub-modelos ---
-    edificabilidad = ParametrosEdificabilidad(
-        cos=cos, cus=cus, altura_maxima_m=altura
+    # Edificabilidad solo si hay al menos un valor real (capa 14 o RAG): si los
+    # tres campos son None el sub-modelo queda en None y la regla +10 del
+    # scoring (r_parametros_urbanisticos) no se activa (hallazgo M6).
+    edificabilidad = (
+        ParametrosEdificabilidad(cos=cos, cus=cus, altura_maxima_m=altura)
+        if any(v is not None for v in (cos, cus, altura))
+        else None
     )
     retiros = RetirosLote(
         frontal_m=frontal, laterales_m=laterales, posteriores_m=posterior
     )
+    criterio = (
+        _extraer_criterio_normativo(respuesta_texto)
+        if estacionamientos_req is not None
+        else None
+    )
     estacionamientos = EstacionamientosRequeridos(
         requeridos=estacionamientos_req,
-        criterio=(
-            "Artículo 389 Decreto 555/2021"
-            if estacionamientos_req is not None
-            else None
-        ),
+        criterio=criterio,
     )
 
     dato = ParametrosUrbanisticos(

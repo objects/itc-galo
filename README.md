@@ -12,6 +12,9 @@ consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
 - **Feature 3**: informe de factibilidad orquestado (1 tool nueva: `get_feasibility_report`).
 - **Feature 4**: ingesta de actos modificatorios del Decreto 555 (corpus consolidado; sin tools MCP nuevas).
 - **Feature 5**: interfaz web de prefactibilidad (FastAPI + Jinja2 + HTMX; sin tools MCP nuevas).
+- **Feature 6**: enriquecimiento del informe con 5 bloques ArcGIS adicionales (geotecnia, socioeconomía, regulatorio, patrimonio cultural, movilidad; sin tools MCP nuevas).
+- **Feature 7**: contexto catastral adicional (`catastro_data`, 5 capas en paralelo; sin tools MCP nuevas).
+- **Feature 8**: parámetros urbanísticos del lote (`urbanistic_parameters`: tratamiento SINUPOT/SDP layer 2, edificabilidad capa 14 con precedencia sobre el RAG, retiros y estacionamientos vía parsing regex determinista del texto RAG; sin tools MCP nuevas).
 
 ## Requisitos
 
@@ -178,7 +181,7 @@ mcp-bogota-factibilidad
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo del lote por CHIP (identidad + contexto por fuente). |
 | `get_upl` | Resuelve la UPL del lote por CHIP, dirección o coordenadas (join espacial punto-en-polígono contra la capa UPL; localidad derivada por mapeo nombre → localidad). |
 | `consultar_normativa` | Consulta en lenguaje natural sobre el POT con citas literales de artículos (RAG local); filtro estricto opcional por UPL. |
-| `get_feasibility_report` | Informe de factibilidad orquestado en 10 bloques (identidad, contexto administrativo, restricciones, mercado, entorno, contexto económico, evidencia normativa, score heurístico determinístico, warnings y timestamp) con trazabilidad por fuente. |
+| `get_feasibility_report` | Informe de factibilidad orquestado en 17 bloques (identidad, contexto administrativo, restricciones, mercado, entorno, contexto económico, geotecnia, socioeconomía, regulatorio, patrimonio cultural, movilidad, catastro, parámetros urbanísticos SINUPOT/SDP + RAG, evidencia normativa, score heurístico determinístico, warnings y timestamp) con trazabilidad por fuente. |
 
 > **Nota**: el bloque `economic_context` de `get_feasibility_report` consulta la
 > capa tabular Predio de ArcGIS (`catastro/lote/MapServer/3`) y no requiere
@@ -186,8 +189,9 @@ mcp-bogota-factibilidad
 
 Los contratos exactos (JSON Schema de entrada/salida) están en
 `specs/001-resolver-lote-contexto/contracts/` (F1),
-`specs/002-rag-normativo-upl/contracts/` (F2) y
-`specs/003-informe-factibilidad/contracts/` (F3).
+`specs/002-rag-normativo-upl/contracts/` (F2),
+`specs/003-informe-factibilidad/contracts/` (F3) y
+`specs/008-parametros-urbanisticos-lote/contracts/` (F8).
 
 Para una guía práctica de uso de las 7 herramientas (entrada y validación, salida,
 fuentes consultadas, errores tipificados y ejemplos de invocación), ver
@@ -302,7 +306,7 @@ app/
 ├── main.py              # FastMCP: registra las 7 tools (4 F1 + 2 F2 + 1 F3)
 ├── models.py            # Modelos pydantic (Lote, contexto, UPL, ArticuloNormativo, Chunk, CorpusInfo, InformeFactibilidad)
 ├── errores.py           # Taxonomía de errores del contrato (10 códigos)
-├── scoring.py           # F3: función pura calcular_score (score heurístico determinístico)
+├── scoring.py           # F3+F6+F7+F8: función pura calcular_score (score heurístico determinístico)
 ├── web/                 # Feature 5: interfaz web de prefactibilidad (FastAPI + Jinja2 + HTMX)
 │   ├── main.py          # crear_app_web: rutas US1/US2, mapeo de errores a HTTP, lifespan con ServidorLotes propio
 │   ├── db.py            # Proyecto (pydantic) + ProyectoRepositorio (SQLite, sqlite3 stdlib)
@@ -313,6 +317,7 @@ app/
 │   ├── arcgis.py        # ArcGIS REST (Lote=38 + temáticas; F3: capa Predio + obras por radio)
 │   ├── arcgis_utils.py  # Utilidades compartidas (params por punto, consultar_query, CapaConfig)
 │   ├── upl.py           # Capa UPL (unidadplaneamientolocal.0) + mapeo nombre → localidad
+│   ├── sdp.py           # F8: SINUPOT/SDP del POT (tratamiento layer 2, edificabilidad layer 14)
 │   └── normativa.py     # RAG: ChromaDB + embeddings Ollama + chat LLM con citation forcing
 ├── ingesta/             # Pipeline de ingesta del corpus normativo (F2) y de actos modificatorios (F4)
 │   ├── actos.py         # F4: detección de formato, extracción genérica y validación FR-014 de actos

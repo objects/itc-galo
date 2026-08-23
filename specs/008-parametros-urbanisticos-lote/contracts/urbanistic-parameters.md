@@ -42,6 +42,8 @@ El bloque `urbanistic_parameters` se añade al contrato existente de F3+F6+F7 (1
 }
 ```
 
+**Nota FR-010 (enmendada)**: el bloque lleva UN solo `source_trace` (patrón F6/F7), correspondiente a la fuente primaria del tratamiento espacial (SINUPOT/SDP layer 2). La proveniencia de los parámetros numéricos del RAG no genera un trace adicional: se documenta en `interpretation` y, ante fallo o degradación del RAG, en los warnings del informe.
+
 ### Estados del bloque
 
 | Estado | Condición | `dato` |
@@ -57,7 +59,7 @@ El bloque `urbanistic_parameters` se añade al contrato existente de F3+F6+F7 (1
 | SDP (tratamiento) | Tratamiento poblado en `dato` | Bloque `no_encontrado` + warning `BLOQUE_DEGRADADO` |
 | RAG (parámetros numéricos) | Campos COS/CUS/altura/retiros/estacionamientos poblados | Campos en `None`, bloque mantiene `disponible` si tratamiento OK |
 
-**Regla FR-009**: un 5xx de SDP NO se trata como "no encontrado" si el RAG respondió. El bloque mantiene estado `disponible` con tratamiento del SINUPOT y campos numéricos del RAG.
+**Regla FR-009 (enmendada)**: un 5xx de SDP degrada el bloque a `no_encontrado` + warning `BLOQUE_DEGRADADO` (alineado con FR-008): nunca es fatal y nunca se reporta como error `FUENTE_5XX`; la causa 5xx queda registrada en el mensaje del warning.
 
 ### Warnings
 

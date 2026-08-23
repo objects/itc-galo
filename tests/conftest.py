@@ -13,6 +13,7 @@ from app.main import ServidorLotes
 from app.providers.arcgis import ArcGISProvider
 from app.providers.mapas_bogota import MapasBogotaProvider
 from app.providers.normativa import NormativaProvider
+from app.providers.sdp import SDPProvider
 from app.providers.upl import UPLProvider
 
 
@@ -222,12 +223,17 @@ def provider_arcgis_estandar(
 
 
 def construir_servidor(mapas=None, arcgis=None):
-    """ServidorLotes con providers simulados (por defecto el flujo feliz estandar)."""
+    """ServidorLotes con providers simulados (por defecto el flujo feliz estandar).
+
+    Inyecta tambien un SDPProvider mockeado (F8): las tools F1 no lo consultan,
+    pero asi ningun servidor de prueba queda con provider real (hallazgo M5).
+    """
     return ServidorLotes(
         mapas if mapas is not None else provider_mapas_estandar(),
         arcgis if arcgis is not None else provider_arcgis_estandar(),
         UPLProvider(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"type": "FeatureCollection", "features": []}))),
         NormativaProvider(),
+        provider_sdp_f3(),
     )
 
 
@@ -363,13 +369,42 @@ def provider_upl_estandar(upl_features=None):
     )
 
 
-def server_lotes_f3(mapas=None, arcgis=None, upl=None, normativa=None):
-    """ServidorLotes con providers simulados del flujo F3 (informe de factibilidad)."""
+def provider_sdp_f3(tratamiento=None, edificabilidad=None):
+    """Provider SDP simulado para server_lotes_f3 (F8): capas 2 y 14 del SINUPOT.
+
+    Inyectado por defecto en `server_lotes_f3` para que NINGUN test preexistente
+    intente DNS/TLS real contra sinu.sdp.gov.co (hallazgo M5 del code review).
+    Por defecto responde 200 con features vacias en ambas capas: el bloque
+    urbanistic_parameters se degrada a no_encontrado + BLOQUE_SIN_DATO sin
+    afectar los bloques F3/F6/F7 ni el scoring.
+    """
+    trat = tratamiento if tratamiento is not None else []
+    edif = edificabilidad if edificabilidad is not None else []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/MapServer/2/query" in url:
+            return httpx.Response(200, json=geojson(trat))
+        if "/MapServer/14/query" in url:
+            return httpx.Response(200, json=geojson(edif))
+        return httpx.Response(404, json={"error": f"sin respuesta simulada para {url}"})
+
+    return SDPProvider(transport=httpx.MockTransport(handler))
+
+
+def server_lotes_f3(mapas=None, arcgis=None, upl=None, normativa=None, sdp=None):
+    """ServidorLotes con providers simulados del flujo F3 (informe de factibilidad).
+
+    `sdp` inyecta un SDPProvider mockeado por defecto (provider_sdp_f3): sin
+    inyeccion explicita, ServidorLotes crearia un provider real con red
+    (hallazgo M5 del code review).
+    """
     return ServidorLotes(
         mapas if mapas is not None else provider_mapas_estandar(),
         arcgis if arcgis is not None else provider_arcgis_f3(),
         upl if upl is not None else provider_upl_estandar(),
         normativa if normativa is not None else NormativaProvider(),
+        sdp if sdp is not None else provider_sdp_f3(),
     )
 
 

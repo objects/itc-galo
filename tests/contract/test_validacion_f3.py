@@ -15,6 +15,7 @@ import httpx
 from app.main import ServidorLotes
 from app.providers.arcgis import ArcGISProvider
 from app.providers.mapas_bogota import MapasBogotaProvider
+from app.providers.sdp import SDPProvider
 from app.providers.upl import UPLProvider
 from tests.conftest import (
     CHIP_VALIDO,
@@ -57,6 +58,9 @@ def _servidor_con_fuentes_trampa() -> tuple[ServidorLotes, NormativaProviderStub
             ArcGISProvider(transport=httpx.MockTransport(_handler_fuente_no_consultada)),
             UPLProvider(transport=httpx.MockTransport(_handler_fuente_no_consultada)),
             stub,
+            # SDP tambien trampa (F8): sin inyeccion, ServidorLotes crearia un
+            # provider real con red (hallazgo M5 del code review).
+            SDPProvider(transport=httpx.MockTransport(_handler_fuente_no_consultada)),
         ),
         stub,
     )

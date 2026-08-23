@@ -13,8 +13,10 @@ servicio (FR-005).
 
 Manejo de errores (FR-009, Principio IV):
 - HTTP 5xx / error de red -> Fuente5xxError (consultar_query).
-- Sin features para el punto -> se retorna None o se lanza excepción
-  según el contexto (tratamiento: excepción; edificabilidad: None).
+- HTTP 4xx -> Fuente4xxError (consultar_query).
+- Sin features para el punto -> consultar_tratamiento retorna None
+  ("SDP responde pero sin dato", el orquestador emite BLOQUE_SIN_DATO);
+  consultar_edificabilidad retorna (None, trace) por ser capa complementaria.
 - El esquema de campos de la capa NO es conocido a priori; se usa outFields="*"
   y se intentan múltiples nombres de campo de forma defensiva (patrón upl.py).
 
@@ -28,7 +30,6 @@ from typing import Any
 
 import httpx
 
-from app.errores import FuenteDatosInvalidosError
 from app.models import (
     ParametrosEdificabilidad,
     SourceTrace,
@@ -109,19 +110,31 @@ class SDPProvider:
         self._tratamiento = _configuracion_tratamiento()
         self._edificabilidad = _configuracion_edificabilidad()
 
+    def configuracion_tratamiento(self) -> CapaConfig:
+        """Configuración pública de la capa de tratamiento (layer 2).
+
+        Expone la CapaConfig para que el orquestador construya source_trace
+        de fallback sin acceder al atributo privado `_tratamiento`
+        (encapsulación, hallazgo m4 del code review).
+        """
+        return self._tratamiento
+
     async def aclose(self) -> None:
         """Cierra el cliente httpx subyacente."""
         await self._client.aclose()
 
     async def consultar_tratamiento(
         self, lng: float, lat: float
-    ) -> tuple[TratamientoUrbanistico, SourceTrace]:
+    ) -> tuple[TratamientoUrbanistico | None, SourceTrace]:
         """Consulta el tratamiento urbanístico del lote en la capa layer 2 del SINUPOT.
 
-        Retorna la tupla (tratamiento, source_trace) cuando la capa devuelve
-        al menos 1 feature con una denominación válida. Si no hay features o el
-        feature no tiene campo de denominación, lanza FuenteDatosInvalidosError
-        (el orquestador lo mapea a estado no_encontrado + warning).
+        Retorna la tupla (tratamiento, source_trace). Cuando SDP responde con
+        éxito pero SIN features para el punto (o el feature no tiene campo de
+        denominación), retorna (None, source_trace): es un "SDP responde pero
+        sin dato" y el orquestador debe emitir warning BLOQUE_SIN_DATO
+        (contracts/urbanistic-parameters.md:Warnings, FR-016). Los fallos de
+        transporte/HTTP sí se propagan como Fuente5xxError/Fuente4xxError
+        (el orquestador los mapea a BLOQUE_DEGRADADO).
 
         El esquema de campos de la capa NO es conocido a priori; se intentan
         múltiples nombres defensivos para el campo de denominación (patrón
@@ -135,12 +148,16 @@ class SDPProvider:
             source_name=self._tratamiento.source_name,
             params=params,
         )
+        trace = SourceTrace(
+            source_name=self._tratamiento.source_name,
+            layer_id=self._tratamiento.layer_id,
+            service_url=self._tratamiento.service_url,
+            data_vigencia=self._tratamiento.data_vigencia,
+            query_timestamp=_ahora_iso(),
+        )
         features = data.get("features") or []
         if not features:
-            raise FuenteDatosInvalidosError(
-                self._tratamiento.source_name,
-                "sin features de tratamiento para el punto consultado",
-            )
+            return None, trace
 
         propiedades = features[0].get("properties") or {}
         denominacion = _primer_texto(
@@ -148,22 +165,11 @@ class SDPProvider:
             ["DENOMINACION", "NOMBRE", "TRATAMIENTO", "TIPO", "TIPO_TRATA"],
         )
         if not denominacion:
-            raise FuenteDatosInvalidosError(
-                self._tratamiento.source_name,
-                "el feature de tratamiento no tiene campo de denominación",
-            )
+            return None, trace
 
         codigo = _primer_texto(
             propiedades,
             ["CODIGO", "CODIGO_CAPA", "ID", "OBJECTID", "OBJECTID_1"],
-        )
-
-        trace = SourceTrace(
-            source_name=self._tratamiento.source_name,
-            layer_id=self._tratamiento.layer_id,
-            service_url=self._tratamiento.service_url,
-            data_vigencia=self._tratamiento.data_vigencia,
-            query_timestamp=_ahora_iso(),
         )
         return TratamientoUrbanistico(
             denominacion=denominacion,
