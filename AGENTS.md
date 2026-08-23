@@ -126,6 +126,27 @@ Notas:
 - Hooks de extensiones se leen de `.specify/extensions.yml` (no existe hoy).
 - Comandos auxiliares: `/speckit.clarify`, `/speckit.checklist`, `/speckit.converge`, `/speckit.analyze`, `/speckit.taskstoissues`.
 
+### Actualización del tooling Spec Kit
+
+Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/commands/`):
+
+1. Instalar/actualizar el CLI a una versión pineada (NOTA: `uv tool upgrade` NO basta porque la
+   fuente es una rev de git pineada; usar `--force --reinstall`):
+   `uv tool install --force --reinstall "specify-cli @ git+https://github.com/github/spec-kit.git@vX.Y.Z"`
+2. Verificar que el working tree esté limpio (`git status --short`) antes de regenerar.
+3. Regenerar SIEMPRE con la integración OpenCode:
+   `specify init --here --force --integration opencode --non-interactive`
+4. Auditar el diff resultante:
+   - `.specify/integration.json` DEBE conservar `"integration": "opencode"` e
+     `"invoke_separator": "."`. Si el init lo cambia, restaurarlo.
+   - No debe aparecer configuración de otros agentes (copilot, `.github/skills/`).
+   - Verificar los manifests (`.specify/integrations/*.manifest.json`): todos los archivos
+     referenciados existen y sus hashes SHA-256 coinciden.
+5. Verificar funcionalmente: `bash .specify/scripts/bash/check-prerequisites.sh --json
+   --require-tasks --include-tasks` (exit 0, resuelve la feature activa) y `uv run pytest -q`.
+
+Última regeneración: Spec Kit 1.0.1 (agosto 2026).
+
 ## Datos del dominio (costosos de reconstruir)
 
 - App objetivo: Python (`mcp>=1.0.0` que incluye FastMCP, `httpx`, `pydantic`); MCP por stdio;
