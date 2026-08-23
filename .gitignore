@@ -20,3 +20,11 @@ htmlcov/
 # Índice vectorial derivado (ChromaDB). Regenerable con la ingesta (FR-009).
 # NOTA: `data/` (corpus JSONL versionado) NO se ignora: es la fuente de verdad.
 .data/
+
+# Artefactos locales (herramientas de agente y cachés generados)
+.github/skills/
+.ocx/
+.omo/
+chroma_db/
+models_cache/
+/opencode.json
