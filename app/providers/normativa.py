@@ -411,6 +411,11 @@ class NormativaProvider:
                         {"role": "user", "content": prompt},
                     ],
                     "stream": False,
+                    # Modelos razonadores (p.ej. qwen3.5) tienen modo "thinking"
+                    # activo por defecto: generan miles de tokens de razonamiento
+                    # que desbordan el timeout y pueden agotar el contexto antes
+                    # del contenido final. Los modelos sin thinking ignoran el campo.
+                    "think": False,
                     "options": {"temperature": 0.1},
                 },
             )

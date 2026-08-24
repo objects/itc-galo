@@ -159,6 +159,25 @@ async def test_contexto_ordena_fragmentos_por_fecha_vigencia_descendente():
 
 
 @pytest.mark.asyncio
+async def test_payload_desactiva_thinking_de_modelos_razonadores():
+    """El POST /api/chat incluye "think": false.
+
+    Los modelos razonadores (p.ej. qwen3.5) tienen el modo thinking activo por
+    defecto y generan miles de tokens de razonamiento que desbordan el timeout
+    del provider o agotan el contexto antes del contenido final. Los modelos sin
+    thinking ignoran el campo, así que es seguro enviarlo siempre.
+    """
+    provider, peticiones = _proveedor_con_captura()
+    try:
+        await provider._generar_respuesta_llm("vivienda colectiva", [_chunk_decreto_555()])
+    finally:
+        await provider.aclose()
+
+    assert peticiones, "El POST /api/chat debió capturarse"
+    assert peticiones[0].get("think") is False
+
+
+@pytest.mark.asyncio
 async def test_prompt_mantiene_citation_forcing_de_f2():
     """FR-003: se conserva la directriz de citas literales verificables de F2."""
     provider, peticiones = _proveedor_con_captura()
