@@ -4,12 +4,15 @@ Consulta la capa `ordenamientoterritorial/unidadplaneamientolocal/MapServer/0`
 por punto (interseccion espacial) y devuelve UPL con trazabilidad (FR-005, FR-006).
 
 Frontera de parsing para la API ArcGIS REST del catastro (Principio II).
-El mapeo NOMBRE -> localidad se deriva de research D3 (mapeo estatico).
+El mapeo NOMBRE -> localidad se deriva de la tabla estatica UPLS_BOGOTA
+(33 UPLs del Decreto 555/2021 con su vocacion), que tambien alimenta el
+filtro territorial FR-002 (PARTES_POR_UPL).
 """
 
 from __future__ import annotations
 
 import asyncio
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any
 
@@ -30,34 +33,116 @@ from app.providers.arcgis_utils import (
 VIGENCIA_UPL_DEFAULT = "2021-12-30"
 
 
-# Mapeo estatico NOMBRE_UPL -> localidad (research D3)
-# Basado en el mapa de UPLs del POT Bogota (Decreto 555/2021)
+# Tabla estatica versionada de las 33 UPLs de Bogota (Decreto 555/2021).
+# Fuente canonica: capa ArcGIS
+# `ordenamientoterritorial/unidadplaneamientolocal/MapServer/0` (33 features,
+# atributos CODIGO_UPL/NOMBRE/VOCACION consultados con where=1=1). La localidad
+# NO es un atributo de la capa: se asigna por la localidad principal de la UPL
+# segun el POT. UPLs multilocalidad documentadas en su entrada.
+# Vocacion (valores reales de la capa): "Urbano", "Urbano-Rural", "Rural".
+UPLS_BOGOTA: dict[str, dict[str, str]] = {
+    "UPL01": {"nombre": "Sumapáz", "localidad": "Sumapaz", "vocacion": "Rural"},
+    # Cuenca rural del río Tunjuelo: abarca Usme (principal), Ciudad Bolívar y Tunjuelito.
+    "UPL02": {"nombre": "Cuenca del Tunjuelo", "localidad": "Usme", "vocacion": "Rural"},
+    "UPL03": {"nombre": "Arborizadora", "localidad": "Ciudad Bolivar", "vocacion": "Urbano-Rural"},
+    "UPL04": {"nombre": "Lucero", "localidad": "Bosa", "vocacion": "Urbano-Rural"},
+    "UPL05": {"nombre": "Usme - Entrenubes", "localidad": "Usme", "vocacion": "Urbano-Rural"},
+    # Cerros Orientales: franja rural/protegida compartida por Santa Fe (principal),
+    # San Cristóbal, Usaquén y Chapinero.
+    "UPL06": {"nombre": "Cerros Orientales", "localidad": "Santa Fe", "vocacion": "Rural"},
+    "UPL07": {"nombre": "Torca", "localidad": "Usaquen", "vocacion": "Urbano-Rural"},
+    "UPL08": {"nombre": "Britalia", "localidad": "Suba", "vocacion": "Urbano-Rural"},
+    "UPL09": {"nombre": "Suba", "localidad": "Suba", "vocacion": "Urbano"},
+    "UPL10": {"nombre": "Tibabuyes", "localidad": "Suba", "vocacion": "Urbano-Rural"},
+    "UPL11": {"nombre": "Engativá", "localidad": "Engativa", "vocacion": "Urbano-Rural"},
+    "UPL12": {"nombre": "Fontibón", "localidad": "Fontibon", "vocacion": "Urbano-Rural"},
+    "UPL13": {"nombre": "Tintal", "localidad": "Kennedy", "vocacion": "Urbano-Rural"},
+    "UPL14": {"nombre": "Patio Bonito", "localidad": "Kennedy", "vocacion": "Urbano-Rural"},
+    "UPL15": {"nombre": "Porvenir", "localidad": "Bosa", "vocacion": "Urbano-Rural"},
+    "UPL16": {"nombre": "Edén", "localidad": "Kennedy", "vocacion": "Urbano"},
+    "UPL17": {"nombre": "Bosa", "localidad": "Bosa", "vocacion": "Urbano"},
+    "UPL18": {"nombre": "Kennedy", "localidad": "Kennedy", "vocacion": "Urbano"},
+    "UPL19": {"nombre": "Tunjuelito", "localidad": "Tunjuelito", "vocacion": "Urbano"},
+    "UPL20": {"nombre": "Rafael Uribe", "localidad": "Rafael Uribe Uribe", "vocacion": "Urbano"},
+    "UPL21": {"nombre": "San Cristóbal", "localidad": "San Cristobal", "vocacion": "Urbano"},
+    "UPL22": {"nombre": "Restrepo", "localidad": "Puente Aranda", "vocacion": "Urbano"},
+    # Centro Histórico: abarca La Candelaria, Santa Fe (principal) y Los Mártires.
+    "UPL23": {"nombre": "Centro Histórico", "localidad": "Santa Fe", "vocacion": "Urbano"},
+    "UPL24": {"nombre": "Chapinero", "localidad": "Chapinero", "vocacion": "Urbano"},
+    "UPL25": {"nombre": "Usaquén", "localidad": "Usaquen", "vocacion": "Urbano"},
+    "UPL26": {"nombre": "Toberín", "localidad": "Fontibon", "vocacion": "Urbano"},
+    "UPL27": {"nombre": "Niza", "localidad": "Engativa", "vocacion": "Urbano"},
+    "UPL28": {"nombre": "Rincón de Suba", "localidad": "Suba", "vocacion": "Urbano"},
+    "UPL29": {"nombre": "Tabora", "localidad": "Puente Aranda", "vocacion": "Urbano"},
+    # Salitre: Ciudad Salitre repartida entre Engativá (principal) y Barrios Unidos.
+    "UPL30": {"nombre": "Salitre", "localidad": "Engativa", "vocacion": "Urbano"},
+    "UPL31": {"nombre": "Puente Aranda", "localidad": "Puente Aranda", "vocacion": "Urbano"},
+    "UPL32": {"nombre": "Teusaquillo", "localidad": "Teusaquillo", "vocacion": "Urbano"},
+    "UPL33": {"nombre": "Barrios Unidos", "localidad": "Barrios Unidos", "vocacion": "Urbano"},
+}
+
+# Partes del Decreto 555/2021 aplicables por vocación de la UPL (FR-002,
+# plan.md F2: "general siempre aplicable"). Una UPL "Urbano-Rural" tiene suelo
+# de ambas clases: sus artículos pueden vivir en la Parte III (urbana) o en la
+# IV (rural).
+PARTES_POR_VOCACION: dict[str, list[str]] = {
+    "Urbano": ["urbano", "general"],
+    "Urbano-Rural": ["urbano", "rural", "general"],
+    "Rural": ["rural", "general"],
+}
+
+PARTES_POR_UPL: dict[str, list[str]] = {
+    codigo: list(PARTES_POR_VOCACION[registro["vocacion"]])
+    for codigo, registro in UPLS_BOGOTA.items()
+}
+
+
+def partes_aplicables(codigo_upl: str) -> list[str]:
+    """Partes del Decreto 555/2021 que aplican a una UPL (FR-002).
+
+    Fail loud: una UPL fuera del catálogo (UPL01–UPL33) no tiene una respuesta
+    silenciosa; el llamador ya valida el formato, así que llegar aquí con un
+    código desconocido es un estado ilegal.
+
+    Raises:
+        ValueError: si el código no está en el catálogo de 33 UPLs.
+    """
+    clave = codigo_upl.strip().upper()
+    if clave not in PARTES_POR_UPL:
+        raise ValueError(f"UPL desconocida: {codigo_upl}. Debe ser UPL01–UPL33.")
+    return list(PARTES_POR_UPL[clave])
+
+
+def construir_filtro_territorial(upl: str) -> dict[str, Any]:
+    """Filtro territorial estricto por UPL para ChromaDB (FR-002, plan.md F2).
+
+    Filtro compuesto `$or` (función pura): un chunk entra si su Parte del
+    Decreto 555 aplica a la clasificación de suelo de la UPL (`parte` en
+    `partes_aplicables(upl)`, vía PARTES_POR_UPL) O si el artículo menciona
+    explícitamente la UPL (`upls`, list[str] en la metadata; `$contains`
+    sobre lista es membresía exacta). Los chunks sin parte derivada
+    (parte="" en el índice) solo entran por la vía de mención explícita.
+    """
+    return {
+        "$or": [
+            {"parte": {"$in": partes_aplicables(upl)}},
+            {"upls": {"$contains": upl}},
+        ]
+    }
+
+
+def _clave_nombre(nombre: str) -> str:
+    """Clave de búsqueda para nombres de UPL: mayúsculas sin tildes."""
+    sin_tildes = unicodedata.normalize("NFD", nombre)
+    return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn").upper()
+
+
+# Mapeo estatico NOMBRE_UPL -> localidad, derivado de UPLS_BOGOTA (fuente:
+# capa ArcGIS unidadplaneamientolocal/MapServer/0). Las claves van en
+# mayusculas sin tildes porque la capa trae nombres acentuados ("Engativá").
 NOMBRE_UPL_A_LOCALIDAD: dict[str, str] = {
-    "SUMAPAZ": "Sumapaz",
-    "USME": "Usme",
-    "CIUDAD BOLIVAR": "Ciudad Bolivar",
-    "TUNJUELITO": "Tunjuelito",
-    "BOSA": "Bosa",
-    "KENNEDY": "Kennedy",
-    "FONTIBON": "Fontibon",
-    "ENGATIVA": "Engativa",
-    "SUBA": "Suba",
-    "BARRIOS UNIDOS": "Barrios Unidos",
-    "TEUSAQUILLO": "Teusaquillo",
-    "LOS MARTIRES": "Los Martires",
-    "ANTONIO NARINO": "Antonio Narino",
-    "PUENTE ARANDA": "Puente Aranda",
-    "CANDELARIA": "La Candelaria",
-    "RAFAEL URIBE URIBE": "Rafael Uribe Uribe",
-    "USAQUEN": "Usaquen",
-    "CHAPINERO": "Chapinero",
-    "SANTA FE": "Santa Fe",
-    # UPLs rurales / areas especiales
-    "SUMAPAZ RURAL": "Sumapaz",
-    "SAN CRISTOBAL SUR": "San Cristobal",
-    "SAN CRISTOBAL NORTE": "San Cristobal",
-    "USME RURAL": "Usme",
-    "CIUDAD BOLIVAR RURAL": "Ciudad Bolivar",
+    _clave_nombre(registro["nombre"]): registro["localidad"]
+    for registro in UPLS_BOGOTA.values()
 }
 
 
@@ -167,7 +252,7 @@ class UPLProvider:
 
     def _construir_upl(self, feature: UPLFeature) -> UPL:
         """Construye el modelo UPL con localidad derivada y trazabilidad."""
-        localidad = NOMBRE_UPL_A_LOCALIDAD.get(feature.nombre.upper())
+        localidad = NOMBRE_UPL_A_LOCALIDAD.get(_clave_nombre(feature.nombre))
         trace = SourceTrace(
             source_name=self._capa.source_name,
             layer_id=self._capa.layer_id,

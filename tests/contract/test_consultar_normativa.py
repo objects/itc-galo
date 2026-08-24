@@ -182,7 +182,7 @@ async def test_consultar_normativa_upl_invalida_formato_devuelve_parametros_inva
     resp = await servidor_normativa_ok.consultar_normativa(consulta="test", upl="UPL99")
     await servidor_normativa_ok.aclose()
     assert resp["error"]["code"] == "PARAMETROS_INVALIDOS"
-    assert "UPL inválida" in resp["error"]["message"]
+    assert "UPL desconocida" in resp["error"]["message"]
 
     resp = await servidor_normativa_ok.consultar_normativa(consulta="test", upl="UPLX")
     assert resp["error"]["code"] == "PARAMETROS_INVALIDOS"

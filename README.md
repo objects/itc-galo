@@ -180,7 +180,7 @@ mcp-bogota-factibilidad
 | `resolve_lot_by_coordinates` | Resuelve el lote que contiene un punto (`latitud`, `longitud` en WGS84). |
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo del lote por CHIP (identidad + contexto por fuente). |
 | `get_upl` | Resuelve la UPL del lote por CHIP, dirección o coordenadas (join espacial punto-en-polígono contra la capa UPL; localidad derivada por mapeo nombre → localidad). |
-| `consultar_normativa` | Consulta en lenguaje natural sobre el POT con citas literales de artículos (RAG local); filtro estricto opcional por UPL. |
+| `consultar_normativa` | Consulta en lenguaje natural sobre el POT con citas literales de artículos (RAG local); filtro territorial estricto opcional por UPL (parte aplicable según vocación o mención explícita de la UPL). |
 | `get_feasibility_report` | Informe de factibilidad orquestado en 17 bloques (identidad, contexto administrativo, restricciones, mercado, entorno, contexto económico, geotecnia, socioeconomía, regulatorio, patrimonio cultural, movilidad, catastro, parámetros urbanísticos SINUPOT/SDP + RAG, evidencia normativa, score heurístico determinístico, warnings y timestamp) con trazabilidad por fuente. |
 
 > **Nota**: el bloque `economic_context` de `get_feasibility_report` consulta la

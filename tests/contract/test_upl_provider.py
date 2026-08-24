@@ -110,12 +110,14 @@ async def test_upl_provider_5xx_raise_fuente_5xx(provider_upl_500):
 
 
 def test_mapeo_nombre_upl_a_localidad_cubre_upls_principales():
-    # Verifica que el mapeo estatico tiene las localidades principales
+    # Verifica que el mapeo estatico (derivado de UPLS_BOGOTA, 33 UPLs) tiene
+    # las localidades principales. Claves en mayusculas sin tildes.
+    assert len(NOMBRE_UPL_A_LOCALIDAD) == 33
     assert NOMBRE_UPL_A_LOCALIDAD["SUMAPAZ"] == "Sumapaz"
     assert NOMBRE_UPL_A_LOCALIDAD["CHAPINERO"] == "Chapinero"
     assert NOMBRE_UPL_A_LOCALIDAD["KENNEDY"] == "Kennedy"
     assert NOMBRE_UPL_A_LOCALIDAD["SUBA"] == "Suba"
     assert NOMBRE_UPL_A_LOCALIDAD["USAQUEN"] == "Usaquen"
-    # UPLs con sufijo RURAL
-    assert NOMBRE_UPL_A_LOCALIDAD["SUMAPAZ RURAL"] == "Sumapaz"
-    assert NOMBRE_UPL_A_LOCALIDAD["USME RURAL"] == "Usme"
+    # Nombres acentuados de la capa ArcGIS se normalizan a la clave.
+    assert NOMBRE_UPL_A_LOCALIDAD["ENGATIVA"] == "Engativa"
+    assert NOMBRE_UPL_A_LOCALIDAD["SAN CRISTOBAL"] == "San Cristobal"

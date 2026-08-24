@@ -10,10 +10,20 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 - **Repositorio en `master`; HEAD `37b0175` (implementación F8) + commit de cierre (correcciones de
   revisión y documentación de F8).**
   La aplicación está implementada y probada: F1, F2,
-  F3, F4, F6, F7 y F8 completas, **293 tests passing (suite completa: smoke 6 + contract), 0 failed**,
+  F3, F4, F6, F7 y F8 completas, **324 tests passing (suite completa: smoke 6 + contract), 0 failed**,
   gate PASS, con las **7 tools** registradas (F4, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
+- **Filtro territorial FR-002 funcional + enriquecimiento UPL del corpus** (post-F8): la metadata
+  `upls` se indexa como `list[str]` (membresía exacta en ChromaDB; el `$contains` sobre string CSV
+  nunca matcheaba) y `construir_filtro_territorial` aplica un filtro compuesto `$or`: parte aplicable
+  según vocación (`PARTES_POR_UPL`, derivada de la tabla estática `UPLS_BOGOTA` con las 33 UPLs de la
+  capa `unidadplaneamientolocal`) O mención explícita de la UPL en el artículo. Extractor enriquecido
+  de 3 capas deterministas (libro/parte, menciones UPL01–UPL33, vocación) durante la ingesta;
+  subcomando CLI `enriquecer-upls`; esquema de metadatos v2 (`METADATA_ESQUEMA_METADATOS`) con rebuild
+  automático del índice al detectar esquema legado. Corpus regenerado: 27/608 artículos con UPLs
+  nuevas, 78/845 chunks poblados. Mensaje de error unificado: "UPL desconocida" (antes `normativa.py`
+  decía "UPL inválida").
 - **F1 — `specs/001-resolver-lote-contexto/`**: COMPLETA. spec.md, plan.md, research.md,
   data-model.md, contracts/, tasks.md (36 tareas T001–T036 marcadas completadas), quickstart.md,
   checklists/. Implementa las 4 tools de resolución de lote.

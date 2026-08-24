@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,9 @@ from app.models import (
     FECHA_VIGENCIA_555,
     METADATA_CORPUS_SHA256,
     METADATA_EMBEDDING_MODEL,
+    METADATA_ESQUEMA_METADATOS,
 )
+from app.providers.upl import UPLS_BOGOTA, construir_filtro_territorial
 
 # Alternativas de numeral romano de mayor a menor longitud: sin ese orden el
 # motor de regex elegiria "I" dentro de "II"/"III"/"IV" y el libro se perderia.
@@ -43,6 +46,85 @@ ARTICULO_PATRON = re.compile(r"ARTÍCULO\s+(\d+)")
 # La fuente real menciona UPL de uno y dos dígitos ("UPL 2".."UPL 33"); el
 # dígito se normaliza después a dos posiciones (UPL02..UPL33).
 UPL_PATRON = re.compile(r"UPL\s*(\d{1,2})")
+
+# --- Enriquecimiento por nombre propio de UPL (fase C) ---
+# Política anti falsos positivos para matchear nombres de UPL sobre el texto
+# (FR-014: la metadata registra SOLO mención explícita; un falso positivo
+# contaminaría el filtro territorial FR-002 con artículos que no pertenecen a
+# la UPL). Criterios de exclusión, verificados contra el corpus real:
+#   a) Coincide con el nombre de una LOCALIDAD: la mención de la localidad
+#      ("la localidad de Suba") no implica la UPL.
+#   b) Palabra común del español o apellido propio ("el porvenir", "el
+#      Restrepo" como sector, Kennedy como persona).
+#   c) Topónimo de un elemento geográfico/hidrográfico distinto de la UPL:
+#      "corredor de páramos de Sumapaz-Chingaza", "río Salitre", "humedal de
+#      Torca y Guaymaral", "humedal de Juan Amarillo o Tibabuyes", "humedal de
+#      Córdoba y Niza", "cerro Entre Nubes".
+#   d) Nombre incompleto respecto al oficial ("Rafael Uribe" vs localidad
+#      "Rafael Uribe Uribe"): el fragmento matcheado es ambiguo.
+# Los excluidos SIGUEN detectándose por código literal (capa 1) y por nombre
+# cualificado "UPL <nombre>" (capa 3), donde el propio texto los desambigua.
+NOMBRES_UPL_EXCLUIDOS_POR_AMBIGUEDAD: dict[str, str] = {
+    "UPL01": "Sumapáz: homónimo del páramo/Parque Nacional Natural Sumapaz y de la localidad",
+    "UPL04": "Lucero: palabra común y apellido; 'el Lucero' como barrio no identifica la UPL sin calificador",
+    "UPL07": "Torca: homónimo del humedal Torca-Guaymaral, del cerro y de la centralidad 'Lagos de Torca'",
+    "UPL09": "Suba: coincide con la localidad",
+    "UPL10": "Tibabuyes: homónimo del humedal 'Juan Amarillo o Tibabuyes'",
+    "UPL11": "Engativá: coincide con la localidad",
+    "UPL12": "Fontibón: coincide con la localidad",
+    "UPL15": "Porvenir: palabra común ('el porvenir'); 'ciclo-alameda del Porvenir' no es la UPL",
+    "UPL16": "Edén: palabra común (topónimo bíblico/genérico)",
+    "UPL17": "Bosa: coincide con la localidad",
+    "UPL18": "Kennedy: coincide con la localidad y es apellido",
+    "UPL19": "Tunjuelito: coincide con la localidad",
+    "UPL20": "Rafael Uribe: nombre incompleto (localidad 'Rafael Uribe Uribe' y persona homónima)",
+    "UPL21": "San Cristóbal: coincide con la localidad",
+    "UPL22": "Restrepo: apellido y topónimo repetido ('el Restrepo' como sector)",
+    "UPL24": "Chapinero: coincide con la localidad",
+    "UPL25": "Usaquén: coincide con la localidad",
+    "UPL27": "Niza: topónimo extranjero (Niza, Francia) y humedal 'Córdoba y Niza'",
+    "UPL30": "Salitre: río, humedal, PTAR y 'Ciudad Salitre' no son la UPL",
+    "UPL31": "Puente Aranda: coincide con la localidad",
+    "UPL32": "Teusaquillo: coincide con la localidad",
+    "UPL33": "Barrios Unidos: coincide con la localidad y es frase común",
+}
+
+# Nombres propios SEGUROS para matcheo sin calificador (capa 2): topónimos
+# únicos en el contexto distrital que designan inequívocamente el territorio
+# de la UPL. Derivado de UPLS_BOGOTA tras aplicar los criterios a-d. Nota
+# UPL05: solo se matchea el compuesto oficial "Usme - Entrenubes"; el alias
+# suelto "Entre Nubes" queda fuera por homonimia con el cerro/parque.
+NOMBRES_UPL_SEGUROS: dict[str, str] = {
+    codigo: registro["nombre"]
+    for codigo, registro in UPLS_BOGOTA.items()
+    if codigo not in NOMBRES_UPL_EXCLUIDOS_POR_AMBIGUEDAD
+}
+
+
+def _clave_sin_tildes(texto: str) -> str:
+    """Clave de comparación textual: minúsculas sin tildes (determinista)."""
+    sin_tildes = unicodedata.normalize("NFD", texto)
+    return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn").lower()
+
+
+def _cuerpo_nombre(nombre: str) -> str:
+    """Cuerpo de regex para un nombre de UPL: tokens escapados y separadores
+    flexibles (espacio, guion o guion largo cubren 'Usme - Entrenubes' y sus
+    variantes tipográficas)."""
+    clave = _clave_sin_tildes(re.sub(r"[-\u2013\u2014]", " ", nombre))
+    separador = r"[\s\-\u2013\u2014]+"
+    return separador.join(re.escape(token) for token in clave.split())
+
+
+PATRONES_NOMBRE_SEGURO: list[tuple[str, re.Pattern[str]]] = [
+    (codigo, re.compile(r"\b" + _cuerpo_nombre(nombre) + r"\b"))
+    for codigo, nombre in sorted(NOMBRES_UPL_SEGUROS.items())
+]
+
+PATRONES_NOMBRE_CUALIFICADO: list[tuple[str, re.Pattern[str]]] = [
+    (codigo, re.compile(r"\bupl\s+" + _cuerpo_nombre(registro["nombre"]) + r"\b"))
+    for codigo, registro in sorted(UPLS_BOGOTA.items())
+]
 ARTICULO_DEROGADO_PATRON = re.compile(
     r"deroga[ra]?\s+(?:el\s+)?art[ií]culo\s+(\d+)", re.IGNORECASE
 )
@@ -147,15 +229,34 @@ def _limpiar_html(texto: str) -> str:
 
 
 def _extraer_upls(texto: str) -> list[str]:
-    """UPLs mencionadas en el texto, únicas y en forma canónica de dos dígitos.
+    """UPLs mencionadas en el texto, únicas, canónicas y deterministas.
 
-    Acepta las variantes de la fuente (`UPL 2`, `UPL20`, `UPL 33`) y normaliza
-    todas a la forma canónica de dos dígitos (`UPL02`..`UPL33`), con cero-padding
-    para los valores de un dígito: "UPL 2" -> "UPL02", "UPL20" -> "UPL20".
+    Tres capas de detección, TODAS sobre mención explícita del texto (FR-014,
+    data-model.md:104: "mención explícita"; nunca se infiere una regla
+    urbanística ausente en la fuente):
+
+    1. Códigos literales (`UPL 17`, `UPL17`, `UPL 33`): se normalizan a la forma
+       canónica de dos dígitos ("UPL 2" -> "UPL02").
+    2. Nombre propio SEGURO de UPL en cualquier posición ("Cerros Orientales" ->
+       UPL06): solo nombres del catálogo `NOMBRES_UPL_SEGUROS`, que excluye los
+       topónimos ambiguos (ver justificación allí).
+    3. Nombre propio CUALIFICADO (`UPL <nombre>`, p. ej. "UPL Bosa" -> UPL17):
+       el calificador "UPL" inmediato desambigua cualquier nombre del catálogo
+       `UPLS_BOGOTA`, incluidos los excluidos de la capa 2.
+
+    La comparación de nombres es insensible a mayúsculas y tildes (clave
+    normalizada) pero conserva el código canónico. La función es pura y
+    determinista (sin LLM, sin reloj) y devuelve los códigos ordenados.
     """
-    return list(
-        dict.fromkeys(f"UPL{int(digitos):02d}" for digitos in UPL_PATRON.findall(texto))
-    )
+    codigos = {f"UPL{int(digitos):02d}" for digitos in UPL_PATRON.findall(texto)}
+    texto_clave = _clave_sin_tildes(texto)
+    for codigo, patron in PATRONES_NOMBRE_SEGURO:
+        if patron.search(texto_clave):
+            codigos.add(codigo)
+    for codigo, patron in PATRONES_NOMBRE_CUALIFICADO:
+        if patron.search(texto_clave):
+            codigos.add(codigo)
+    return sorted(codigos)
 
 
 def _extraer_derogados(texto: str) -> list[int]:
@@ -637,6 +738,18 @@ BATCH_EMBEDDING_TAMANO = int(os.getenv("EMBEDDING_BATCH_SIZE", "100"))
 # documento CAMBIADO reconstruye la colección.
 METADATA_DOCUMENTOS_HASH = "hash_corpus"
 
+# Version del esquema de metadatos por chunk (FR-002), persistida en la
+# metadata de la coleccion (clave `esquema_metadatos`). Un cambio de FORMATO
+# de la metadata no cambia el hash del JSONL: sin esta version, el indice
+# viejo seguiria sirviendo chunks con el formato anterior. Historial:
+#   "1" = `upls` como string CSV ("UPL17,UPL20"): `$contains` sobre string NO
+#         hace substring matching en ChromaDB -> el filtro FR-002 devolvia
+#         siempre 0 resultados.
+#   "2" = `upls` como list[str] real (`$contains` = membresia exacta) y la
+#         clave se omite cuando el articulo no menciona UPLs (ChromaDB rechaza
+#         listas vacias).
+VERSION_ESQUEMA_METADATOS = "2"
+
 # Identidad canónica del documento base (FR-012): el 555 conserva su esquema F2
 # y su JSONL no se modifica; los campos aditivos se materializan en el índice.
 DOCUMENTO_BASE_ID = "Decreto_555_2021"
@@ -775,6 +888,16 @@ def _motivo_reconstruccion(
             f"({modelo_persistido} != {embedding_model})"
         )
 
+    # Esquema de metadatos por chunk (FR-002): un indice creado con otro
+    # formato de metadata (p. ej. `upls` como CSV) debe reconstruirse aunque
+    # el hash del corpus no haya cambiado.
+    esquema_persistido = metadata_coleccion.get(METADATA_ESQUEMA_METADATOS)
+    if esquema_persistido != VERSION_ESQUEMA_METADATOS:
+        return (
+            f"Índice con otro esquema de metadatos "
+            f"({esquema_persistido or 'sin versión'} != {VERSION_ESQUEMA_METADATOS})"
+        )
+
     huella_persistida = _parsear_huella(
         metadata_coleccion.get(METADATA_DOCUMENTOS_HASH, "")
     )
@@ -897,6 +1020,7 @@ def indexar_corpus(
         "hnsw:space": "cosine",
         METADATA_CORPUS_SHA256: hash_actual,
         METADATA_EMBEDDING_MODEL: embedding_model,
+        METADATA_ESQUEMA_METADATOS: VERSION_ESQUEMA_METADATOS,
         METADATA_DOCUMENTOS_HASH: _serializar_huella(huella_entrante),
     }
 
@@ -957,17 +1081,20 @@ def indexar_corpus(
         for chunk in chunk_articulo(articulo):
             ids.append(chunk.id)
             documents.append(chunk.texto)
-            metadatas.append(
-                {
-                    "articulo": chunk.articulo,
-                    "titulo": chunk.titulo,
-                    "libro": chunk.libro,
-                    "parte": chunk.parte or "",
-                    "seccion": chunk.seccion or "",
-                    "upls": ",".join(articulo.upls_mencionadas),
-                    **metadatos_norma,
-                }
-            )
+            metadatos_chunk = {
+                "articulo": chunk.articulo,
+                "titulo": chunk.titulo,
+                "libro": chunk.libro,
+                "parte": chunk.parte or "",
+                "seccion": chunk.seccion or "",
+                **metadatos_norma,
+            }
+            if articulo.upls_mencionadas:
+                # list[str] real, NO CSV: `$contains` de ChromaDB sobre lista es
+                # membresia exacta (FR-002). La clave se omite si no hay UPLs
+                # porque ChromaDB rechaza listas vacias en la metadata.
+                metadatos_chunk["upls"] = list(articulo.upls_mencionadas)
+            metadatas.append(metadatos_chunk)
 
     for inicio in range(0, len(ids), batch_tamano):
         coleccion.upsert(
@@ -1008,7 +1135,10 @@ def consultar_corpus(
     """Consulta el índice vectorial del corpus normativo.
 
     Busca chunks semánticamente similares a la consulta, con filtro opcional
-    estricto por UPL (FR-002) usando $contains sobre string CSV "UPL17,UPL20".
+    estricto por UPL (FR-002): filtro compuesto `$or` entre la Parte aplicable
+    según la vocación de la UPL (`parte`) y la mención explícita de la UPL
+    (`upls`, list[str] en la metadata). Mismo criterio que el provider RAG
+    (`construir_filtro_territorial`).
 
     Args:
         ruta_indice: Ruta al directorio del índice ChromaDB.
@@ -1036,7 +1166,7 @@ def consultar_corpus(
             f"Índice no encontrado en {ruta_indice}. Ejecuta la ingesta primero."
         ) from e
 
-    where = {"upls": {"$contains": upl_filtro}} if upl_filtro else None
+    where = construir_filtro_territorial(upl_filtro) if upl_filtro else None
 
     results = coleccion.query(
         query_texts=[consulta],
@@ -1311,6 +1441,12 @@ def indexar_acto(
                 f"Índice con otro modelo de embeddings "
                 f"({metadata_coleccion[METADATA_EMBEDDING_MODEL]} != {embedding_model})"
             )
+        elif metadata_coleccion.get(METADATA_ESQUEMA_METADATOS) != VERSION_ESQUEMA_METADATOS:
+            motivo = (
+                f"Índice con otro esquema de metadatos "
+                f"({metadata_coleccion.get(METADATA_ESQUEMA_METADATOS) or 'sin versión'} "
+                f"!= {VERSION_ESQUEMA_METADATOS})"
+            )
         else:
             huella_persistida = _parsear_huella(
                 metadata_coleccion.get(METADATA_DOCUMENTOS_HASH, "")
@@ -1405,6 +1541,110 @@ def cmd_consultar(
         parte_str = f"{chunk.libro}/{chunk.parte}" if chunk.parte else f"{chunk.libro}/sin parte"
         print(f"{chunk.id} (art {chunk.articulo}, {parte_str}): similitud={sim:.4f}")
         print(f"  {chunk.texto[:200]}...")
+
+
+# --- Subcomando `enriquecer-upls` (fase C: metadata UPL del corpus) ---
+# Post-proceso SIN re-descargar: recalcula `upls_mencionadas` de cada artículo
+# con el extractor enriquecido sobre titulo+texto y re-escribe el JSONL y su
+# `.sha256` de forma atómica SOLO si hubo cambios. Las líneas sin cambios se
+# conservan byte a byte para minimizar el diff del corpus versionado en git
+# (FR-013). La huella `.sha256` es `hash_documento` del corpus actualizado,
+# exactamente la misma convención de `descargar` (555) y de
+# `escribir_documento_acto` (actos), con lo que la verificación FR-009 y la
+# huella multi-documento (`hash_corpus`) quedan consistentes. El registro
+# `.corpus_consolidado.json` NO se toca: su `hash_sha256` es la huella del
+# ARCHIVO FUENTE (FR-007), que este post-proceso no modifica.
+
+
+def enriquecer_upls_jsonl(ruta_jsonl: str) -> dict[str, Any]:
+    """Recalcula `upls_mencionadas` del JSONL y lo reescribe si cambió algo.
+
+    Lee el JSONL existente, aplica `_extraer_upls` (extractor enriquecido) a
+    titulo+texto de cada artículo y compara contra el valor persistido.
+    Devuelve un reporte con el diff ({articulo, antes, nuevas} por cambio);
+    si hubo cambios, reescribe el JSONL y su `.sha256` de forma atómica.
+
+    Fail fast: un archivo inexistente o ilegible aborta sin escribir nada.
+    """
+    from app.ingesta.actos import _escribir_atomicamente
+
+    ruta = Path(ruta_jsonl)
+    if not ruta.is_file():
+        raise CorpusNoIngestadoError(
+            detalle=(
+                f"No existe el archivo '{ruta_jsonl}'. Ejecuta la ingesta antes "
+                "de enriquecer la metadata UPL."
+            )
+        )
+
+    lineas = ruta.read_text(encoding="utf-8").splitlines()
+    articulos = deserializar_corpus(ruta_jsonl)
+
+    lineas_actualizadas: list[str] = []
+    articulos_actualizados: list[ArticuloNormativo] = []
+    detalles: list[dict[str, Any]] = []
+    for linea, articulo in zip(lineas, articulos):
+        nuevas = _extraer_upls(f"{articulo.titulo}\n{articulo.texto}")
+        articulos_actualizados.append(
+            articulo.model_copy(update={"upls_mencionadas": nuevas})
+        )
+        if nuevas == articulo.upls_mencionadas:
+            # Línea sin cambios: se conserva literal (diff mínimo en git).
+            lineas_actualizadas.append(linea)
+            continue
+        dato = json.loads(linea)
+        dato["upls_mencionadas"] = nuevas
+        lineas_actualizadas.append(
+            json.dumps(dato, ensure_ascii=False, separators=(",", ":"))
+        )
+        agregadas = sorted(set(nuevas) - set(articulo.upls_mencionadas))
+        retiradas = sorted(set(articulo.upls_mencionadas) - set(nuevas))
+        detalles.append(
+            {
+                "articulo": articulo.numero,
+                "antes": articulo.upls_mencionadas,
+                "nuevas": nuevas,
+                "agregadas": agregadas,
+                "retiradas": retiradas,
+            }
+        )
+
+    reporte: dict[str, Any] = {
+        "archivo": str(ruta),
+        "articulos": len(articulos),
+        "cambiados": len(detalles),
+        "detalles": detalles,
+        "hash_sha256": None,
+    }
+    if not detalles:
+        return reporte
+
+    hash_nuevo = hash_documento(articulos_actualizados)
+    _escribir_atomicamente(ruta, "\n".join(lineas_actualizadas) + "\n")
+    _escribir_atomicamente(Path(f"{ruta}.sha256"), hash_nuevo)
+    reporte["hash_sha256"] = hash_nuevo
+    return reporte
+
+
+def cmd_enriquecer_upls(ruta_jsonl: str) -> None:
+    """Ejecuta el enriquecimiento de UPLs e imprime el diff."""
+    reporte = enriquecer_upls_jsonl(ruta_jsonl)
+    for detalle in reporte["detalles"]:
+        print(
+            f"Artículo {detalle['articulo']}: "
+            f"+{detalle['agregadas']} -{detalle['retiradas']} "
+            f"(antes {len(detalle['antes'])} -> ahora {len(detalle['nuevas'])})"
+        )
+    if reporte["cambiados"] == 0:
+        print(
+            f"Sin cambios: {reporte['articulos']} artículos ya tenían la "
+            f"metadata UPL al día ({reporte['archivo']})."
+        )
+        return
+    print(
+        f"Artículos cambiados: {reporte['cambiados']} de {reporte['articulos']} "
+        f"| Hash nuevo: {reporte['hash_sha256']} | Archivo: {reporte['archivo']}"
+    )
 
 
 # --- Subcomando `acto` (T013/T014, Feature 4: ingesta de actos modificatorios) ---
@@ -1809,7 +2049,7 @@ def _smoke() -> None:
     if resultado['metadatas']:
         meta = resultado['metadatas'][0]
         print(f"  parte == '': {meta.get('parte') == ''}")
-        print(f"  upls == 'UPL17': {meta.get('upls') == 'UPL17'}")
+        print(f"  upls == ['UPL17']: {meta.get('upls') == ['UPL17']}")
 
     # Smoke tests para consultar_corpus
     print("\n=== Smoke tests consultar_corpus ===")
@@ -1887,6 +2127,20 @@ def main() -> None:
     p_cons.add_argument("--upl", dest="upl_filtro", help="Filtrar por UPL (ej. UPL17)")
     p_cons.add_argument("--ruta-indice", default=DEFAULT_INDICE, help="Ruta al índice ChromaDB")
 
+    # --enriquecer-upls
+    p_enr = subparsers.add_parser(
+        "enriquecer-upls",
+        help=(
+            "Recalcula upls_mencionadas del JSONL con el extractor enriquecido "
+            "(nombres propios de UPL) y reescribe JSONL + .sha256 si cambió algo"
+        ),
+    )
+    p_enr.add_argument(
+        "--archivo",
+        default=RUTA_CORPUS,
+        help="Ruta al JSONL a enriquecer (default: data/corpus/decreto_555_2021.jsonl)",
+    )
+
     # --acto
     p_acto = subparsers.add_parser(
         "acto",
@@ -1929,6 +2183,8 @@ def main() -> None:
             cmd_full(args.url, args.ruta_indice, args.demo)
         elif args.comando == "consultar":
             cmd_consultar(args.consulta, args.top_k, args.umbral, args.upl_filtro, args.ruta_indice)
+        elif args.comando == "enriquecer-upls":
+            cmd_enriquecer_upls(args.archivo)
         elif args.comando == "acto":
             cmd_acto(args)
     except ErrorIngesta as e:

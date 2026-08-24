@@ -203,6 +203,14 @@ COLECCION_NORMATIVA = "decreto_555_2021"
 METADATA_CORPUS_SHA256 = "corpus_sha256"
 METADATA_EMBEDDING_MODEL = "embedding_model"
 
+# Version del esquema de metadatos de los chunks (FR-002): un cambio en el
+# FORMATO de la metadata por chunk (no en el corpus) obliga a reconstruir el
+# indice aunque el hash del JSONL no cambie. Historial:
+#   "1" = `upls` como string CSV ("UPL17,UPL20") — $contains nunca matcheaba.
+#   "2" = `upls` como list[str] real ($contains = membresia exacta) + filtro
+#         territorial compuesto ($or parte/upls) en la consulta.
+METADATA_ESQUEMA_METADATOS = "esquema_metadatos"
+
 # Vigencia del Decreto 555/2021 (FR-014): fecha mínima de expedición de un acto
 # que pretenda reglamentarlo o modificarlo. Es el dato del POT base (research
 # H4: Registro Distrital No. 7326, vigencia 30/12/2021).

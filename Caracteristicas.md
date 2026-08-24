@@ -18,7 +18,7 @@ normativa** del POT (RAG local sobre el Decreto 555 de 2021).
 - **100 % determinista sin LLM** en la resolución de lote, el contexto temático y el
   `feasibility_score` (`app/scoring.py`, función pura). El LLM se usa **solo** en el RAG
   normativo opcional (`consultar_normativa` y la evidencia de `get_feasibility_report`).
-- Suite: **293 tests passing, 0 failed** (suite completa: smoke 6 + contract; sin red
+- Suite: **324 tests passing, 0 failed** (suite completa: smoke 6 + contract; sin red
   real ni Ollama).
 
 Las 7 tools:
@@ -236,8 +236,9 @@ consulta la capa UPL directamente por el punto (`metodo_resolucion = "punto_dire
 
 Responde una **consulta en lenguaje natural** sobre el POT (Decreto 555 de 2021) con los
 artículos más relevantes, **cita literal** (número y título) y trazabilidad. El `upl`
-opcional aplica un **filtro estricto** por metadatos/clasificación (solo artículos aplicables
-a esa UPL). Sin resultados relevantes → **abstención explícita** (no es un error).
+opcional aplica un **filtro territorial estricto** (`$or` compuesto): artículos de las Partes
+del Decreto aplicables a la vocación de suelo de la UPL **o** artículos que mencionan
+explícitamente la UPL. Sin resultados relevantes → **abstención explícita** (no es un error).
 
 - **Entrada**
 

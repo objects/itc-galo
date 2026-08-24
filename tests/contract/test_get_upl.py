@@ -397,10 +397,11 @@ async def test_get_upl_sin_upl_devuelve_lote_sin_upl():
 # --- Test de mapeo nombre UPL -> localidad ---
 
 def test_mapeo_nombre_upl_a_localidad_cubre_casos():
-    """Verifica mapeo estático para UPLs principales."""
+    """Verifica mapeo estático (derivado de UPLS_BOGOTA, 33 UPLs) para UPLs principales."""
+    assert len(NOMBRE_UPL_A_LOCALIDAD) == 33
     assert NOMBRE_UPL_A_LOCALIDAD["CHAPINERO"] == "Chapinero"
     assert NOMBRE_UPL_A_LOCALIDAD["KENNEDY"] == "Kennedy"
     assert NOMBRE_UPL_A_LOCALIDAD["SUBA"] == "Suba"
     assert NOMBRE_UPL_A_LOCALIDAD["SUMAPAZ"] == "Sumapaz"
-    assert NOMBRE_UPL_A_LOCALIDAD["SUMAPAZ RURAL"] == "Sumapaz"
-    assert NOMBRE_UPL_A_LOCALIDAD["USME RURAL"] == "Usme"
+    assert NOMBRE_UPL_A_LOCALIDAD["BOSA"] == "Bosa"
+    assert NOMBRE_UPL_A_LOCALIDAD["CUENCA DEL TUNJUELO"] == "Usme"

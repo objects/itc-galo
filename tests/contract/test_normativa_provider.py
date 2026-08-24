@@ -115,11 +115,11 @@ def test_normativa_provider_validacion_upl_formato_invalido(chroma_tempdir, fake
     provider = NormativaProvider(ruta_indice=str(chroma_tempdir))
     provider._embedding_function = fake_ef
 
-    with pytest.raises(ValueError, match="UPL inválida"):
+    with pytest.raises(ValueError, match="UPL desconocida"):
         provider._validar_entrada("consulta", "UPL99", 3)  # Fuera de rango
-    with pytest.raises(ValueError, match="UPL inválida"):
+    with pytest.raises(ValueError, match="UPL desconocida"):
         provider._validar_entrada("consulta", "UPLX", 3)   # Formato
-    with pytest.raises(ValueError, match="UPL inválida"):
+    with pytest.raises(ValueError, match="UPL desconocida"):
         provider._validar_entrada("consulta", "17", 3)     # Sin prefijo
 
 

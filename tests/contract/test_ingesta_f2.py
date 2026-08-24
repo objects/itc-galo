@@ -657,14 +657,15 @@ def test_indexar_corpus_metadatos_chunk_correctos(corpus_base, chroma_tempdir, f
     res = coleccion.get(ids=["art-001"])
     meta = res["metadatas"][0]
     assert meta["parte"] == "general"
-    assert meta["upls"] == "UPL17"
+    # FR-002: `upls` es list[str] real ($contains = membresia exacta), no CSV.
+    assert meta["upls"] == ["UPL17"]
     assert meta["articulo"] == 1
     assert meta["libro"] == "II"
 
     res2 = coleccion.get(ids=["art-002"])
     meta2 = res2["metadatas"][0]
     assert meta2["parte"] == "urbano"
-    assert meta2["upls"] == "UPL20"
+    assert meta2["upls"] == ["UPL20"]
 
 
 # --- Reconstrucción del índice por cambio de embeddings (FR-008) ---
@@ -810,18 +811,22 @@ def test_consultar_corpus_filtro_upl_estricto(corpus_base, chroma_tempdir, fake_
         str(chroma_tempdir), fake_ef, "normas", top_k=10, umbral_similitud=0.0, upl_filtro="UPL17"
     )
 
-    # Verificar que el filtro se aplica (aunque fake embeddings pueden devolver 0 resultados,
-    # el parámetro where se pasa correctamente a Chroma)
-    # Validamos que no falle y que si hay resultados, tengan UPL17
+    # Filtro compuesto FR-002: cada resultado menciona UPL17 O su parte aplica
+    # a la vocacion de la UPL (UPL17 Bosa es Urbana -> urbano/general).
+    from app.providers.upl import partes_aplicables
+
+    partes_aceptadas = set(partes_aplicables("UPL17"))
     for chunk, _ in resultados_upl17:
         art_original = next(a for a in corpus_base if a.numero == chunk.articulo)
-        assert "UPL17" in art_original.upls_mencionadas
+        assert (
+            "UPL17" in art_original.upls_mencionadas or chunk.parte in partes_aceptadas
+        )
 
-    # Filtro UPL inexistente -> no falla
-    resultados_vacio = consultar_corpus(
-        str(chroma_tempdir), fake_ef, "normas", top_k=10, umbral_similitud=0.0, upl_filtro="UPL99"
-    )
-    assert isinstance(resultados_vacio, list)
+    # UPL fuera del catalogo -> fallo explicito (fail fast), nunca vacio silencioso.
+    with pytest.raises(ValueError, match="UPL desconocida"):
+        consultar_corpus(
+            str(chroma_tempdir), fake_ef, "normas", top_k=10, umbral_similitud=0.0, upl_filtro="UPL99"
+        )
 
 
 def test_consultar_corpus_umbral_similitud_filtra(corpus_base, chroma_tempdir, fake_ef):

@@ -697,4 +697,5 @@ def test_metadatos_extendidos_555_materializados_en_indice(corpus_555_sintetico,
     assert meta.get("source_name") == "Decreto 555 de 2021 (POT Bogotá)"
     # Metadatos F2 conservados (FR-011): el chunk sigue siendo el mismo.
     assert meta.get("articulo") == 1
-    assert meta.get("upls") == "UPL17"
+    # FR-002: `upls` es list[str] real ($contains = membresia exacta), no CSV.
+    assert meta.get("upls") == ["UPL17"]

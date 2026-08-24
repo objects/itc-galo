@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from app.errores import CorpusNoIngestadoError, OllamaNoDisponibleError
 from app.models import COLECCION_NORMATIVA, SourceTrace
-from app.providers.upl import NOMBRE_UPL_A_LOCALIDAD
+from app.providers.upl import construir_filtro_territorial
 
 
 # Configuracion por defecto (sobrescribible por entorno)
@@ -238,7 +238,7 @@ class NormativaProvider:
         if upl:
             upl = upl.strip().upper()
             if not upl.startswith("UPL") or len(upl) != 5 or upl not in UPL_VALIDAS:
-                raise ValueError(f"UPL inválida: {upl}. Debe ser UPL01–UPL33.")
+                raise ValueError(f"UPL desconocida: {upl}. Debe ser UPL01–UPL33.")
         return consulta, upl
 
     async def consultar(
@@ -259,7 +259,7 @@ class NormativaProvider:
 
         # Recuperación vectorial
         coleccion = self._get_coleccion()
-        where = {"upls": {"$contains": upl}} if upl else None
+        where = construir_filtro_territorial(upl) if upl else None
 
         results = coleccion.query(
             query_texts=[consulta],
