@@ -146,7 +146,13 @@ def provider_mapas_estandar(api_key="clave-de-prueba"):
             return httpx.Response(200, json=geocodificar_unica())
         return httpx.Response(500, json={"error": "cmd no simulado"})
 
-    return MapasBogotaProvider(transport=httpx.MockTransport(handler), api_key=api_key)
+    # backoff_segundos=0: el fallback responde 500 (fallo persistente simulado);
+    # sin esperas reales si algún test pisa el camino no simulado.
+    return MapasBogotaProvider(
+        transport=httpx.MockTransport(handler),
+        api_key=api_key,
+        backoff_segundos=0.0,
+    )
 
 
 def provider_arcgis_estandar(

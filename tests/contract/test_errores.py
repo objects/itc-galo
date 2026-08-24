@@ -68,7 +68,12 @@ async def test_5xx_de_mapas_bogota_es_fuente_5xx():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(502, json={"error": "upstream"})
 
-    mapas = MapasBogotaProvider(transport=httpx.MockTransport(handler), api_key="clave-de-prueba")
+    # backoff_segundos=0: fallo persistente simulado, sin esperas reales
+    mapas = MapasBogotaProvider(
+        transport=httpx.MockTransport(handler),
+        api_key="clave-de-prueba",
+        backoff_segundos=0.0,
+    )
     servidor = construir_servidor(mapas=mapas)
     try:
         respuesta = await servidor.resolve_lot_by_chip(CHIP_VALIDO)
@@ -125,7 +130,12 @@ async def test_5xx_de_geocodificacion_es_fuente_5xx_y_no_direccion_no_localizada
             return httpx.Response(503, json={"error": "upstream"})
         return httpx.Response(200, json=geocodificar_unica())
 
-    mapas = MapasBogotaProvider(transport=httpx.MockTransport(handler), api_key="clave-de-prueba")
+    # backoff_segundos=0: fallo persistente simulado, sin esperas reales
+    mapas = MapasBogotaProvider(
+        transport=httpx.MockTransport(handler),
+        api_key="clave-de-prueba",
+        backoff_segundos=0.0,
+    )
     servidor = construir_servidor(mapas=mapas)
     try:
         respuesta = await servidor.resolve_lot_by_address("Calle 26 # 69-76")

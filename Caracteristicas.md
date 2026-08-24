@@ -18,7 +18,7 @@ normativa** del POT (RAG local sobre el Decreto 555 de 2021).
 - **100 % determinista sin LLM** en la resolución de lote, el contexto temático y el
   `feasibility_score` (`app/scoring.py`, función pura). El LLM se usa **solo** en el RAG
   normativo opcional (`consultar_normativa` y la evidencia de `get_feasibility_report`).
-- Suite: **324 tests passing, 0 failed** (suite completa: smoke 6 + contract; sin red
+- Suite: **332 tests passing, 0 failed** (suite completa: smoke 6 + contract; sin red
   real ni Ollama).
 
 Las 7 tools:
@@ -40,9 +40,13 @@ Las 7 tools:
 - **Acceso de red** a las fuentes públicas:
   - `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web` (API de búsqueda de Mapas Bogotá).
   - `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/` (ArcGIS REST).
-- **Ollama** (`ollama pull bge-m3` y `ollama pull qwen3:8b`): **solo** para la evidencia
-  normativa del RAG. La resolución de lote y el contexto temático (F1), y el
-  `feasibility_score`, **no** requieren Ollama.
+- **Ollama** (`bge-m3` para embeddings y un modelo de chat, p. ej. `qwen3.5:9b`):
+  **solo** para la evidencia normativa del RAG. La resolución de lote y el contexto
+  temático (F1), y el `feasibility_score`, **no** requieren Ollama. El `.env.example`
+  viene preconfigurado contra un servidor Ollama remoto en LAN
+  (`http://192.168.40.91:11434`, chat `qwen3.5:9b`); para usar un Ollama local
+  (`http://localhost:11434`) hay que ajustar `OLLAMA_HOST`/`OLLAMA_BASE_URL` y hacer
+  `ollama pull bge-m3` + `ollama pull <modelo-de-chat>`.
 - **`MAPAS_BOGOTA_APIKEY`**: **solo** para resolución/UPL por dirección. Sin ella, esas
   consultas fallan rápido con `CREDENCIAL_FALTANTE`; por CHIP y por coordenadas siguen
   funcionando.
@@ -60,10 +64,10 @@ El proyecto **no carga `.env` automáticamente**: las variables se leen del ento
 | Variable | Obligatoria | Descripción |
 |----------|-------------|-------------|
 | `MAPAS_BOGOTA_APIKEY` | Solo resolución/UPL por dirección | API key de Mapas Bogotá (`geocodificar`). Sin ella → `CREDENCIAL_FALTANTE`. |
-| `OLLAMA_HOST` | Solo F2 | Bind moderno de Ollama (verificación de disponibilidad). Default `http://localhost:11434`. |
-| `OLLAMA_BASE_URL` | Solo F2 | Endpoint que usa ChromaDB (`/api/embeddings`). Default `http://localhost:11434`. |
+| `OLLAMA_HOST` | Solo F2 | Bind moderno de Ollama (verificación de disponibilidad). Default en código `http://localhost:11434`; `.env.example` apunta al servidor remoto LAN `http://192.168.40.91:11434`. |
+| `OLLAMA_BASE_URL` | Solo F2 | Endpoint que usa ChromaDB (`/api/embeddings`). Default en código `http://localhost:11434`; `.env.example` apunta al mismo servidor remoto LAN. |
 | `OLLAMA_EMBEDDING_MODEL` | Solo F2 | Embeddings (default `bge-m3`, 1024 dims). Al cambiar, la ingesta reconstruye el índice automáticamente. |
-| `OLLAMA_CHAT_MODEL` | Solo F2 | Modelo de chat (default `qwen3:8b`). |
+| `OLLAMA_CHAT_MODEL` | Solo F2 | Modelo de chat (default en código `qwen3:8b`; `.env.example` recomienda `qwen3.5:9b`, disponible en el servidor remoto). |
 | `CORPUS_URL` | Ingesta | URL oficial del articulado en sisjur (Decreto 555/2021). |
 | `VECTOR_DB_PATH` | Solo F2 | Índice ChromaDB (default `.data/chroma`, gitignored). |
 | `EMBEDDING_DIM` | Solo F2 | Dimensión del embedding (default `1024`). |

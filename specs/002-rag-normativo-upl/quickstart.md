@@ -15,17 +15,23 @@ remitirse a [contracts/](contracts/) y [data-model.md](data-model.md).
    ```
    (instala `mcp>=1.0.0`, `httpx`, `pydantic`, `chromadb`, `pytest` según `pyproject.toml`).
 3. **Variables de entorno** (leídas desde `.env`; ver `.env.example`):
-   - `OLLAMA_BASE_URL=http://localhost:11434` (endpoint legado que usa ChromaDB).
+   - `OLLAMA_BASE_URL` (endpoint legado que usa ChromaDB). Default en código
+     `http://localhost:11434`; `.env.example` viene preconfigurado contra un servidor
+     Ollama remoto en LAN (`http://192.168.40.91:11434`).
    - `OLLAMA_EMBEDDING_MODEL=bge-m3` (modelo de embeddings, 1024 dims).
-   - `OLLAMA_CHAT_MODEL=qwen3:8b` (modelo de chat para generación de respuesta).
+   - `OLLAMA_CHAT_MODEL`: default en código `qwen3:8b`; `.env.example` recomienda
+     `qwen3.5:9b` (disponible en el servidor remoto).
    - `VECTOR_DB_PATH=.data/chroma` (directorio del índice vectorial).
    - `CORPUS_URL=https://www.alcaldiabogota.gov.co/sisjur/normas/Norma1.jsp?i=119582` (URL sisjur del Decreto 555/2021).
    - `MAPAS_BOGOTA_APIKEY` (opcional): obligatoria solo para `get_upl` por dirección.
-4. **Ollama corriendo localmente** con modelos descargados:
+4. **Servidor Ollama accesible** con los modelos disponibles. Con `.env.example` tal
+   cual basta acceso al servidor remoto LAN (`192.168.40.91:11434`, que debe tener
+   `bge-m3` y `qwen3.5:9b`). Para un **Ollama local**, ajusta `OLLAMA_HOST`/
+   `OLLAMA_BASE_URL` a `http://localhost:11434` y descarga los modelos:
    ```bash
    ollama serve
    ollama pull bge-m3
-   ollama pull qwen3:8b
+   ollama pull qwen3:8b   # u otro modelo de chat (p. ej. qwen3.5:9b), ajustando OLLAMA_CHAT_MODEL
    # Alternativas de chat: ollama pull gemma4:e4b (8-16 GB RAM) o gemma4:26b (16 GB+ VRAM, 256K ctx)
    ```
 5. **Ingesta del corpus** (genera JSONL versionado + índice ChromaDB):
@@ -74,7 +80,8 @@ Sus contratos completos están en [contracts/](contracts/).
 
 ### Escenario 1 — Ingesta completa (offline-first)
 
-- **Precondición**: Ollama corriendo con `bge-m3` y `qwen3:8b`.
+- **Precondición**: Servidor Ollama accesible con `bge-m3` y el modelo de chat
+  configurado (`qwen3:8b` por defecto en código; `qwen3.5:9b` con `.env.example`).
 - **Acción**: `python -m app.ingesta.corpus full`
 - **Resultado esperado**:
   - Se genera `data/corpus/decreto_555_2021.jsonl` (≈608 artículos) + `.sha256` con hash determinista.
@@ -159,7 +166,8 @@ Sus contratos completos están en [contracts/](contracts/).
 
 ### Escenario 11 — Ollama no disponible → `OLLAMA_NO_DISPONIBLE`
 
-- **Precondición**: Detener `ollama serve`.
+- **Precondición**: Servidor Ollama inalcanzable (p. ej., detener `ollama serve` en un
+  setup local o apuntar `OLLAMA_BASE_URL` a un host sin servicio).
 - **Acción**: invocar `consultar_normativa` o `get_upl` (que usa embeddings vía ChromaDB).
 - **Resultado esperado**: error canónico `OLLAMA_NO_DISPONIBLE` con modelo faltante y instrucción `ollama pull <modelo>` (FR-011, fail-fast).
 

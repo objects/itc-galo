@@ -16,20 +16,26 @@ y [data-model.md](data-model.md).
    ```
    (añade `pypdf>=5` y `python-docx>=1.1` para la ingesta de PDF/DOCX; ver `pyproject.toml`).
 3. **Variables de entorno** (leídas del entorno; ver `.env.example`):
-   - `OLLAMA_BASE_URL=http://localhost:11434` (endpoint legado que usa ChromaDB).
+   - `OLLAMA_BASE_URL` (endpoint legado que usa ChromaDB). Default en código
+     `http://localhost:11434`; `.env.example` viene preconfigurado contra un servidor
+     Ollama remoto en LAN (`http://192.168.40.91:11434`).
    - `OLLAMA_EMBEDDING_MODEL=bge-m3` (modelo de embeddings, 1024 dims).
-   - `OLLAMA_CHAT_MODEL=qwen3:8b` (modelo de chat con citation forcing).
+   - `OLLAMA_CHAT_MODEL`: default en código `qwen3:8b`; `.env.example` recomienda
+     `qwen3.5:9b` (disponible en el servidor remoto).
    - `VECTOR_DB_PATH=.data/chroma` (directorio del índice vectorial).
    - `CORPUS_URL=https://www.alcaldiabogota.gov.co/sisjur/normas/Norma1.jsp?i=119582` (555; no
      se re-descarga salvo cambio de modelo de embeddings, H3).
 4. **Corpus base ingestado** (F2): `data/corpus/decreto_555_2021.jsonl` + `.sha256`
    versionados en git y el índice en `.data/chroma/` (si no existe: `python -m app.ingesta.corpus full`).
-5. **Ollama corriendo localmente** (solo para `--indexar` y consultas; la extracción y
-   validación de la ingesta NO requieren Ollama, FR-010):
+5. **Servidor Ollama accesible** (solo para `--indexar` y consultas; la extracción y
+   validación de la ingesta NO requieren Ollama, FR-010). Con `.env.example` tal cual
+   basta acceso al servidor remoto LAN (`192.168.40.91:11434`, que debe tener `bge-m3`
+   y `qwen3.5:9b`). Para un **Ollama local**, ajusta `OLLAMA_HOST`/`OLLAMA_BASE_URL` a
+   `http://localhost:11434` y descarga los modelos:
    ```bash
    ollama serve
    ollama pull bge-m3
-   ollama pull qwen3:8b
+   ollama pull qwen3:8b   # u otro modelo de chat (p. ej. qwen3.5:9b), ajustando OLLAMA_CHAT_MODEL
    ```
 
 ## Comandos de verificación automática

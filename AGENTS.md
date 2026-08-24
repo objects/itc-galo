@@ -10,7 +10,7 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 - **Repositorio en `master`; HEAD `37b0175` (implementación F8) + commit de cierre (correcciones de
   revisión y documentación de F8).**
   La aplicación está implementada y probada: F1, F2,
-  F3, F4, F6, F7 y F8 completas, **324 tests passing (suite completa: smoke 6 + contract), 0 failed**,
+  F3, F4, F6, F7 y F8 completas, **332 tests passing (suite completa: smoke 6 + contract), 0 failed**,
   gate PASS, con las **7 tools** registradas (F4, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
@@ -249,6 +249,9 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   vacía + causa + warning; un 5xx NUNCA se degrada ni se reporta como "no encontrado" (FR-012/FR-009).
 - Errores: taxonomía canónica de **10 códigos** (`CodigoError` en `app/errores.py`) con excepciones
   tipadas y `construir_error`. Un 5xx NUNCA se reporta como "no encontrado" (FR-009).
+- Reintentos: `MapasBogotaProvider` reintenta fallos transitorios de la fuente (`TransportError` y
+  HTTP ≥ 500, solo GETs idempotentes) con 3 intentos y backoff exponencial corto (0.5s base,
+  inyectable en tests) antes de lanzar `FUENTE_5XX` con la causa distinguible; los 4xx no se reintentan.
 - Tests sin red real ni Ollama: siempre usar fixtures `httpx.MockTransport` de `tests/conftest.py`
   (CHIP_VALIDO=AAA0072LRYN, CHIP_INEXISTENTE=ZZZ9999ZZZ9).
 - Ingesta: `descargar` no requiere Ollama; `indexar` reconstruye el índice automáticamente si cambia

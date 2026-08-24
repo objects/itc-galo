@@ -17,12 +17,16 @@ remitirse a [contracts/get-feasibility-report.md](contracts/get-feasibility-repo
    - `MAPAS_BOGOTA_APIKEY` (opcional salvo escenario por dirección): geocodificación.
    - `OLLAMA_BASE_URL`, `OLLAMA_EMBEDDING_MODEL=bge-m3`, `OLLAMA_CHAT_MODEL`,
      `VECTOR_DB_PATH=.data/chroma` (solo para la evidencia normativa; el reporte degrada
-     sin Ollama).
-3. **Ollama corriendo** (opcional) e ingestado el corpus del Decreto 555/2021:
+     sin Ollama). `.env.example` viene preconfigurado contra un servidor Ollama remoto
+     en LAN (`http://192.168.40.91:11434`, chat `qwen3.5:9b`); para un Ollama local,
+     ajusta `OLLAMA_HOST`/`OLLAMA_BASE_URL` a `http://localhost:11434`.
+3. **Servidor Ollama accesible** (opcional; el reporte degrada sin él) e ingestado el
+   corpus del Decreto 555/2021:
    ```bash
-   ollama serve
    python -m app.ingesta.corpus full
    ```
+   (con Ollama local, arranca antes `ollama serve`; el servidor remoto debe tener
+   disponibles `bge-m3` y `qwen3.5:9b`).
 4. **Servidor MCP levantado** (cualquier cliente MCP, p. ej. OpenCode conectado al
    servidor registrado): `get_feasibility_report` es la 7ª tool.
 

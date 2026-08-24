@@ -27,8 +27,10 @@ FuenteDatosInvalidosError.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -76,18 +78,34 @@ class CandidatoDireccion(BaseModel):
 
 
 class MapasBogotaProvider:
-    """Cliente httpx async para la API de busqueda de Mapas Bogota."""
+    """Cliente httpx async para la API de busqueda de Mapas Bogota.
+
+    Ante fallos transitorios de la fuente (cold-start del backend: 503 que
+    desaparece al segundo intento, timeouts de conexion) reintenta los GET
+    idempotentes con backoff exponencial corto antes de fallar (FR-009).
+    """
 
     def __init__(
         self,
         transport: httpx.AsyncBaseTransport | None = None,
         api_key: str | None = None,
         timeout: float = 30.0,
+        intentos: int = 3,
+        backoff_segundos: float = 0.5,
+        dormir: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
+        if intentos < 1:
+            raise ValueError("intentos debe ser >= 1")
         self._client = httpx.AsyncClient(
             base_url=URL_SERVICIO, transport=transport, timeout=timeout
         )
         self._api_key = api_key
+        self._intentos = intentos
+        self._backoff_segundos = backoff_segundos
+        # Inyectable para tests (sin esperas reales); por defecto asyncio.sleep.
+        self._dormir: Callable[[float], Awaitable[None]] = (
+            dormir if dormir is not None else asyncio.sleep
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -146,19 +164,51 @@ class MapasBogotaProvider:
         return self._parsear_candidatos(data)
 
     async def _consultar(self, ruta: str, params: dict[str, Any]) -> dict[str, Any]:
-        """GET a la API con clasificacion de errores de fuente tipada.
+        """GET a la API con reintentos ante fallos transitorios y clasificacion tipada.
 
-        - HTTP/body 5xx -> Fuente5xxError (FR-009).
+        Reintenta (GET idempotente) ante `httpx.TransportError` (timeout/conexion)
+        y respuestas HTTP >= 500 — los 503 transitorios por cold-start del backend
+        de Mapas Bogota se recuperan solos — con backoff exponencial corto
+        (`backoff_segundos * 2**(intento-1)`). Los 4xx NO se reintentan (fallan
+        igual). Tras agotar `intentos` lanza Fuente5xxError (FR-009) con la causa
+        distinguible en el mensaje ("tras N intentos", timeout vs HTTP real).
+
+        - HTTP/body 5xx persistente -> Fuente5xxError (FR-009).
         - HTTP/body 4xx -> Fuente4xxError (peticion rechazada).
         - Payload no utilizable -> FuenteDatosInvalidosError.
         """
-        try:
-            respuesta = await self._client.get(ruta, params=params)
-        except httpx.TransportError as exc:
-            # Fallo de red: la fuente no esta disponible
-            raise Fuente5xxError(NOMBRE_FUENTE, 503) from exc
-        if respuesta.status_code >= 500:
-            raise Fuente5xxError(NOMBRE_FUENTE, respuesta.status_code)
+        ultima_causa: Exception | None = None
+        ultimo_status = 503
+        for intento in range(1, self._intentos + 1):
+            try:
+                respuesta = await self._client.get(ruta, params=params)
+            except httpx.TransportError as exc:
+                ultima_causa = exc
+                ultimo_status = 503
+            else:
+                if respuesta.status_code < 500:
+                    return self._clasificar_respuesta(respuesta)
+                ultima_causa = None
+                ultimo_status = respuesta.status_code
+            if intento < self._intentos:
+                await self._dormir(self._backoff_segundos * 2 ** (intento - 1))
+        if ultima_causa is not None:
+            raise Fuente5xxError(
+                NOMBRE_FUENTE,
+                503,
+                detalle=(
+                    "sin respuesta tras "
+                    f"{self._intentos} intentos ({_causa_transporte(ultima_causa)})."
+                ),
+            ) from ultima_causa
+        raise Fuente5xxError(
+            NOMBRE_FUENTE,
+            ultimo_status,
+            detalle=f"error persistente tras {self._intentos} intentos.",
+        )
+
+    def _clasificar_respuesta(self, respuesta: httpx.Response) -> dict[str, Any]:
+        """Clasifica una respuesta HTTP < 500 segun la taxonomia tipada."""
         if respuesta.status_code >= 400:
             raise Fuente4xxError(NOMBRE_FUENTE, respuesta.status_code)
         try:
@@ -209,6 +259,13 @@ class MapasBogotaProvider:
                 )
             )
         return candidatos
+
+
+def _causa_transporte(exc: httpx.TransportError) -> str:
+    """Causa legible de un TransportError para el mensaje de Fuente5xxError."""
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout de conexión"
+    return "error de conexión"
 
 
 def _centroide_desde_rings(puntos: list[list[float]]) -> tuple[float | None, float | None]:

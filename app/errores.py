@@ -74,10 +74,14 @@ class Fuente5xxError(Exception):
     encontrado. Identifica la fuente que fallo para que el mensaje sea accionable.
     """
 
-    def __init__(self, source_name: str, status: int) -> None:
-        super().__init__(f"La fuente {source_name} no está disponible (error {status}).")
+    def __init__(self, source_name: str, status: int, detalle: str | None = None) -> None:
+        mensaje = f"La fuente {source_name} no está disponible (error {status})."
+        if detalle:
+            mensaje = f"{mensaje} {detalle}"
+        super().__init__(mensaje)
         self.source_name = source_name
         self.status = status
+        self.detalle = detalle
 
 
 class UplNoEncontradaError(Exception):
