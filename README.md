@@ -22,13 +22,13 @@ consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
 - Acceso de red a las fuentes públicas:
   - `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web` (API de búsqueda de Mapas Bogotá: `buscar` para CHIP, `api` para geocodificar)
   - `https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/` (ArcGIS REST del catastro)
-- **Ollama local** (solo Feature 2: `get_upl` y `consultar_normativa`) con los
-  modelos de embeddings y de chat descargados:
+- **Servidor Ollama** local o remoto en LAN (solo Feature 2: `get_upl` y
+  `consultar_normativa`) con los modelos de embeddings y de chat disponibles
+  (la configuración de ejemplo de `.env.example` apunta a un servidor remoto,
+  `http://192.168.40.91:11434`):
   ```bash
-  ollama pull bge-m3
-  ollama pull qwen3:8b
-  # Alternativas de chat: ollama pull gemma4:e4b (8-16 GB RAM) o gemma4:26b (16 GB+ VRAM, 256K ctx)
-  ollama pull gemma4:e4b
+  ollama pull bge-m3   # embeddings; debe ser byte-idéntico (mismo digest) para reusar el índice sin rebuild
+  ollama pull qwen3.5:9b
   ```
   El RAG normativo es 100 % local: sin llamadas a APIs de pago ni nube.
 
@@ -57,9 +57,9 @@ cp .env.example .env
 | Variable | Obligatoria | Descripción |
 |----------|-------------|-------------|
 | `MAPAS_BOGOTA_APIKEY` | Solo consulta por dirección | API key de Mapas Bogotá para `geocodificar`. Sin ella, `resolve_lot_by_address` y `get_upl` por dirección fallan rápido con `CREDENCIAL_FALTANTE`; las consultas por CHIP y por coordenadas siguen funcionando. |
-| `OLLAMA_BASE_URL` | Solo F2 | Endpoint de Ollama (default `http://localhost:11434`; ChromaDB usa el legado `/api/embeddings`). |
+| `OLLAMA_BASE_URL` | Solo F2 | Endpoint de Ollama (default en código `http://localhost:11434`; `.env.example` apunta al servidor remoto LAN `http://192.168.40.91:11434`; ChromaDB usa el legado `/api/embeddings`). |
 | `OLLAMA_EMBEDDING_MODEL` | Solo F2 | Modelo de embeddings (default `bge-m3`, 1024 dims). Al cambiar el modelo, la ingesta reconstruye el índice automáticamente (el modelo se persiste en la metadata de la colección; con clientes externos, borra `.data/` manualmente). |
-| `OLLAMA_CHAT_MODEL` | Solo F2 | Modelo de chat para la generación de respuesta (default `qwen3:8b`; alternativas `gemma4:e4b` 8-16 GB RAM o `gemma4:26b` 16 GB+ VRAM, 256K ctx). |
+| `OLLAMA_CHAT_MODEL` | Solo F2 | Modelo de chat para la generación de respuesta (default en código `qwen3:8b`; `.env.example` recomienda `qwen3.5:9b`, disponible en el servidor remoto). |
 | `CORPUS_URL` | Ingesta | URL oficial del articulado en sisjur (default `Norma1.jsp?i=119582`). |
 | `VECTOR_DB_PATH` | Solo F2 | Directorio del índice ChromaDB (default `.data/chroma`, gitignored, regenerable). |
 | `EMBEDDING_DIM` | Solo F2 | Dimensión del embedding (default `1024`, debe coincidir con el modelo). |
