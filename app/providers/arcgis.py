@@ -395,6 +395,45 @@ async def _gather_con_fallos(
     return list(resultados), fallos
 
 
+def _traza_de_resultado(capa: CapaConfig, resultado: dict[str, Any]) -> SourceTrace:
+    """Traza de una capa consultada EXITOSAMENTE (hallazgo M4).
+
+    La vigencia es la que declara el primer feature de la propia capa (ANIO/
+    VIGENCIA) o, si no lo declara, la vigencia documentada de CapaConfig: cada
+    sub-fuente publica su propia vigencia, nunca la de otra capa.
+    """
+    features = resultado.get("features") or []
+    if features:
+        vigencia = _vigencia_del_feature(features[0].get("properties") or {})
+        if vigencia:
+            return _construir_trace(capa, data_vigencia=vigencia)
+    return _construir_trace(capa)
+
+
+def _trazas_de_bloque(
+    tareas_por_capa: Sequence[tuple[CapaConfig, Coroutine[Any, Any, dict[str, Any]]]],
+    resultados: list[Any],
+) -> tuple[SourceTrace, list[SourceTrace]]:
+    """Trazas por sub-fuente de un bloque multifuente (hallazgo M4).
+
+    Retorna (traza_principal, trazas_subfuente):
+    - `trazas_subfuente`: una entrada por capa consultada EXITOSAMENTE, en el
+      orden de declaracion de las capas del bloque, con su vigencia propia. Las
+      capas caidas NO generan traza aqui: su fallo viaja tipado en FalloCapa
+      (FR-009); jamas se fabrica una traza para una capa que no respondio.
+    - `traza_principal`: la primera capa exitosa o, si TODAS fallaron, la traza
+      declarada de la primera capa del bloque (el contrato exige source_trace
+      siempre poblado; comportamiento respaldado por el test M2).
+    """
+    trazas = [
+        _traza_de_resultado(capa, resultado)
+        for (capa, _), resultado in zip(tareas_por_capa, resultados)
+        if not isinstance(resultado, BaseException)
+    ]
+    traza_principal = trazas[0] if trazas else _construir_trace(tareas_por_capa[0][0])
+    return traza_principal, trazas
+
+
 class LoteArcgis(BaseModel):
     """Lote parseado de la capa 38 del Mapa de Referencia (identity + geometria)."""
 
@@ -660,13 +699,15 @@ class ArcGISProvider:
 
     async def consultar_riesgos_geotecnicos(
         self, lng: float, lat: float
-    ) -> tuple[RiesgoGeotecnicos, SourceTrace, list[FalloCapa]]:
+    ) -> tuple[RiesgoGeotecnicos, SourceTrace, list[SourceTrace], list[FalloCapa]]:
         """Consulta 4 capas de gestionriesgos en paralelo: amenaza, geologia, sismo, zonificacion.
 
-        Retorna la tupla (riesgos, source_trace, fallos) con la clasificacion
-        dominante de cada capa, el nivel de amenaza mas critico encontrado y los
-        fallos tipados por capa (FR-009): una capa caida queda en `fallos` con
-        su causa y jamas se confunde con "sin dato".
+        Retorna la tupla (riesgos, source_trace, source_traces, fallos) con la
+        clasificacion dominante de cada capa, el nivel de amenaza mas critico
+        encontrado, la trazabilidad por sub-fuente (hallazgo M4: una traza por
+        capa exitosa con su vigencia propia) y los fallos tipados por capa
+        (FR-009): una capa caida queda en `fallos` con su causa y jamas se
+        confunde con "sin dato" ni genera una traza fabricada.
         """
         claves = [
             ("geotecnia_amenaza", "amenaza_movimientos"),
@@ -679,26 +720,22 @@ class ArcGISProvider:
             for clave, _ in claves
         ]
         resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
 
         campos: dict[str, str | None] = {}
-        traza = _construir_trace(self._capas["geotecnia_amenaza"])
         for (_, campo), resultado in zip(claves, resultados):
             if isinstance(resultado, BaseException):
                 campos[campo] = None
             else:
                 features = resultado.get("features") or []
-                if features:
-                    propiedades = features[0].get("properties") or {}
-                    campos[campo] = _primer_texto(
-                        propiedades, ["GEOTECNIA", "NOMBRE", "TIPO", "DESCRIPCION"]
+                campos[campo] = (
+                    _primer_texto(
+                        features[0].get("properties") or {},
+                        ["GEOTECNIA", "NOMBRE", "TIPO", "DESCRIPCION"],
                     )
-                    vig = _vigencia_del_feature(propiedades)
-                    if vig:
-                        traza = _construir_trace(
-                            self._capas["geotecnia_amenaza"], data_vigencia=vig
-                        )
-                else:
-                    campos[campo] = None
+                    if features
+                    else None
+                )
 
         nivel = _inferir_nivel_amenaza(campos.get("amenaza_movimientos"))
         return (
@@ -709,17 +746,19 @@ class ArcGISProvider:
                 zonificacion_geotecnica=campos.get("zonificacion_geotecnica"),
                 nivel_amenaza=nivel,
             ),
-            traza,
+            traza_principal,
+            trazas_subfuente,
             fallos,
         )
 
     async def consultar_contexto_socioeconomico(
         self, lng: float, lat: float
-    ) -> tuple[ContextoSocioeconomico, SourceTrace, list[FalloCapa]]:
+    ) -> tuple[ContextoSocioeconomico, SourceTrace, list[SourceTrace], list[FalloCapa]]:
         """Consulta 4 capas socioeconomicas en paralelo: estratificacion, uso, altura, avaluo.
 
-        Retorna la tupla (contexto, source_trace, fallos) con el primer
-        source_trace disponible y los fallos tipados por capa (FR-009).
+        Retorna la tupla (contexto, source_trace, source_traces, fallos) con la
+        trazabilidad por sub-fuente (hallazgo M4: una traza por capa exitosa con
+        su vigencia propia) y los fallos tipados por capa (FR-009).
         """
         claves = ["estratificacion", "usopredominante", "alturamedia", "medianaavaluo"]
         tareas = [
@@ -727,12 +766,12 @@ class ArcGISProvider:
             for clave in claves
         ]
         resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
 
         estrato: int | None = None
         uso: str | None = None
         altura: float | None = None
         avaluo: float | None = None
-        traza = _construir_trace(self._capas["estratificacion"])
 
         # Estratificacion (layer 1, SR PCS_CarMAGBOG)
         r_estrat = resultados[0]
@@ -743,9 +782,6 @@ class ArcGISProvider:
                 estrato = _extraer_numero(propiedades, ["ESTRATO", "ESTRATA", "ESTRAT"])
                 if estrato is not None:
                     estrato = int(estrato)
-                vig = _vigencia_del_feature(propiedades)
-                if vig:
-                    traza = _construir_trace(self._capas["estratificacion"], data_vigencia=vig)
 
         # Uso predominante
         r_uso = resultados[1]
@@ -780,17 +816,19 @@ class ArcGISProvider:
                 altura_media=altura,
                 mediana_avaluo=avaluo,
             ),
-            traza,
+            traza_principal,
+            trazas_subfuente,
             fallos,
         )
 
     async def consultar_entorno_regulatorio(
         self, lng: float, lat: float
-    ) -> tuple[EntornoRegulatorio, SourceTrace, list[FalloCapa]]:
+    ) -> tuple[EntornoRegulatorio, SourceTrace, list[SourceTrace], list[FalloCapa]]:
         """Consulta 2 capas regulatorias en paralelo: licencias y plusvalia.
 
-        Retorna la tupla (entorno, source_trace, fallos) con los fallos tipados
-        por capa (FR-009).
+        Retorna la tupla (entorno, source_trace, source_traces, fallos) con la
+        trazabilidad por sub-fuente (hallazgo M4) y los fallos tipados por capa
+        (FR-009).
         """
         claves = ["licencias", "plusvalia"]
         tareas = [
@@ -798,11 +836,11 @@ class ArcGISProvider:
             for clave in claves
         ]
         resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
 
         licencias_count: int | None = None
         zona_plusvalia: bool | None = None
         nombre_plan: str | None = None
-        traza = _construir_trace(self._capas["licencias"])
 
         # Licencias
         r_licencias = resultados[0]
@@ -810,10 +848,6 @@ class ArcGISProvider:
             features = r_licencias.get("features") or []
             if features:
                 licencias_count = len(features)
-                propiedades = features[0].get("properties") or {}
-                vig = _vigencia_del_feature(propiedades)
-                if vig:
-                    traza = _construir_trace(self._capas["licencias"], data_vigencia=vig)
 
         # Plusvalia
         r_plusvalia = resultados[1]
@@ -832,17 +866,19 @@ class ArcGISProvider:
                 zona_plusvalia=zona_plusvalia,
                 nombre_plan_plusvalia=nombre_plan,
             ),
-            traza,
+            traza_principal,
+            trazas_subfuente,
             fallos,
         )
 
     async def consultar_patrimonio_cultural(
         self, lng: float, lat: float
-    ) -> tuple[PatrimonioCultural, SourceTrace, list[FalloCapa]]:
+    ) -> tuple[PatrimonioCultural, SourceTrace, list[SourceTrace], list[FalloCapa]]:
         """Consulta 2 capas de patrimonio cultural en paralelo: BIC y plan arqueologico.
 
-        Retorna la tupla (patrimonio, source_trace, fallos) con los fallos
-        tipados por capa (FR-009).
+        Retorna la tupla (patrimonio, source_trace, source_traces, fallos) con
+        la trazabilidad por sub-fuente (hallazgo M4) y los fallos tipados por
+        capa (FR-009).
         """
         claves = ["bic", "planarqueologico"]
         tareas = [
@@ -850,11 +886,11 @@ class ArcGISProvider:
             for clave in claves
         ]
         resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
 
         bic_cercano: bool | None = None
         nombre_bic: str | None = None
         zona_arqueologica: bool | None = None
-        traza = _construir_trace(self._capas["bic"])
 
         # BIC
         r_bic = resultados[0]
@@ -864,9 +900,6 @@ class ArcGISProvider:
                 bic_cercano = True
                 propiedades = features[0].get("properties") or {}
                 nombre_bic = _primer_texto(propiedades, ["NOMBRE", "CATEGORIA", "DENOMINACION"])
-                vig = _vigencia_del_feature(propiedades)
-                if vig:
-                    traza = _construir_trace(self._capas["bic"], data_vigencia=vig)
 
         # Plan arqueologico
         r_arq = resultados[1]
@@ -881,19 +914,20 @@ class ArcGISProvider:
                 nombre_bic=nombre_bic,
                 zona_arqueologica=zona_arqueologica,
             ),
-            traza,
+            traza_principal,
+            trazas_subfuente,
             fallos,
         )
 
     async def consultar_acceso_movilidad(
         self, lng: float, lat: float
-    ) -> tuple[AccesoMovilidad, SourceTrace, list[FalloCapa]]:
+    ) -> tuple[AccesoMovilidad, SourceTrace, list[SourceTrace], list[FalloCapa]]:
         """Consulta 3 capas de transporte publico con radio: TransMilenio, SITP, Metro.
 
         Usa distance + units=esriSRUnit_Meter para busqueda por proximidad
         (patron consultar_obras_publicas_radio). Retorna la tupla
-        (movilidad, source_trace, fallos) con los fallos tipados por capa
-        (FR-009).
+        (movilidad, source_trace, source_traces, fallos) con la trazabilidad por
+        sub-fuente (hallazgo M4) y los fallos tipados por capa (FR-009).
         """
         configuracion_radio = [
             ("transmilenio", 800, ["ETRNOMBRE", "NOMBRE", "ESTACION"]),
@@ -908,12 +942,12 @@ class ArcGISProvider:
             for clave, radio, campos in configuracion_radio
         ]
         resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
 
         count_tm: int | None = None
         count_sitp: int | None = None
         count_metro: int | None = None
         estacion_cercana: str | None = None
-        traza = _construir_trace(self._capas["transmilenio"])
 
         # TransMilenio
         r_tm = resultados[0]
@@ -925,9 +959,6 @@ class ArcGISProvider:
                 nombre_tm = _primer_texto(propiedades, ["ETRNOMBRE", "NOMBRE", "ESTACION"])
                 if nombre_tm and estacion_cercana is None:
                     estacion_cercana = nombre_tm
-                vig = _vigencia_del_feature(propiedades)
-                if vig:
-                    traza = _construir_trace(self._capas["transmilenio"], data_vigencia=vig)
 
         # SITP
         r_sitp = resultados[1]
@@ -954,19 +985,21 @@ class ArcGISProvider:
                 estaciones_metro=count_metro,
                 estacion_cercana=estacion_cercana,
             ),
-            traza,
+            traza_principal,
+            trazas_subfuente,
             fallos,
         )
 
     async def consultar_contexto_catastro(
         self, lng: float, lat: float
-    ) -> tuple[ContextoCatastro, SourceTrace, list[FalloCapa]]:
+    ) -> tuple[ContextoCatastro, SourceTrace, list[SourceTrace], list[FalloCapa]]:
         """Consulta 5 capas catastrales en paralelo: construccion, manzana, densidad, variacion, sector.
 
-        Retorna la tupla (contexto_catastro, source_trace, fallos) con el
-        primer source_trace disponible y los fallos tipados por capa (FR-009):
-        cada capa se degrada independientemente pero su fallo queda registrado,
-        nunca silenciado.
+        Retorna la tupla (contexto_catastro, source_trace, source_traces,
+        fallos) con la trazabilidad por sub-fuente (hallazgo M4: una traza por
+        capa exitosa con su vigencia propia) y los fallos tipados por capa
+        (FR-009): cada capa se degrada independientemente pero su fallo queda
+        registrado, nunca silenciado.
         """
         claves = [
             "construccion",
@@ -980,13 +1013,13 @@ class ArcGISProvider:
             for clave in claves
         ]
         resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
 
         construccion: dict[str, Any] | None = None
         manzana: dict[str, Any] | None = None
         densidad_predial: dict[str, Any] | None = None
         variacion_area: dict[str, Any] | None = None
         sector_catastral: str | None = None
-        traza = _construir_trace(self._capas["construccion"])
 
         # Construccion (layer 0): CONCODIGO, CONNPISOS, CONALTURA, etc.
         r_construccion = resultados[0]
@@ -1004,9 +1037,6 @@ class ArcGISProvider:
                     "mejoras": _extraer_numero(propiedades, ["CONMEJORA"]),
                     "voladizo": _extraer_numero(propiedades, ["CONVOLADIZ"]),
                 }
-                vig = _vigencia_del_feature(propiedades)
-                if vig:
-                    traza = _construir_trace(self._capas["construccion"], data_vigencia=vig)
 
         # Manzana catastro (layer 0): MANCODIGO, SECCODIGO
         r_manzana = resultados[1]
@@ -1062,7 +1092,8 @@ class ArcGISProvider:
                 variacion_area=variacion_area,
                 sector_catastral=sector_catastral,
             ),
-            traza,
+            traza_principal,
+            trazas_subfuente,
             fallos,
         )
 

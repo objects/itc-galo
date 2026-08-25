@@ -72,7 +72,12 @@ class AccesoMovilidad(BaseModel):
 
 ### Wrappers de bloque
 
-Cada wrapper sigue el patrón de F3:
+Cada wrapper sigue el patrón de F3. Los wrappers multifuente añaden además
+`source_traces` (procedencia por sub-fuente, hallazgo M4): una traza por capa
+consultada exitosamente, en orden de declaración, con su vigencia propia; las
+capas caídas no generan traza (viajan en `FalloCapa`, FR-009). `source_trace`
+se conserva como la traza principal (primera capa exitosa) para
+retrocompatibilidad.
 
 ```python
 class BloqueRiesgosGeotecnicos(BaseModel):
@@ -80,31 +85,38 @@ class BloqueRiesgosGeotecnicos(BaseModel):
     dato: RiesgoGeotecnicos | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []   # hallazgo M4
 
 class BloqueContextoSocioeconomico(BaseModel):
     estado: EstadoDato
     dato: ContextoSocioeconomico | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 
 class BloqueEntornoRegulatorio(BaseModel):
     estado: EstadoDato
     dato: EntornoRegulatorio | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 
 class BloquePatrimonioCultural(BaseModel):
     estado: EstadoDato
     dato: PatrimonioCultural | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 
 class BloqueAccesoMovilidad(BaseModel):
     estado: EstadoDato
     dato: AccesoMovilidad | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 ```
+
+El mismo mecanismo aplica a `BloqueCatastroData` (F7, 5 capas del catastro).
 
 ### InformeFactibilidad (extendido)
 

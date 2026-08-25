@@ -27,7 +27,12 @@ from tests.conftest import (
     respuesta_normativa_ok,
     server_lotes_f3,
 )
-from tests.contract._f3_shared import BLOQUES_CON_ESTADO, BLOQUES_RAIZ, CAMPOS_TRAZA
+from tests.contract._f3_shared import (
+    BLOQUES_CON_ESTADO,
+    BLOQUES_MULTIFUENTE,
+    BLOQUES_RAIZ,
+    CAMPOS_TRAZA,
+)
 
 # Terminos de reglas urbanisticas que el reporte NO debe citar (FR-014): el
 # score y las interpretations solo hablan de datos reales de las fuentes.
@@ -125,10 +130,17 @@ async def test_bloques_tematicos_con_patron_estado_dato_interpretation():
 
     for nombre in BLOQUES_CON_ESTADO:
         bloque = reporte[nombre]
-        assert set(bloque) == {"estado", "dato", "interpretation", "source_trace"}, nombre
+        # Los bloques multifuente (M4) anaden `source_traces` al patron base
+        shape_esperado = {"estado", "dato", "interpretation", "source_trace"}
+        if nombre in BLOQUES_MULTIFUENTE:
+            shape_esperado.add("source_traces")
+        assert set(bloque) == shape_esperado, nombre
         assert bloque["estado"] in {"disponible", "no_encontrado"}, nombre
         assert isinstance(bloque["interpretation"], str) and bloque["interpretation"], nombre
         assert set(bloque["source_trace"]) == CAMPOS_TRAZA, nombre
+        if nombre in BLOQUES_MULTIFUENTE:
+            for traza in bloque["source_traces"]:
+                assert set(traza) == CAMPOS_TRAZA, nombre
         if bloque["estado"] == "disponible":
             assert bloque["dato"] is not None, nombre
         else:

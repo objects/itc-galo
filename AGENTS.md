@@ -241,7 +241,11 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
 - Todo el dominio está en español: especifica, documenta y comenta en español.
 - Salida para el LLM: JSON estructurado con trazabilidad por fuente (`source_name`, `layer_id`,
   `service_url`, `data_vigencia`, `query_timestamp`). No mezclar capas de vigencias distintas
-  como una sola fotografía temporal.
+  como una sola fotografía temporal. Los bloques multifuente (F6/F7: geotecnia, socioeconómico,
+  regulatorio, patrimonio, movilidad, catastro) publican además `source_traces` con la procedencia
+  por sub-fuente (hallazgo M4): una traza por capa exitosa con su vigencia propia; las capas caídas
+  van solo en `FalloCapa`/`BLOQUE_DEGRADADO`, nunca como trazas fabricadas; `source_trace` se
+  conserva poblado (primera capa exitosa) por retrocompatibilidad.
 - El `feasibility_score` es heurístico (F3): el LLM no debe inferir reglas urbanísticas ausentes
   en la fuente (FR-014). `calcular_score` es determinista (SC-003), sin LLM ni reloj: base 50,
   clamps a [0,100], confidence según bloques evaluables.

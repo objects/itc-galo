@@ -569,48 +569,83 @@ class AccesoMovilidad(BaseModel):
 
 
 class BloqueRiesgosGeotecnicos(BaseModel):
-    """Bloque geotechnical_risks con el patron {estado, dato, interpretation, source_trace}."""
+    """Bloque geotechnical_risks con el patron {estado, dato, interpretation, source_trace}.
+
+    Multifuente (4 capas de gestionriesgos): `source_trace` es la traza
+    principal (primera capa exitosa) para retrocompatibilidad y `source_traces`
+    documenta la procedencia por sub-fuente (hallazgo M4).
+    """
 
     estado: EstadoDato
     dato: RiesgoGeotecnicos | None = None
     interpretation: str
     source_trace: SourceTrace
+    # Trazas por sub-fuente (hallazgo M4): una entrada por capa consultada
+    # exitosamente, en el orden de declaracion de las capas del bloque, cada una
+    # con su propia vigencia/fecha de consulta. Las capas caidas NO aparecen
+    # aqui: su fallo viaja tipado en FalloCapa -> warning BLOQUE_DEGRADADO
+    # (FR-009). Decision de diseno (opcion a sobre b): traza por BLOQUE y no por
+    # campo porque varios campos pueden provenir de la misma capa y el mapeo
+    # campo->capa duplicaria informacion y acoplaria el modelo del dato al
+    # provider; la lista ordenada por capa es honesta y suficiente para citar
+    # la fuente correcta de cada dato.
+    source_traces: list[SourceTrace] = []
 
 
 class BloqueContextoSocioeconomico(BaseModel):
-    """Bloque socioeconomic_context con el patron {estado, dato, interpretation, source_trace}."""
+    """Bloque socioeconomic_context con el patron {estado, dato, interpretation, source_trace}.
+
+    Multifuente (4 capas): procedencia por sub-fuente en `source_traces`
+    (hallazgo M4); `source_trace` conserva la traza principal.
+    """
 
     estado: EstadoDato
     dato: ContextoSocioeconomico | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 
 
 class BloqueEntornoRegulatorio(BaseModel):
-    """Bloque regulatory_environment con el patron {estado, dato, interpretation, source_trace}."""
+    """Bloque regulatory_environment con el patron {estado, dato, interpretation, source_trace}.
+
+    Multifuente (2 capas): procedencia por sub-fuente en `source_traces`
+    (hallazgo M4); `source_trace` conserva la traza principal.
+    """
 
     estado: EstadoDato
     dato: EntornoRegulatorio | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 
 
 class BloquePatrimonioCultural(BaseModel):
-    """Bloque cultural_heritage con el patron {estado, dato, interpretation, source_trace}."""
+    """Bloque cultural_heritage con el patron {estado, dato, interpretation, source_trace}.
+
+    Multifuente (2 capas): procedencia por sub-fuente en `source_traces`
+    (hallazgo M4); `source_trace` conserva la traza principal.
+    """
 
     estado: EstadoDato
     dato: PatrimonioCultural | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 
 
 class BloqueAccesoMovilidad(BaseModel):
-    """Bloque transit_access con el patron {estado, dato, interpretation, source_trace}."""
+    """Bloque transit_access con el patron {estado, dato, interpretation, source_trace}.
+
+    Multifuente (3 capas): procedencia por sub-fuente en `source_traces`
+    (hallazgo M4); `source_trace` conserva la traza principal.
+    """
 
     estado: EstadoDato
     dato: AccesoMovilidad | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 
 
 class ContextoCatastro(BaseModel):
@@ -629,12 +664,17 @@ class ContextoCatastro(BaseModel):
 
 
 class BloqueCatastroData(BaseModel):
-    """Bloque catastro_data con el patron {estado, dato, interpretation, source_trace}."""
+    """Bloque catastro_data con el patron {estado, dato, interpretation, source_trace}.
+
+    Multifuente (5 capas del catastro): procedencia por sub-fuente en
+    `source_traces` (hallazgo M4); `source_trace` conserva la traza principal.
+    """
 
     estado: EstadoDato
     dato: ContextoCatastro | None = None
     interpretation: str
     source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
 
 
 # --- Feature 8: Parámetros urbanísticos del lote (tratamiento, edificabilidad, retiros, estacionamientos) ---

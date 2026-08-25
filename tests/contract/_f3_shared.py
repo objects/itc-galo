@@ -48,3 +48,14 @@ BLOQUES_CON_ESTADO = {
     "catastro_data",
     "urbanistic_parameters",
 }
+
+# Bloques multifuente que ademas publican `source_traces` (procedencia por
+# sub-fuente, hallazgo M4): una traza por capa exitosa con su vigencia propia.
+BLOQUES_MULTIFUENTE = {
+    "geotechnical_risks",
+    "socioeconomic_context",
+    "regulatory_environment",
+    "cultural_heritage",
+    "transit_access",
+    "catastro_data",
+}

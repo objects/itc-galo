@@ -247,8 +247,10 @@ class ServidorLotes:
         # Consulta catastro data en paralelo (F7): el provider reporta los
         # fallos tipados por capa como FalloCapa (FR-009); cada fallo produce un
         # warning BLOQUE_DEGRADADO con la causa real y la traza publicada es la
-        # de la fuente consultada, nunca una fabricada.
-        contexto_catastro, trace_catastro, fallos_catastro = (
+        # de la fuente consultada, nunca una fabricada. `source_traces` expone
+        # la procedencia por sub-fuente (hallazgo M4): una traza por capa
+        # exitosa con su vigencia propia.
+        contexto_catastro, trace_catastro, trazas_catastro, fallos_catastro = (
             await self._arcgis.consultar_contexto_catastro(
                 lote.centroid.lng, lote.centroid.lat
             )
@@ -289,6 +291,7 @@ class ServidorLotes:
                     "sector_catastral": contexto_catastro.sector_catastral,
                 } if catastro_disponible else None,
                 "source_trace": trace_catastro.model_dump(),
+                "source_traces": [traza.model_dump() for traza in trazas_catastro],
             },
             "urbanistic_parameters": _bloque_a_contrato(bloque_urbanistic_summary),
             "warnings": summary_warnings,
@@ -770,7 +773,7 @@ class ServidorLotes:
         # Bloque geotechnical_risks
         if isinstance(r_geotecnia, BaseException):
             return _error_de_fuente(r_geotecnia)
-        riesgos_geotec, trace_geotecnia, fallos_geotec = r_geotecnia
+        riesgos_geotec, trace_geotecnia, trazas_geotec, fallos_geotec = r_geotecnia
         tiene_datos_geotec = any([
             riesgos_geotec.amenaza_movimientos,
             riesgos_geotec.geologia,
@@ -782,6 +785,7 @@ class ServidorLotes:
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos geotécnicos.",
                 source_trace=trace_geotecnia,
+                source_traces=trazas_geotec,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
@@ -830,12 +834,13 @@ class ServidorLotes:
                 dato=riesgos_geotec if tiene_datos_geotec else None,
                 interpretation=interpretation_geotec,
                 source_trace=trace_geotecnia,
+                source_traces=trazas_geotec,
             )
 
         # Bloque socioeconomic_context
         if isinstance(r_socio, BaseException):
             return _error_de_fuente(r_socio)
-        contexto_socio, trace_socio, fallos_socio = r_socio
+        contexto_socio, trace_socio, trazas_socio, fallos_socio = r_socio
         tiene_datos_socio = any([
             contexto_socio.estrato is not None,
             contexto_socio.uso_predominante,
@@ -847,6 +852,7 @@ class ServidorLotes:
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos socioeconómicos.",
                 source_trace=trace_socio,
+                source_traces=trazas_socio,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
@@ -895,12 +901,13 @@ class ServidorLotes:
                 dato=contexto_socio if tiene_datos_socio else None,
                 interpretation=interpretation_socio,
                 source_trace=trace_socio,
+                source_traces=trazas_socio,
             )
 
         # Bloque regulatory_environment
         if isinstance(r_regulatorio, BaseException):
             return _error_de_fuente(r_regulatorio)
-        entorno_reg, trace_regulatorio, fallos_regulatorio = r_regulatorio
+        entorno_reg, trace_regulatorio, trazas_regulatorio, fallos_regulatorio = r_regulatorio
         tiene_datos_reg = any([
             entorno_reg.licencias_encontradas is not None,
             entorno_reg.zona_plusvalia is not None,
@@ -910,6 +917,7 @@ class ServidorLotes:
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos regulatorios.",
                 source_trace=trace_regulatorio,
+                source_traces=trazas_regulatorio,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
@@ -958,12 +966,13 @@ class ServidorLotes:
                 dato=entorno_reg if tiene_datos_reg else None,
                 interpretation=interpretation_reg,
                 source_trace=trace_regulatorio,
+                source_traces=trazas_regulatorio,
             )
 
         # Bloque cultural_heritage
         if isinstance(r_patrimonio, BaseException):
             return _error_de_fuente(r_patrimonio)
-        patrimonio, trace_patrimonio, fallos_patrimonio = r_patrimonio
+        patrimonio, trace_patrimonio, trazas_patrimonio, fallos_patrimonio = r_patrimonio
         tiene_datos_pat = any([
             patrimonio.bic_cercano is not None,
             patrimonio.zona_arqueologica is not None,
@@ -973,6 +982,7 @@ class ServidorLotes:
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos de patrimonio cultural.",
                 source_trace=trace_patrimonio,
+                source_traces=trazas_patrimonio,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
@@ -1019,12 +1029,13 @@ class ServidorLotes:
                 dato=patrimonio if tiene_datos_pat else None,
                 interpretation=interpretation_pat,
                 source_trace=trace_patrimonio,
+                source_traces=trazas_patrimonio,
             )
 
         # Bloque transit_access
         if isinstance(r_movilidad, BaseException):
             return _error_de_fuente(r_movilidad)
-        movilidad, trace_movilidad, fallos_movilidad = r_movilidad
+        movilidad, trace_movilidad, trazas_movilidad, fallos_movilidad = r_movilidad
         tiene_datos_mov = any([
             movilidad.estaciones_transmilenio is not None,
             movilidad.paraderos_sitp is not None,
@@ -1035,6 +1046,7 @@ class ServidorLotes:
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos de transporte público.",
                 source_trace=trace_movilidad,
+                source_traces=trazas_movilidad,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
@@ -1091,12 +1103,13 @@ class ServidorLotes:
                 dato=movilidad if tiene_datos_mov else None,
                 interpretation=interpretation_mov,
                 source_trace=trace_movilidad,
+                source_traces=trazas_movilidad,
             )
 
         # Bloque catastro_data
         if isinstance(r_catastro, BaseException):
             return _error_de_fuente(r_catastro)
-        contexto_catastro, trace_catastro, fallos_catastro_f3 = r_catastro
+        contexto_catastro, trace_catastro, trazas_catastro_f3, fallos_catastro_f3 = r_catastro
         tiene_datos_catastro = any([
             contexto_catastro.construccion is not None,
             contexto_catastro.manzana is not None,
@@ -1109,6 +1122,7 @@ class ServidorLotes:
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos catastrales adicionales.",
                 source_trace=trace_catastro,
+                source_traces=trazas_catastro_f3,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
@@ -1166,6 +1180,7 @@ class ServidorLotes:
                 dato=contexto_catastro if tiene_datos_catastro else None,
                 interpretation=interpretation_catastro,
                 source_trace=trace_catastro,
+                source_traces=trazas_catastro_f3,
             )
 
         # --- Cuarta ronda: parámetros urbanísticos (F8, degradación independiente) ---
@@ -2030,6 +2045,10 @@ def _bloque_a_contrato(
     `a_dato_contrato`); cuando estado=no_encontrado, dato es None (FR-007).
     `extra_dato` anade campos derivados del orquestador (p. ej. radio_m en
     environment_context, research H5).
+
+    Los bloques multifuente (F6/F7) exponen ademas `source_traces`: la
+    procedencia por sub-fuente con la vigencia propia de cada capa exitosa
+    (hallazgo M4). Los bloques monofuente no definen el campo y no lo publican.
     """
     if bloque.estado == "disponible" and bloque.dato is not None:
         dato = bloque.dato.model_dump(exclude={"estado", "source_trace"}, exclude_none=True)
@@ -2037,12 +2056,16 @@ def _bloque_a_contrato(
             dato.update(extra_dato)
     else:
         dato = None
-    return {
+    salida = {
         "estado": bloque.estado,
         "dato": dato,
         "interpretation": bloque.interpretation,
         "source_trace": bloque.source_trace.model_dump(),
     }
+    trazas_subfuente = getattr(bloque, "source_traces", None)
+    if trazas_subfuente is not None:
+        salida["source_traces"] = [traza.model_dump() for traza in trazas_subfuente]
+    return salida
 
 
 # --- Registro del servidor MCP (stdio) ---

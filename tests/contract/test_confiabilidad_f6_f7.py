@@ -133,7 +133,9 @@ async def test_provider_catastro_reporta_fallos_por_capa_sin_tragar_excepciones(
     las capas vivas: un 5xx nunca sale como 'sin features' (M1, nivel provider)."""
     arcgis = provider_arcgis_con_fallos({"catastro/manzana": 500})
     try:
-        contexto, _traza, fallos = await arcgis.consultar_contexto_catastro(-74.083, 4.6035)
+        contexto, _traza, _trazas_subfuente, fallos = await arcgis.consultar_contexto_catastro(
+            -74.083, 4.6035
+        )
     finally:
         await arcgis.aclose()
 
