@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tests.conftest import (
     CHIP_VALIDO,
     CODIGO_CATASTRAL,
@@ -27,7 +29,11 @@ async def test_punto_dentro_de_un_lote_resuelve_lote():
     assert lote["chip"] == CHIP_VALIDO
     assert lote["codigo_catastral"] == CODIGO_CATASTRAL
     assert lote["manzana"] == MANZANA
-    assert lote["centroid"] == {"lat": LAT_DENTRO, "lng": LNG_DENTRO}
+    # Centroide geometrico del poligono (hallazgo M3): el rectangulo de la
+    # fixture [-74.084, -74.082] x [4.603, 4.604] tiene centroide interior
+    # (-74.083, 4.6035), NO el punto de consulta.
+    assert lote["centroid"]["lat"] == pytest.approx(4.6035)
+    assert lote["centroid"]["lng"] == pytest.approx(-74.083)
     assert "contexto_tematico" in respuesta
 
 

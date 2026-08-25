@@ -62,7 +62,6 @@ from app.models import (
     BloqueValorReferencia,
     Centroide,
     ContextoAdministrativo,
-    ContextoCatastro,
     ContextoSocioeconomico,
     EntornoRegulatorio,
     EvidenciaNormativa,
@@ -79,8 +78,9 @@ from app.models import (
     UPL,
     Warning,
 )
-from app.providers.arcgis import ArcGISProvider
+from app.providers.arcgis import ArcGISProvider, FalloCapa
 from app.providers.arcgis_utils import RAIZ_ARCGIS
+from app.providers.geom import centroide_interior_de_geometria
 from app.providers.mapas_bogota import CandidatoDireccion, MapasBogotaProvider
 from app.providers.normativa import (
     CONSULTA_MAX_CHARS,
@@ -244,25 +244,29 @@ class ServidorLotes:
         contexto, error = await self._consultar_contexto_seguro(lote)
         if error:
             return error
-        # Consulta catastro data en paralelo (F7)
-        try:
-            contexto_catastro, trace_catastro = await self._arcgis.consultar_contexto_catastro(
+        # Consulta catastro data en paralelo (F7): el provider reporta los
+        # fallos tipados por capa como FalloCapa (FR-009); cada fallo produce un
+        # warning BLOQUE_DEGRADADO con la causa real y la traza publicada es la
+        # de la fuente consultada, nunca una fabricada.
+        contexto_catastro, trace_catastro, fallos_catastro = (
+            await self._arcgis.consultar_contexto_catastro(
                 lote.centroid.lng, lote.centroid.lat
             )
-            catastro_disponible = contexto_catastro.construccion is not None or contexto_catastro.manzana is not None or contexto_catastro.densidad_predial is not None or contexto_catastro.variacion_area is not None or contexto_catastro.sector_catastral is not None
-        except Exception:
-            contexto_catastro = ContextoCatastro()
-            trace_catastro = SourceTrace(
-                source_name="Catastro — Construcción",
-                layer_id="0",
-                service_url=f"{RAIZ_ARCGIS}/catastro/construccion/MapServer",
-                data_vigencia="2024",
-                query_timestamp=_ahora_iso(),
-            )
-            catastro_disponible = False
+        )
+        catastro_disponible = contexto_catastro.construccion is not None or contexto_catastro.manzana is not None or contexto_catastro.densidad_predial is not None or contexto_catastro.variacion_area is not None or contexto_catastro.sector_catastral is not None
 
         # Consulta parámetros urbanísticos (F8, degradación independiente)
         summary_warnings: list[dict[str, str]] = []
+        if fallos_catastro:
+            summary_warnings.append(
+                {
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque catastro_data degradado: "
+                        f"{_mensaje_fallos(fallos_catastro)}."
+                    ),
+                }
+            )
         bloque_urbanistic_summary = await _bloque_parametros_urbanisticos(
             lng=lote.centroid.lng,
             lat=lote.centroid.lat,
@@ -603,10 +607,12 @@ class ServidorLotes:
         destino = r_destino
 
         # --- Segunda ronda de consultas paralelas: 5 bloques adicionales F6 ---
-        # Cada bloque degrada independientemente (FR-012): un fallo en una fuente
-        # produce un bloque con estado "no_encontrado" y warning, sin interrumpir
-        # las demas consultas. Los errores 5xx se propagan como FUENTE_5XX fatal
-        # (FR-009) porque return_exceptions captura todas las excepciones.
+        # Cada bloque degrada independientemente (FR-012): los fallos tipados de
+        # capa viajan DENTRO del resultado del provider (FalloCapa, FR-009) y
+        # producen warning BLOQUE_DEGRADADO con la causa real; nunca se maquillan
+        # como "no encontrado" silencioso. Solo una excepcion inesperada (no
+        # tipada) del provider llega hasta aqui, y se clasifica con
+        # _error_de_fuente (fail loud para errores no tipados).
         t_geotecnia = self._arcgis.consultar_riesgos_geotecnicos(
             lote.centroid.lng, lote.centroid.lat
         )
@@ -754,35 +760,45 @@ class ServidorLotes:
         )
 
         # --- Bloques adicionales F6: construccion con patron {estado, dato, interpretation, source_trace} ---
-        # Cada bloque degrada independientemente (FR-012): errores tipados del
-        # provider se capturan con return_exceptions y producen "no_encontrado"
-        # con warning; un 5xx fatal se propagaria como FUENTE_5XX (FR-009).
+        # Cada bloque degrada independientemente (FR-012): los fallos tipados de
+        # capa llegan como FalloCapa dentro del resultado del provider y producen
+        # warning BLOQUE_DEGRADADO con la causa real (FR-009). Regla por bloque:
+        # fallos sin datos -> no_encontrado + BLOQUE_DEGRADADO; fallos con datos
+        # -> disponible + BLOQUE_DEGRADADO parcial; sin fallos y sin datos ->
+        # no_encontrado + BLOQUE_SIN_DATO.
 
         # Bloque geotechnical_risks
         if isinstance(r_geotecnia, BaseException):
+            return _error_de_fuente(r_geotecnia)
+        riesgos_geotec, trace_geotecnia, fallos_geotec = r_geotecnia
+        tiene_datos_geotec = any([
+            riesgos_geotec.amenaza_movimientos,
+            riesgos_geotec.geologia,
+            riesgos_geotec.respuesta_sismica,
+            riesgos_geotec.zonificacion_geotecnica,
+        ])
+        if fallos_geotec and not tiene_datos_geotec:
             bloque_geotecnia = BloqueRiesgosGeotecnicos(
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos geotécnicos.",
-                source_trace=SourceTrace(
-                    source_name="emergencias/gestionriesgos",
-                    layer_id="2",
-                    service_url=f"{RAIZ_ARCGIS}/emergencias/gestionriesgos/MapServer",
-                    data_vigencia="2023",
-                    query_timestamp=_ahora_iso(),
-                ),
+                source_trace=trace_geotecnia,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": "Bloque geotechnical_risks degradado: error al consultar la fuente.",
+                "mensaje": (
+                    f"Bloque geotechnical_risks degradado: "
+                    f"{_mensaje_fallos(fallos_geotec)}."
+                ),
             })
         else:
-            riesgos_geotec, trace_geotecnia = r_geotecnia
-            tiene_datos_geotec = any([
-                riesgos_geotec.amenaza_movimientos,
-                riesgos_geotec.geologia,
-                riesgos_geotec.respuesta_sismica,
-                riesgos_geotec.zonificacion_geotecnica,
-            ])
+            if fallos_geotec:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque geotechnical_risks degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_geotec)}."
+                    ),
+                })
             if tiene_datos_geotec:
                 partes_geotec = []
                 if riesgos_geotec.amenaza_movimientos:
@@ -818,29 +834,36 @@ class ServidorLotes:
 
         # Bloque socioeconomic_context
         if isinstance(r_socio, BaseException):
+            return _error_de_fuente(r_socio)
+        contexto_socio, trace_socio, fallos_socio = r_socio
+        tiene_datos_socio = any([
+            contexto_socio.estrato is not None,
+            contexto_socio.uso_predominante,
+            contexto_socio.altura_media is not None,
+            contexto_socio.mediana_avaluo is not None,
+        ])
+        if fallos_socio and not tiene_datos_socio:
             bloque_socio = BloqueContextoSocioeconomico(
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos socioeconómicos.",
-                source_trace=SourceTrace(
-                    source_name="Estratificación socioeconómica",
-                    layer_id="1",
-                    service_url=f"{RAIZ_ARCGIS}/ordenamientoterritorial/estratificacion/MapServer",
-                    data_vigencia="2024",
-                    query_timestamp=_ahora_iso(),
-                ),
+                source_trace=trace_socio,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": "Bloque socioeconomic_context degradado: error al consultar la fuente.",
+                "mensaje": (
+                    f"Bloque socioeconomic_context degradado: "
+                    f"{_mensaje_fallos(fallos_socio)}."
+                ),
             })
         else:
-            contexto_socio, trace_socio = r_socio
-            tiene_datos_socio = any([
-                contexto_socio.estrato is not None,
-                contexto_socio.uso_predominante,
-                contexto_socio.altura_media is not None,
-                contexto_socio.mediana_avaluo is not None,
-            ])
+            if fallos_socio:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque socioeconomic_context degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_socio)}."
+                    ),
+                })
             partes_socio = []
             if contexto_socio.estrato is not None:
                 partes_socio.append(f"estrato {contexto_socio.estrato}")
@@ -876,27 +899,34 @@ class ServidorLotes:
 
         # Bloque regulatory_environment
         if isinstance(r_regulatorio, BaseException):
+            return _error_de_fuente(r_regulatorio)
+        entorno_reg, trace_regulatorio, fallos_regulatorio = r_regulatorio
+        tiene_datos_reg = any([
+            entorno_reg.licencias_encontradas is not None,
+            entorno_reg.zona_plusvalia is not None,
+        ])
+        if fallos_regulatorio and not tiene_datos_reg:
             bloque_regulatorio = BloqueEntornoRegulatorio(
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos regulatorios.",
-                source_trace=SourceTrace(
-                    source_name="Licencias de construcción aprobadas",
-                    layer_id="3",
-                    service_url=f"{RAIZ_ARCGIS}/ordenamientoterritorial/licenciasconstruccion/MapServer",
-                    data_vigencia="2025",
-                    query_timestamp=_ahora_iso(),
-                ),
+                source_trace=trace_regulatorio,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": "Bloque regulatory_environment degradado: error al consultar la fuente.",
+                "mensaje": (
+                    f"Bloque regulatory_environment degradado: "
+                    f"{_mensaje_fallos(fallos_regulatorio)}."
+                ),
             })
         else:
-            entorno_reg, trace_regulatorio = r_regulatorio
-            tiene_datos_reg = any([
-                entorno_reg.licencias_encontradas is not None,
-                entorno_reg.zona_plusvalia is not None,
-            ])
+            if fallos_regulatorio:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque regulatory_environment degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_regulatorio)}."
+                    ),
+                })
             partes_reg = []
             if entorno_reg.licencias_encontradas is not None:
                 plural_lic = "s" if entorno_reg.licencias_encontradas != 1 else ""
@@ -932,27 +962,34 @@ class ServidorLotes:
 
         # Bloque cultural_heritage
         if isinstance(r_patrimonio, BaseException):
+            return _error_de_fuente(r_patrimonio)
+        patrimonio, trace_patrimonio, fallos_patrimonio = r_patrimonio
+        tiene_datos_pat = any([
+            patrimonio.bic_cercano is not None,
+            patrimonio.zona_arqueologica is not None,
+        ])
+        if fallos_patrimonio and not tiene_datos_pat:
             bloque_patrimonio = BloquePatrimonioCultural(
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos de patrimonio cultural.",
-                source_trace=SourceTrace(
-                    source_name="Bienes de Interés Cultural",
-                    layer_id="1",
-                    service_url=f"{RAIZ_ARCGIS}/recreaciondeporte/bienesinterescultural/MapServer",
-                    data_vigencia="2023",
-                    query_timestamp=_ahora_iso(),
-                ),
+                source_trace=trace_patrimonio,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": "Bloque cultural_heritage degradado: error al consultar la fuente.",
+                "mensaje": (
+                    f"Bloque cultural_heritage degradado: "
+                    f"{_mensaje_fallos(fallos_patrimonio)}."
+                ),
             })
         else:
-            patrimonio, trace_patrimonio = r_patrimonio
-            tiene_datos_pat = any([
-                patrimonio.bic_cercano is not None,
-                patrimonio.zona_arqueologica is not None,
-            ])
+            if fallos_patrimonio:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque cultural_heritage degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_patrimonio)}."
+                    ),
+                })
             partes_pat = []
             if patrimonio.bic_cercano is True:
                 detalle_bic = ""
@@ -986,28 +1023,35 @@ class ServidorLotes:
 
         # Bloque transit_access
         if isinstance(r_movilidad, BaseException):
+            return _error_de_fuente(r_movilidad)
+        movilidad, trace_movilidad, fallos_movilidad = r_movilidad
+        tiene_datos_mov = any([
+            movilidad.estaciones_transmilenio is not None,
+            movilidad.paraderos_sitp is not None,
+            movilidad.estaciones_metro is not None,
+        ])
+        if fallos_movilidad and not tiene_datos_mov:
             bloque_movilidad = BloqueAccesoMovilidad(
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos de transporte público.",
-                source_trace=SourceTrace(
-                    source_name="Transporte público — Estaciones TransMilenio",
-                    layer_id="1",
-                    service_url=f"{RAIZ_ARCGIS}/movilidad/transportepublico/MapServer",
-                    data_vigencia="2025",
-                    query_timestamp=_ahora_iso(),
-                ),
+                source_trace=trace_movilidad,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": "Bloque transit_access degradado: error al consultar la fuente.",
+                "mensaje": (
+                    f"Bloque transit_access degradado: "
+                    f"{_mensaje_fallos(fallos_movilidad)}."
+                ),
             })
         else:
-            movilidad, trace_movilidad = r_movilidad
-            tiene_datos_mov = any([
-                movilidad.estaciones_transmilenio is not None,
-                movilidad.paraderos_sitp is not None,
-                movilidad.estaciones_metro is not None,
-            ])
+            if fallos_movilidad:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque transit_access degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_movilidad)}."
+                    ),
+                })
             partes_mov = []
             if movilidad.estaciones_transmilenio is not None:
                 plural_tm = "s" if movilidad.estaciones_transmilenio != 1 else ""
@@ -1051,30 +1095,37 @@ class ServidorLotes:
 
         # Bloque catastro_data
         if isinstance(r_catastro, BaseException):
+            return _error_de_fuente(r_catastro)
+        contexto_catastro, trace_catastro, fallos_catastro_f3 = r_catastro
+        tiene_datos_catastro = any([
+            contexto_catastro.construccion is not None,
+            contexto_catastro.manzana is not None,
+            contexto_catastro.densidad_predial is not None,
+            contexto_catastro.variacion_area is not None,
+            contexto_catastro.sector_catastral is not None,
+        ])
+        if fallos_catastro_f3 and not tiene_datos_catastro:
             bloque_catastro = BloqueCatastroData(
                 estado="no_encontrado",
                 interpretation="No se pudieron consultar los datos catastrales adicionales.",
-                source_trace=SourceTrace(
-                    source_name="Catastro — Construcción",
-                    layer_id="0",
-                    service_url=f"{RAIZ_ARCGIS}/catastro/construccion/MapServer",
-                    data_vigencia="2024",
-                    query_timestamp=_ahora_iso(),
-                ),
+                source_trace=trace_catastro,
             )
             warnings.append({
                 "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": "Bloque catastro_data degradado: error al consultar la fuente.",
+                "mensaje": (
+                    f"Bloque catastro_data degradado: "
+                    f"{_mensaje_fallos(fallos_catastro_f3)}."
+                ),
             })
         else:
-            contexto_catastro, trace_catastro = r_catastro
-            tiene_datos_catastro = any([
-                contexto_catastro.construccion is not None,
-                contexto_catastro.manzana is not None,
-                contexto_catastro.densidad_predial is not None,
-                contexto_catastro.variacion_area is not None,
-                contexto_catastro.sector_catastral is not None,
-            ])
+            if fallos_catastro_f3:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque catastro_data degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_catastro_f3)}."
+                    ),
+                })
             partes_catastro = []
             if contexto_catastro.sector_catastral:
                 partes_catastro.append(f"sector: {contexto_catastro.sector_catastral}")
@@ -1349,6 +1400,15 @@ class ServidorLotes:
                 lng=lng,
             )
         arcgis = lotes[0]
+        # Centroide publicado (hallazgo M3): es el centroide GEOMETRICO interior
+        # del poligono de la capa 38, no el punto de consulta. El punto de
+        # consulta puede caer en el borde del lote y distorsionar las consultas
+        # tematicas posteriores; el fallback al punto de entrada solo aplica si
+        # la geometria no es utilizable (determinismo preservado).
+        centroide_geometrico = centroide_interior_de_geometria(arcgis.geometry)
+        lng_centroide, lat_centroide = (
+            centroide_geometrico if centroide_geometrico is not None else (lng, lat)
+        )
         lote = Lote(
             chip=arcgis.chip,
             codigo_catastral=arcgis.codigo_catastral,
@@ -1356,7 +1416,7 @@ class ServidorLotes:
             direccion_normalizada=arcgis.direccion_normalizada,
             barrio=arcgis.barrio,
             geometry=arcgis.geometry,
-            centroid=Centroide(lat=lat, lng=lng),
+            centroid=Centroide(lat=lat_centroide, lng=lng_centroide),
             source_trace=arcgis.source_trace,
         )
         return lote, None
@@ -1550,6 +1610,19 @@ def _formatear_numero(valor: float) -> str:
     if float(valor).is_integer():
         return str(int(valor))
     return str(valor)
+
+
+def _mensaje_fallos(fallos: list[FalloCapa]) -> str:
+    """Causa legible de los fallos de capa de un bloque multifuente (FR-009).
+
+    Un bloque con capas caidas NUNCA se reporta como "no encontrado" silencioso:
+    este mensaje alimenta el warning BLOQUE_DEGRADADO con la fuente y la causa
+    real de cada capa que fallo.
+    """
+    return "; ".join(
+        f"error al consultar la capa {fallo.source_name} ({fallo.detalle})"
+        for fallo in fallos
+    )
 
 
 def _trace_upl_por_defecto() -> dict[str, str]:

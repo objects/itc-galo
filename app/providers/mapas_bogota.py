@@ -45,6 +45,7 @@ from app.errores import (
     verificar_body_sin_error,
 )
 from app.models import SourceTrace
+from app.providers.geom import punto_interior_seguro
 
 URL_SERVICIO = "https://catalogopmb.catastrobogota.gov.co/PMBWeb/web"
 # Ruta relativa: httpx anexa a URL_SERVICIO quitando el "/" inicial
@@ -223,7 +224,7 @@ class MapasBogotaProvider:
         geometria = resultado.get("GEOMETRY") or {}
         rings = geometria.get("rings") or []
         if rings:
-            lng, lat = _centroide_desde_rings(rings[0])
+            lng, lat = _centroide_desde_rings(rings)
         else:
             # Fallback defensivo: el item puede traer el punto directo
             # (LATITUD/LONGITUD) en vez de un poligono (parse, no valida).
@@ -268,18 +269,27 @@ def _causa_transporte(exc: httpx.TransportError) -> str:
     return "error de conexión"
 
 
-def _centroide_desde_rings(puntos: list[list[float]]) -> tuple[float | None, float | None]:
-    """Centroide aritmetico del anillo exterior (rings ya en WGS84).
+def _centroide_desde_rings(rings: list[list[list[float]]]) -> tuple[float | None, float | None]:
+    """Centroide geometrico interior del poligono ESRI (rings ya en WGS84).
+
+    Usa la formula del centroide de poligono (shoelace con areas) sobre el
+    anillo exterior respetando los agujeros; si el resultado cae fuera (lotes
+    concavos), busca un punto interior seguro determinista (hallazgo M3). La
+    media aritmetica de vertices quedo atras: puede caer fuera del lote y
+    provocar consultas fantasma ("lote no encontrado") al re-consultar la capa
+    por punto.
 
     La API viva entrega GEOMETRY.rings en grados decimales (WGS84); la conversion
     desde Web Mercator queda solo como defensa (D4) por si un payload futuro no
-    respeta ese formato.
+    respeta ese formato: cualquier transformacion lineal preserva centroides y
+    contencion, asi que basta convertir el punto resultante.
     """
-    if not puntos:
+    if not rings:
         return None, None
-    cantidad = len(puntos)
-    cx = sum(punto[0] for punto in puntos) / cantidad
-    cy = sum(punto[1] for punto in puntos) / cantidad
+    punto = punto_interior_seguro(rings)
+    if punto is None:
+        return None, None
+    cx, cy = punto
     # La API se consulta con spatialReference=102100; si el centroide no parece
     # grados decimales, se convierte de Web Mercator a WGS84 (defensivo, D4).
     if abs(cx) > 180 or abs(cy) > 90:

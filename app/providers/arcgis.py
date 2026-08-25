@@ -35,19 +35,31 @@ no se "rescata" parcialmente el contexto: el shape de salida no tiene canal de
 error por tematica (estado es solo disponible/no_encontrado, contrato) y mapear un
 5xx a no_encontrado violaria FR-009. En el caso normal (ausencia de dato), cada
 tematica reporta no_encontrado por separado (FR-007).
+
+Bloques multifuente F6/F7 (riesgos, socioeconomico, regulatorio, patrimonio,
+movilidad, catastro): cada capa SI reporta sus fallos tipados. asyncio.gather
+corre con return_exceptions pero las excepciones NUNCA se tragan: se convierten
+en FalloCapa (fuente + causa legible) y viajan en el tercer elemento de la tupla
+de retorno para que el limite emita el warning BLOQUE_DEGRADADO con la causa real
+(FR-009). Un fallo de capa jamas se maquilla como "no encontrado" silencioso.
 """
 
 from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Coroutine, Sequence
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel
 
-from app.errores import FuenteDatosInvalidosError
+from app.errores import (
+    Fuente4xxError,
+    Fuente5xxError,
+    FuenteDatosInvalidosError,
+)
 from app.models import (
     AccesoMovilidad,
     ContextoCatastro,
@@ -340,6 +352,49 @@ D_USOTUSO: dict[str, str] = {
 PATRON_CHIP = re.compile(r"^[A-Z0-9]{11}$")
 
 
+class FalloCapa(BaseModel):
+    """Fallo tipado de una capa dentro de un bloque multifuente (FR-009).
+
+    Un 5xx/4xx/payload invalido de una capa NUNCA se reporta como "no
+    encontrado": queda registrado aqui (fuente + causa legible) para que el
+    limite construya el warning BLOQUE_DEGRADADO con la causa real.
+    """
+
+    source_name: str
+    detalle: str
+
+
+def _detalle_de_fallo(exc: BaseException) -> str:
+    """Causa legible y determinista de un error tipado del provider (FR-009)."""
+    if isinstance(exc, Fuente5xxError):
+        return f"la fuente no está disponible (error {exc.status})"
+    if isinstance(exc, Fuente4xxError):
+        return f"la fuente rechazó la consulta (error {exc.status})"
+    if isinstance(exc, FuenteDatosInvalidosError):
+        return f"la fuente devolvió datos no válidos ({exc.detail})"
+    return "error inesperado al consultar la fuente"
+
+
+async def _gather_con_fallos(
+    tareas_por_capa: Sequence[tuple[CapaConfig, Coroutine[Any, Any, dict[str, Any]]]],
+) -> tuple[list[Any], list[FalloCapa]]:
+    """Ejecuta las consultas de un bloque multifuente separando exitos de fallos.
+
+    Los errores tipados de cada capa (FR-009) NO se tragan: quedan en `fallos`
+    con su causa para que el limite emita el warning BLOQUE_DEGRADADO. Solo los
+    resultados exitosos llegan al parsing del bloque.
+    """
+    resultados = await asyncio.gather(
+        *(tarea for _, tarea in tareas_por_capa), return_exceptions=True
+    )
+    fallos = [
+        FalloCapa(source_name=capa.source_name, detalle=_detalle_de_fallo(resultado))
+        for (capa, _), resultado in zip(tareas_por_capa, resultados)
+        if isinstance(resultado, BaseException)
+    ]
+    return list(resultados), fallos
+
+
 class LoteArcgis(BaseModel):
     """Lote parseado de la capa 38 del Mapa de Referencia (identity + geometria)."""
 
@@ -605,11 +660,13 @@ class ArcGISProvider:
 
     async def consultar_riesgos_geotecnicos(
         self, lng: float, lat: float
-    ) -> tuple[RiesgoGeotecnicos, SourceTrace]:
+    ) -> tuple[RiesgoGeotecnicos, SourceTrace, list[FalloCapa]]:
         """Consulta 4 capas de gestionriesgos en paralelo: amenaza, geologia, sismo, zonificacion.
 
-        Retorna la tupla (riesgos, source_trace) con la clasificacion dominante
-        de cada capa y el nivel de amenaza mas critico encontrado.
+        Retorna la tupla (riesgos, source_trace, fallos) con la clasificacion
+        dominante de cada capa, el nivel de amenaza mas critico encontrado y los
+        fallos tipados por capa (FR-009): una capa caida queda en `fallos` con
+        su causa y jamas se confunde con "sin dato".
         """
         claves = [
             ("geotecnia_amenaza", "amenaza_movimientos"),
@@ -618,10 +675,10 @@ class ArcGISProvider:
             ("geotecnia_zonificacion", "zonificacion_geotecnica"),
         ]
         tareas = [
-            self._consultar_feature_punto(self._capas[clave], lng, lat)
+            (self._capas[clave], self._consultar_feature_punto(self._capas[clave], lng, lat))
             for clave, _ in claves
         ]
-        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+        resultados, fallos = await _gather_con_fallos(tareas)
 
         campos: dict[str, str | None] = {}
         traza = _construir_trace(self._capas["geotecnia_amenaza"])
@@ -653,23 +710,23 @@ class ArcGISProvider:
                 nivel_amenaza=nivel,
             ),
             traza,
+            fallos,
         )
 
     async def consultar_contexto_socioeconomico(
         self, lng: float, lat: float
-    ) -> tuple[ContextoSocioeconomico, SourceTrace]:
+    ) -> tuple[ContextoSocioeconomico, SourceTrace, list[FalloCapa]]:
         """Consulta 4 capas socioeconomicas en paralelo: estratificacion, uso, altura, avaluo.
 
-        Retorna la tupla (contexto, source_trace) con el primer source_trace
-        disponible.
+        Retorna la tupla (contexto, source_trace, fallos) con el primer
+        source_trace disponible y los fallos tipados por capa (FR-009).
         """
+        claves = ["estratificacion", "usopredominante", "alturamedia", "medianaavaluo"]
         tareas = [
-            self._consultar_feature_punto(self._capas["estratificacion"], lng, lat),
-            self._consultar_feature_punto(self._capas["usopredominante"], lng, lat),
-            self._consultar_feature_punto(self._capas["alturamedia"], lng, lat),
-            self._consultar_feature_punto(self._capas["medianaavaluo"], lng, lat),
+            (self._capas[clave], self._consultar_feature_punto(self._capas[clave], lng, lat))
+            for clave in claves
         ]
-        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+        resultados, fallos = await _gather_con_fallos(tareas)
 
         estrato: int | None = None
         uso: str | None = None
@@ -724,20 +781,23 @@ class ArcGISProvider:
                 mediana_avaluo=avaluo,
             ),
             traza,
+            fallos,
         )
 
     async def consultar_entorno_regulatorio(
         self, lng: float, lat: float
-    ) -> tuple[EntornoRegulatorio, SourceTrace]:
+    ) -> tuple[EntornoRegulatorio, SourceTrace, list[FalloCapa]]:
         """Consulta 2 capas regulatorias en paralelo: licencias y plusvalia.
 
-        Retorna la tupla (entorno, source_trace).
+        Retorna la tupla (entorno, source_trace, fallos) con los fallos tipados
+        por capa (FR-009).
         """
+        claves = ["licencias", "plusvalia"]
         tareas = [
-            self._consultar_feature_punto(self._capas["licencias"], lng, lat),
-            self._consultar_feature_punto(self._capas["plusvalia"], lng, lat),
+            (self._capas[clave], self._consultar_feature_punto(self._capas[clave], lng, lat))
+            for clave in claves
         ]
-        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+        resultados, fallos = await _gather_con_fallos(tareas)
 
         licencias_count: int | None = None
         zona_plusvalia: bool | None = None
@@ -773,20 +833,23 @@ class ArcGISProvider:
                 nombre_plan_plusvalia=nombre_plan,
             ),
             traza,
+            fallos,
         )
 
     async def consultar_patrimonio_cultural(
         self, lng: float, lat: float
-    ) -> tuple[PatrimonioCultural, SourceTrace]:
+    ) -> tuple[PatrimonioCultural, SourceTrace, list[FalloCapa]]:
         """Consulta 2 capas de patrimonio cultural en paralelo: BIC y plan arqueologico.
 
-        Retorna la tupla (patrimonio, source_trace).
+        Retorna la tupla (patrimonio, source_trace, fallos) con los fallos
+        tipados por capa (FR-009).
         """
+        claves = ["bic", "planarqueologico"]
         tareas = [
-            self._consultar_feature_punto(self._capas["bic"], lng, lat),
-            self._consultar_feature_punto(self._capas["planarqueologico"], lng, lat),
+            (self._capas[clave], self._consultar_feature_punto(self._capas[clave], lng, lat))
+            for clave in claves
         ]
-        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+        resultados, fallos = await _gather_con_fallos(tareas)
 
         bic_cercano: bool | None = None
         nombre_bic: str | None = None
@@ -819,31 +882,32 @@ class ArcGISProvider:
                 zona_arqueologica=zona_arqueologica,
             ),
             traza,
+            fallos,
         )
 
     async def consultar_acceso_movilidad(
         self, lng: float, lat: float
-    ) -> tuple[AccesoMovilidad, SourceTrace]:
+    ) -> tuple[AccesoMovilidad, SourceTrace, list[FalloCapa]]:
         """Consulta 3 capas de transporte publico con radio: TransMilenio, SITP, Metro.
 
         Usa distance + units=esriSRUnit_Meter para busqueda por proximidad
-        (patron consultar_obras_publicas_radio).
+        (patron consultar_obras_publicas_radio). Retorna la tupla
+        (movilidad, source_trace, fallos) con los fallos tipados por capa
+        (FR-009).
         """
-        tareas = [
-            self._consultar_radio(
-                self._capas["transmilenio"], lng, lat, 800,
-                ["ETRNOMBRE", "NOMBRE", "ESTACION"],
-            ),
-            self._consultar_radio(
-                self._capas["sitp"], lng, lat, 500,
-                ["PSINOMBRE", "NOMBRE", "PARADERO"],
-            ),
-            self._consultar_radio(
-                self._capas["metro"], lng, lat, 800,
-                ["REFNAME", "NOMBRE", "ESTACION"],
-            ),
+        configuracion_radio = [
+            ("transmilenio", 800, ["ETRNOMBRE", "NOMBRE", "ESTACION"]),
+            ("sitp", 500, ["PSINOMBRE", "NOMBRE", "PARADERO"]),
+            ("metro", 800, ["REFNAME", "NOMBRE", "ESTACION"]),
         ]
-        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+        tareas = [
+            (
+                self._capas[clave],
+                self._consultar_radio(self._capas[clave], lng, lat, radio, campos),
+            )
+            for clave, radio, campos in configuracion_radio
+        ]
+        resultados, fallos = await _gather_con_fallos(tareas)
 
         count_tm: int | None = None
         count_sitp: int | None = None
@@ -891,16 +955,18 @@ class ArcGISProvider:
                 estacion_cercana=estacion_cercana,
             ),
             traza,
+            fallos,
         )
 
     async def consultar_contexto_catastro(
         self, lng: float, lat: float
-    ) -> tuple[ContextoCatastro, SourceTrace]:
+    ) -> tuple[ContextoCatastro, SourceTrace, list[FalloCapa]]:
         """Consulta 5 capas catastrales en paralelo: construccion, manzana, densidad, variacion, sector.
 
-        Retorna la tupla (contexto_catastro, source_trace) con el primer
-        source_trace disponible. Cada capa se degrade independientemente
-        via asyncio.gather(return_exceptions=True).
+        Retorna la tupla (contexto_catastro, source_trace, fallos) con el
+        primer source_trace disponible y los fallos tipados por capa (FR-009):
+        cada capa se degrada independientemente pero su fallo queda registrado,
+        nunca silenciado.
         """
         claves = [
             "construccion",
@@ -910,10 +976,10 @@ class ArcGISProvider:
             "sector_catastral",
         ]
         tareas = [
-            self._consultar_feature_punto(self._capas[clave], lng, lat)
+            (self._capas[clave], self._consultar_feature_punto(self._capas[clave], lng, lat))
             for clave in claves
         ]
-        resultados = await asyncio.gather(*tareas, return_exceptions=True)
+        resultados, fallos = await _gather_con_fallos(tareas)
 
         construccion: dict[str, Any] | None = None
         manzana: dict[str, Any] | None = None
@@ -997,6 +1063,7 @@ class ArcGISProvider:
                 sector_catastral=sector_catastral,
             ),
             traza,
+            fallos,
         )
 
     async def _consultar_feature_punto(
@@ -1170,20 +1237,31 @@ def _traducir_dominio(dominio: dict[str, str], codigo: str | None) -> str | None
     return dominio.get(codigo, codigo)
 
 
-def _inferir_nivel_amenaza(amenaza: str | None) -> str:
+# Niveles de amenaza por raiz con limite de palabra (hallazgo m1): la capa
+# gestionriesgos publica "Amenaza alta/media/baja" (adjetivo femenino
+# pospuesto), ademas de las formas masculinas. Los limites de palabra evitan
+# falsos positivos ("altitud", "altura", "remedia", "medianoche" no matchean).
+_PATRON_NIVEL_ALTO = re.compile(r"\b(?:crític[oa]s?|critic[oa]s?|alt[oa]s?)\b")
+_PATRON_NIVEL_MEDIO = re.compile(r"\b(?:moderad[oa]s?|medi[oa]s?)\b")
+_PATRON_NIVEL_BAJO = re.compile(r"\b(?:normal(?:es)?|baj[oa]s?)\b")
+
+
+def _inferir_nivel_amenaza(amenaza: str | None) -> Literal["alto", "medio", "bajo", "desconocido"]:
     """Infiere el nivel de amenaza geotecnicos desde el campo GEOTECNIA.
 
-    Clasificacion basada en la terminologia comun de las capas de gestion de
-    riesgos de Bogota. Si no hay dato o la amenaza es None, retorna "desconocido".
-    Nunca inventa clasificaciones (FR-014).
+    Clasificacion por raices insensibles a genero y numero ("alto"/"alta",
+    "medio"/"media", "bajo"/"baja") terminologia comun de las capas de gestion
+    de riesgos de Bogota. Se evalua de mas critico a menos critico. Si no hay
+    dato o ningun patron matchea, retorna "desconocido". Nunca inventa
+    clasificaciones (FR-014).
     """
     if amenaza is None:
         return "desconocido"
-    amenaza_lower = amenaza.lower()
-    if any(p in amenaza_lower for p in ["alto", "alto riesgo", "critico"]):
+    amenaza_normalizada = amenaza.lower()
+    if _PATRON_NIVEL_ALTO.search(amenaza_normalizada):
         return "alto"
-    if any(p in amenaza_lower for p in ["medio", "medio riesgo", "moderado"]):
+    if _PATRON_NIVEL_MEDIO.search(amenaza_normalizada):
         return "medio"
-    if any(p in amenaza_lower for p in ["bajo", "bajo riesgo", "normal"]):
+    if _PATRON_NIVEL_BAJO.search(amenaza_normalizada):
         return "bajo"
     return "desconocido"
