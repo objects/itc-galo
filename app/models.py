@@ -209,6 +209,9 @@ METADATA_EMBEDDING_MODEL = "embedding_model"
 #   "1" = `upls` como string CSV ("UPL17,UPL20") — $contains nunca matcheaba.
 #   "2" = `upls` como list[str] real ($contains = membresia exacta) + filtro
 #         territorial compuesto ($or parte/upls) en la consulta.
+#   "3" = metadatos de retrieval hibrido por chunk: `tema` (clasificacion
+#         tematica determinista), `estado` ("vigente"/"derogado") y
+#         `fecha_vigencia` garantizada para todo chunk (555 y actos).
 METADATA_ESQUEMA_METADATOS = "esquema_metadatos"
 
 # Vigencia del Decreto 555/2021 (FR-014): fecha mínima de expedición de un acto
@@ -224,6 +227,9 @@ FormatoDocumento = Literal["sisjur_html", "pdf", "docx", "markdown", "txt"]
 # excluyen de la huella canónica del corpus (`hash_documento`) para que el
 # Decreto 555 conserve exactamente su hash actual (FR-012): el 555 los tiene en
 # None y el JSONL versionado NO se modifica; los actos los pueblan.
+# `estado_documento`/`derogado_compilado_por` (esquema v3) se añaden a la misma
+# exclusión: ya vivían en las líneas JSONL de los actos (contrato F4) y su
+# incorporación al modelo NO debe alterar ninguna huella existente.
 CAMPOS_ADITIVOS_F4 = (
     "norma_id",
     "tipo_norma",
@@ -231,6 +237,8 @@ CAMPOS_ADITIVOS_F4 = (
     "año",
     "fecha_vigencia",
     "titulo_norma",
+    "estado_documento",
+    "derogado_compilado_por",
 )
 
 
@@ -304,6 +312,16 @@ class ArticuloNormativo(BaseModel):
     año: int | None = None
     fecha_vigencia: str | None = None
     titulo_norma: str | None = None
+
+    # --- Metadatos de estado del documento de origen (esquema v3) ---
+    # Ya existían en las líneas JSONL de los actos (contrato F4, banner sisjur
+    # H7) pero el modelo los descartaba al validar; ahora se conservan para que
+    # la ingesta pueda etiquetar cada chunk con `estado` ("vigente"/"derogado").
+    # El 555 no los trae (None): sus artículos son vigentes por definición — su
+    # campo `articulos_derogados` lista artículos QUE ESTE artículo deroga, no
+    # su propio estado.
+    estado_documento: Literal["vigente", "derogado"] | None = None
+    derogado_compilado_por: str | None = None
 
 
 class Chunk(BaseModel):

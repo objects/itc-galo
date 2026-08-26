@@ -4,13 +4,32 @@ Usa el índice ChromaDB + embeddings Ollama (bge-m3) + chat LLM configurable
 por entorno (OLLAMA_CHAT_MODEL, ver FIX 1) para responder consultas en lenguaje
 natural con citas literales y trazabilidad (FR-001, FR-003, Historia de Usuario
 1). Filtro estricto por UPL (FR-002).
+
+Búsqueda HÍBRIDA (Fase 4): la recuperación combina la pata vectorial (query de
+ChromaDB) con una pata léxica BM25 local sobre los documentos del filtro, y
+fusiona ambos rankings con Reciprocal Rank Fusion (RRF, k=60). Elección de RRF
+sobre suma normalizada de scores: no exige normalizar escalas heterogéneas
+(coseno 0-1 vs BM25 sin cota), es insensible a outliers de score y su resultado
+depende solo del ORDEN de cada ranking — determinista por construcción (SC-003).
+
+Reglas deterministas de vigencia y jerarquía (Fase 4, sin LLM) antes de devolver
+chunks al LLM:
+- Los chunks con `estado == "derogado"` se EXCLUYEN salvo que los vigentes no
+  alcancen a llenar `top_k` (fallback downranked: entran al final, en su orden
+  híbrido relativo).
+- Jerarquía normativa en empates de score híbrido: Decreto 555 (norma base)
+  primero; empates restantes se resuelven por `fecha_vigencia` más reciente y,
+  en última instancia, por id ascendente (orden total determinista).
 """
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import time
+import unicodedata
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,6 +52,24 @@ UMBRAL_SIMILITUD_DEFAULT = 0.35
 TOP_K_DEFAULT = 3
 TOP_K_MAX = 6
 CONSULTA_MAX_CHARS = 500
+
+# --- Búsqueda híbrida (Fase 4) ---
+# La pata vectorial recupera más candidatos que top_k para que la fusión RRF
+# tenga material con qué reordenar; la pata léxica puntúa TODO el conjunto del
+# filtro territorial con BM25 local. Ambas patas se acotan al mismo tope.
+FACTOR_CANDIDATOS_HIBRIDO = 3
+TOPE_CANDIDATOS_HIBRIDO = TOP_K_MAX * FACTOR_CANDIDATOS_HIBRIDO
+
+# Constante estándar de Reciprocal Rank Fusion: amortigua el peso del primer
+# puesto y hace que un top-1 en una sola pata nunca domine sobre consistencia
+# en ambas. El +1 hace los rangos 1-based (rank 1 -> 1/61).
+RRF_K = 60
+
+# Parámetros BM25 de la pata léxica (valores canónicos de la literatura).
+BM25_K1 = 1.2
+BM25_B = 0.75
+# Tokens de menos de 3 caracteres ("del", "la", "y") no aportan señal léxica.
+TERMINO_MIN_LONGITUD = 3
 
 # Healthcheck de Ollama (FIX 9): TTL del cache de la verificación de
 # disponibilidad. El ping de cada consulta duplica la latencia; solo se
@@ -101,6 +138,15 @@ class ChunkRecuperado(BaseModel):
     source_name: str | None = None
     relacion_con_555: str | None = None
     data_vigencia: str | None = None
+
+    # --- Metadatos y score del retrieval híbrido (Fase 4, esquema v3) ---
+    # `tema`/`estado` provienen de la metadata del índice (None en índices
+    # pre-v3 o mocks legacy: se tratan como "vigente" sin tema). `score_hibrido`
+    # es el RRF acumulado; los chunks recuperados SOLO por la pata léxica
+    # conservan `similitud` en 0.0 (sin señal vectorial).
+    tema: str | None = None
+    estado: str | None = None
+    score_hibrido: float | None = None
 
 
 class NormativaProvider:
@@ -257,17 +303,24 @@ class NormativaProvider:
         # Verificar Ollama chat
         await self._verificar_ollama_chat()
 
-        # Recuperación vectorial
+        # Recuperación híbrida (Fase 4): pata vectorial + pata léxica BM25,
+        # fusionadas con RRF y filtradas por las reglas deterministas de
+        # vigencia/jerarquía antes de llegar al LLM.
         coleccion = self._get_coleccion()
         where = construir_filtro_territorial(upl) if upl else None
 
+        n_vector = min(top_k * FACTOR_CANDIDATOS_HIBRIDO, TOPE_CANDIDATOS_HIBRIDO)
         results = coleccion.query(
             query_texts=[consulta],
-            n_results=top_k,
+            n_results=n_vector,
             where=where,
         )
+        ranking_vector = self._procesar_resultados(results, upl)
+        ranking_keyword = self._recuperar_candidatos_keyword(coleccion, consulta, where)
 
-        chunks = self._procesar_resultados(results, upl)
+        chunks = _aplicar_reglas_vigencia_y_jerarquia(
+            _fusion_rrf(ranking_vector, ranking_keyword), top_k
+        )
         if not chunks:
             return self._respuesta_sin_resultados()
 
@@ -298,6 +351,13 @@ class NormativaProvider:
                 # por ítem; los campos F2 conservan su semántica (FR-011).
                 "norma": norma,
                 "source_name": source_name,
+                # Campos aditivos Fase 4 (retrieval híbrido): score RRF y
+                # metadatos de vigencia/tema del índice v3 (None en legacy).
+                "score_hibrido": (
+                    round(chunk.score_hibrido, 6) if chunk.score_hibrido is not None else None
+                ),
+                "tema": chunk.tema,
+                "estado": chunk.estado,
             })
 
         return {
@@ -307,7 +367,69 @@ class NormativaProvider:
             "trazabilidad": self._construir_trace().model_dump(),
         }
 
+    def _recuperar_candidatos_keyword(
+        self, coleccion, consulta: str, where: dict | None
+    ) -> list[ChunkRecuperado]:
+        """Pata léxica del retrieval híbrido: BM25 local sobre el filtro.
+
+        Recupera TODOS los chunks que cumplen el filtro territorial
+        (`coleccion.get`) y los puntúa con BM25 (k1=1.2, b=0.75) contra los
+        términos de la consulta. El IDF se calcula sobre el propio conjunto
+        filtrado: determinista para un índice dado (SC-003), sin red ni LLM.
+
+        Returns:
+            Ranking léxico (score desc, id asc en empates) acotado a
+            TOPE_CANDIDATOS_HIBRIDO. Los chunks llevan `similitud` 0.0: no hay
+            señal vectorial para ellos hasta que la fusión RRF los combine.
+        """
+        datos = coleccion.get(where=where, include=["documents", "metadatas"])
+        ids = datos.get("ids") or []
+        documentos = datos.get("documents") or []
+        metadatas = datos.get("metadatas") or []
+        if not ids or not documentos:
+            return []
+
+        terminos_consulta = _tokenizar(consulta)
+        if not terminos_consulta:
+            return []
+
+        tokenizados = [_tokenizar(documento) for documento in documentos]
+        total_documentos = len(tokenizados)
+        longitudes = [len(tokens) for tokens in tokenizados]
+        longitud_media = sum(longitudes) / total_documentos
+
+        # Document frequency por término único (base del IDF).
+        frecuencias_documento: Counter[str] = Counter()
+        for tokens in tokenizados:
+            frecuencias_documento.update(set(tokens))
+
+        puntuados: list[tuple[float, str, ChunkRecuperado]] = []
+        for indice, tokens in enumerate(tokenizados):
+            score_bm25 = _score_bm25(
+                terminos_consulta,
+                Counter(tokens),
+                longitudes[indice],
+                longitud_media,
+                frecuencias_documento,
+                total_documentos,
+            )
+            if score_bm25 <= 0.0:
+                continue
+            chunk = _chunk_desde_fila(
+                ids[indice], documentos[indice], metadatas[indice], similitud=0.0
+            )
+            puntuados.append((score_bm25, chunk.id, chunk))
+
+        puntuados.sort(key=lambda item: (-item[0], item[1]))
+        return [chunk for _, _, chunk in puntuados[:TOPE_CANDIDATOS_HIBRIDO]]
+
     def _procesar_resultados(self, results: dict, upl_filtro: str | None) -> list[ChunkRecuperado]:
+        """Convierte el resultado crudo de `coleccion.query` en chunks tipados.
+
+        Aplica el umbral de similitud vectorial (UMBRAL_SIMILITUD_DEFAULT) y
+        ordena por similitud descendente. Es la PATA VECTORIAL del retrieval
+        híbrido; `upl_filtro` se conserva por compatibilidad de firma.
+        """
         chunks: list[ChunkRecuperado] = []
 
         if not results.get("ids") or not results["ids"][0]:
@@ -322,29 +444,7 @@ class NormativaProvider:
             similitud = 1.0 - distance
             if similitud < UMBRAL_SIMILITUD_DEFAULT:
                 continue
-
-            parte = metadata.get("parte")
-            chunks.append(ChunkRecuperado(
-                id=id_chunk,
-                articulo=metadata["articulo"],
-                titulo=metadata["titulo"],
-                libro=metadata["libro"],
-                parte=parte if parte != "" else None,
-                texto=document,
-                similitud=similitud,
-                # Metadatos aditivos F4 (data-model.md:113-130): el índice actual
-                # (solo 555, pre-T020) no los lleva → None y degradación a la
-                # norma base en la respuesta.
-                norma_id=metadata.get("norma_id"),
-                tipo_norma=metadata.get("tipo_norma"),
-                numero_norma=metadata.get("numero_norma") or metadata.get("numero"),
-                año=metadata.get("año"),
-                fecha_vigencia=metadata.get("fecha_vigencia"),
-                titulo_norma=metadata.get("titulo_norma"),
-                source_name=metadata.get("source_name"),
-                relacion_con_555=metadata.get("relacion_con_555"),
-                data_vigencia=metadata.get("data_vigencia"),
-            ))
+            chunks.append(_chunk_desde_fila(id_chunk, document, metadata, similitud))
 
         chunks.sort(key=lambda c: c.similitud, reverse=True)
         return chunks
@@ -441,6 +541,170 @@ class NormativaProvider:
 
 def _ahora_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# --- Retrieval híbrido: funciones puras deterministas (Fase 4, SC-003) ---
+
+
+def _tokenizar(texto: str) -> list[str]:
+    """Tokens léxicos de un texto: minúsculas sin tildes, alfanuméricos.
+
+    Se descartan tokens de menos de TERMINO_MIN_LONGITUD caracteres ("del",
+    "las", "que"): no aportan señal discriminante y el IDF no los compensa en
+    conjuntos pequeños. Función pura.
+    """
+    clave = unicodedata.normalize("NFD", texto)
+    sin_tildes = "".join(c for c in clave if unicodedata.category(c) != "Mn").lower()
+    return [
+        token
+        for token in re.split(r"[^a-z0-9]+", sin_tildes)
+        if len(token) >= TERMINO_MIN_LONGITUD
+    ]
+
+
+def _score_bm25(
+    terminos_consulta: list[str],
+    frecuencias_documento: Counter[str],
+    longitud_documento: int,
+    longitud_media: int | float,
+    frecuencias_por_documento: Counter[str],
+    total_documentos: int,
+) -> float:
+    """Puntaje BM25 de un documento contra la consulta (k1=BM25_K1, b=BM25_B).
+
+    IDF Robertson-Sparck Jones con suavizado estándar:
+    ln(1 + (N - df + 0.5) / (df + 0.5)). Función pura y determinista.
+    """
+    score = 0.0
+    for termino in set(terminos_consulta):
+        frecuencia = frecuencias_documento.get(termino, 0)
+        if frecuencia == 0:
+            continue
+        df = frecuencias_por_documento.get(termino, 0)
+        idf = math.log(1.0 + (total_documentos - df + 0.5) / (df + 0.5))
+        saturacion = (
+            frecuencia * (BM25_K1 + 1.0)
+            / (frecuencia + BM25_K1 * (1.0 - BM25_B + BM25_B * longitud_documento / longitud_media))
+        )
+        score += idf * saturacion
+    return score
+
+
+def _chunk_desde_fila(
+    id_chunk: str, document: str, metadata: dict, similitud: float
+) -> ChunkRecuperado:
+    """ChunkRecuperado tipado desde una fila cruda de ChromaDB (query o get).
+
+    Punto ÚNICO de parsing de metadata (Principio II): tanto la pata vectorial
+    como la léxica construyen chunks aquí. Los metadatos v3 (`tema`, `estado`)
+    son opcionales: índices pre-v3 y mocks legacy los omiten y degradan a None.
+    """
+    parte = metadata.get("parte")
+    return ChunkRecuperado(
+        id=id_chunk,
+        articulo=metadata["articulo"],
+        titulo=metadata["titulo"],
+        libro=metadata["libro"],
+        parte=parte if parte != "" else None,
+        texto=document,
+        similitud=similitud,
+        # Metadatos aditivos F4 (data-model.md:113-130): el índice actual
+        # (solo 555, pre-T020) no los lleva → None y degradación a la
+        # norma base en la respuesta.
+        norma_id=metadata.get("norma_id"),
+        tipo_norma=metadata.get("tipo_norma"),
+        numero_norma=metadata.get("numero_norma") or metadata.get("numero"),
+        año=metadata.get("año"),
+        fecha_vigencia=metadata.get("fecha_vigencia"),
+        titulo_norma=metadata.get("titulo_norma"),
+        source_name=metadata.get("source_name"),
+        relacion_con_555=metadata.get("relacion_con_555"),
+        data_vigencia=metadata.get("data_vigencia"),
+        # Metadatos v3 (Fase 4): None en índices legacy → tratados como vigente.
+        tema=metadata.get("tema"),
+        estado=metadata.get("estado"),
+    )
+
+
+def _fusion_rrf(
+    ranking_vector: list[ChunkRecuperado],
+    ranking_keyword: list[ChunkRecuperado],
+) -> list[ChunkRecuperado]:
+    """Fusiona ambos rankings con Reciprocal Rank Fusion (RRF, k=RRF_K).
+
+    Elección documentada (Fase 4): RRF sobre suma normalizada de scores porque
+    no exige normalizar escalas heterogéneas (coseno vs BM25), es robusto a
+    outliers y depende solo del ORDEN de cada ranking — determinista por
+    construcción (SC-003). Empates de score RRF se resuelven por similitud
+    vectorial descendente y, en última instancia, por id ascendente (orden
+    total). Cada chunk devuelto lleva su `score_hibrido` acumulado; los chunks
+    recuperados solo por la pata léxica conservan `similitud` 0.0.
+    """
+    puntajes: dict[str, float] = {}
+    por_id: dict[str, ChunkRecuperado] = {}
+    for ranking in (ranking_vector, ranking_keyword):
+        for posicion, chunk in enumerate(ranking):
+            puntajes[chunk.id] = puntajes.get(chunk.id, 0.0) + 1.0 / (RRF_K + posicion + 1)
+            por_id.setdefault(chunk.id, chunk)
+
+    ids_ordenados = sorted(
+        puntajes,
+        key=lambda cid: (-puntajes[cid], -por_id[cid].similitud, cid),
+    )
+    return [
+        por_id[cid].model_copy(update={"score_hibrido": puntajes[cid]})
+        for cid in ids_ordenados
+    ]
+
+
+def _es_norma_base(chunk: ChunkRecuperado) -> bool:
+    """True si el chunk proviene del Decreto 555 (norma principal).
+
+    Los índices legacy sin identidad de norma (`norma_id` None) se tratan como
+    norma base: solo contienen el 555.
+    """
+    return chunk.norma_id is None or chunk.norma_id == CORPUS_LAYER_ID
+
+
+def _ordenar_por_jerarquia(chunks: list[ChunkRecuperado]) -> list[ChunkRecuperado]:
+    """Orden total determinista por score híbrido + jerarquía normativa.
+
+    Orden primario: `score_hibrido` descendente (la relevancia manda). En
+    EMPATES de score decide la jerarquía: Decreto 555 antes que actos
+    modificatorios; luego `fecha_vigencia` más reciente; finalmente id
+    ascendente. Implementado como ordenamiento multi-pase ESTABLE (cada pase es
+    una clave secundaria del siguiente).
+    """
+    orden = sorted(chunks, key=lambda c: c.id)
+    orden = sorted(orden, key=lambda c: c.fecha_vigencia or "", reverse=True)
+    orden = sorted(orden, key=_es_norma_base, reverse=True)
+    return sorted(orden, key=lambda c: c.score_hibrido or 0.0, reverse=True)
+
+
+def _aplicar_reglas_vigencia_y_jerarquia(
+    chunks: list[ChunkRecuperado], top_k: int
+) -> list[ChunkRecuperado]:
+    """Reglas deterministas de vigencia y jerarquía antes del LLM (Fase 4).
+
+    Política de derogados documentada: los chunks con `estado == "derogado"`
+    se EXCLUYEN de la respuesta salvo que los vigentes no alcancen a llenar
+    `top_k`; en ese caso entran como FALLBACK downranked (al final, en su
+    orden híbrido relativo) para no devolver menos resultados de los que el
+    corpus puede ofrecer. Un índice pre-v3 (estado None) se trata como vigente.
+
+    La jerarquía (555 > acto en empate de score, ver `_ordenar_por_jerarquia`)
+    se aplica ANTES de separar derogados, de modo que tanto la selección
+    principal como el fallback respeten el mismo orden determinista.
+    """
+    ordenados = _ordenar_por_jerarquia(chunks)
+    vigentes = [c for c in ordenados if c.estado != "derogado"]
+    derogados = [c for c in ordenados if c.estado == "derogado"]
+
+    seleccion = vigentes[:top_k]
+    cupo_fallback = top_k - len(seleccion)
+    if cupo_fallback > 0:
+        seleccion.extend(derogados[:cupo_fallback])
+    return seleccion
 
 
 def _articulos_citados_en(texto: str) -> set[int]:

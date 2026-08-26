@@ -7,6 +7,19 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
+- **Fase 4 — RAG híbrido + reglas de vigencia/jerarquía en retrieval** (post-F8): la metadata por
+  chunk sube a **esquema v3** (`VERSION_ESQUEMA_METADATOS = "3"` en `app/ingesta/corpus.py`): cada
+  chunk indexado lleva `tema` (clasificación temática determinista desde título/sección, mapeo
+  `TEMAS_NORMATIVOS` con default "general"), `estado` ("vigente"/"derogado" según el banner sisjur
+  H7 del acto; el 555 es siempre vigente) y `fecha_vigencia` garantizada. **PENDIENTE: re-indexar el
+  índice real** (`python -m app.ingesta.corpus indexar`); el rebuild es automático al detectar
+  esquema legado. El provider RAG (`app/providers/normativa.py`) ahora recupera de forma HÍBRIDA:
+  pata vectorial (ChromaDB) + pata léxica BM25 local sobre el filtro territorial, fusionadas con
+  Reciprocal Rank Fusion (RRF k=60, determinista); cada ítem expone `score_hibrido`, `tema` y
+  `estado` aditivos. Antes del LLM se aplican reglas deterministas: chunks derogados EXCLUIDOS salvo
+  fallback downranked cuando los vigentes no llenan `top_k`, y jerarquía 555 > acto modificatorio en
+  empates de score (desempates: fecha_vigencia más reciente, luego id). Tests:
+  `tests/contract/test_rag_hibrido_vigencia.py`.
 - **Repositorio en `master`; HEAD `37b0175` (implementación F8) + commit de cierre (correcciones de
   revisión y documentación de F8).**
   La aplicación está implementada y probada: F1, F2,

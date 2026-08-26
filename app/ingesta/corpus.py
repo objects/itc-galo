@@ -264,6 +264,95 @@ def _extraer_derogados(texto: str) -> list[int]:
     return [int(n) for n in ARTICULO_DEROGADO_PATRON.findall(texto)]
 
 
+# --- Clasificación temática y estado (esquema de metadatos v3, Fase 4) ---
+# Clasificación DETERMINISTA y sin LLM de cada artículo en un tema normativo.
+# La señal es exclusivamente el encabezado del artículo (`titulo` + `seccion`)
+# normalizado (minúsculas sin tildes): el título declara la MATERIA del
+# artículo, mientras el cuerpo puede mencionar muchas materias a la vez.
+#
+# El ORDEN de la tupla es parte del contrato: se evalúa de arriba hacia abajo y
+# gana el PRIMER patrón que matchea. "general" es el default para todo
+# artículo sin señal temática explícita. Los patrones cubren las formas del
+# título oficial del Decreto 555/2021 y de los actos modificatorios.
+TEMAS_NORMATIVOS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "usos_suelo",
+        re.compile(
+            r"\busos? del suelo\b"
+            r"|\btratamientos? (urbanistico|del suelo|de renovacion|de desarrollo)\b"
+            r"|compatibilidad urbanistica"
+            r"|conformacion del suelo"
+        ),
+    ),
+    (
+        "edificabilidad",
+        re.compile(
+            r"edificabilidad"
+            r"|indices urbanisticos"
+            r"|indice de (ocupacion|construccion)"
+            r"|coeficiente de construccion"
+            r"|constructibilidad"
+        ),
+    ),
+    (
+        "espacio_publico",
+        re.compile(r"espacio(s)? publico(s)?|\bparques?\b"),
+    ),
+    (
+        "viabilidad",
+        re.compile(
+            r"viabilidad"
+            r"|licencia(s)? (urbanistica|de construccion|de subdivision)"
+            r"|\bcuraduria\b"
+            r"|reconocimiento de edificacion"
+        ),
+    ),
+    (
+        "procedimientos",
+        re.compile(
+            r"procedimiento"
+            r"|\btramite(s)?\b"
+            r"|\brecurso(s)?\b"
+            r"|sancion(es)?|infraccion(es)?"
+            r"|notificacion|publicidad|vigilancia y control"
+        ),
+    ),
+)
+
+TEMA_DEFAULT = "general"
+
+
+def clasificar_tema(articulo: ArticuloNormativo) -> str:
+    """Tema normativo determinista de un artículo (esquema v3).
+
+    Aplica `TEMAS_NORMATIVOS` en orden sobre la clave normalizada de
+    `titulo` + `seccion` y devuelve el primer tema que matchea; si ninguno
+    matchea devuelve `TEMA_DEFAULT` ("general"). Función pura: mismo artículo,
+    mismo tema, siempre.
+    """
+    clave = _clave_sin_tildes(f"{articulo.titulo} {articulo.seccion or ''}")
+    for tema, patron in TEMAS_NORMATIVOS:
+        if patron.search(clave):
+            return tema
+    return TEMA_DEFAULT
+
+
+def estado_de_articulo(articulo: ArticuloNormativo) -> str:
+    """Estado de vigencia determinista de un artículo ("vigente"/"derogado").
+
+    Regla documentada (esquema v3):
+    - Actos modificatorios F4: el banner sisjur H7 marca el documento completo
+      como "derogado" (`estado_documento` + `derogado_compilado_por`); todos
+      sus artículos heredan ese estado.
+    - Decreto 555: siempre "vigente". Su campo `articulos_derogados` lista los
+      artículos QUE ESTE artículo deroga (normas anteriores), nunca su propio
+      estado; el decreto base está vigente por definición.
+    """
+    if articulo.estado_documento == "derogado":
+        return "derogado"
+    return "vigente"
+
+
 def _parsear_formato_demo(html: str) -> list[ArticuloNormativo]:
     """Parsea el HTML plano del modo demo (encabezados "ARTÍCULO N. Título").
 
@@ -748,7 +837,12 @@ METADATA_DOCUMENTOS_HASH = "hash_corpus"
 #   "2" = `upls` como list[str] real (`$contains` = membresia exacta) y la
 #         clave se omite cuando el articulo no menciona UPLs (ChromaDB rechaza
 #         listas vacias).
-VERSION_ESQUEMA_METADATOS = "2"
+#   "3" = retrieval hibrido y reglas de vigencia (Fase 4): cada chunk lleva
+#         `tema` (clasificacion tematica determinista, ver TEMAS_NORMATIVOS),
+#         `estado` ("vigente"/"derogado", ver estado_de_articulo) y
+#         `fecha_vigencia` garantizada para TODO chunk (el 555 con su vigencia
+#         canonica FECHA_VIGENCIA_555; los actos con la del JSONL F4).
+VERSION_ESQUEMA_METADATOS = "3"
 
 # Identidad canónica del documento base (FR-012): el 555 conserva su esquema F2
 # y su JSONL no se modifica; los campos aditivos se materializan en el índice.
@@ -1078,6 +1172,10 @@ def indexar_corpus(
     for articulo in corpus:
         documento_id = articulo.norma_id or DOCUMENTO_BASE_ID
         metadatos_norma = _metadatos_norma(documento_id, articulo, registro)
+        # Metadatos de retrieval v3 (Fase 4): constantes por artículo, se
+        # calculan una sola vez fuera del bucle de chunks.
+        tema_articulo = clasificar_tema(articulo)
+        estado_articulo = estado_de_articulo(articulo)
         for chunk in chunk_articulo(articulo):
             ids.append(chunk.id)
             documents.append(chunk.texto)
@@ -1087,6 +1185,8 @@ def indexar_corpus(
                 "libro": chunk.libro,
                 "parte": chunk.parte or "",
                 "seccion": chunk.seccion or "",
+                "tema": tema_articulo,
+                "estado": estado_articulo,
                 **metadatos_norma,
             }
             if articulo.upls_mencionadas:
@@ -1324,6 +1424,10 @@ def _articulo_enriquecido(
                 f"{documento.tipo_norma.capitalize()} "
                 f"{documento.numero} de {documento.año}"
             ),
+            # Estado del documento (esquema v3): el banner sisjur H7 marca el
+            # acto completo como derogado; sus artículos lo heredan.
+            "estado_documento": documento.estado_documento,
+            "derogado_compilado_por": documento.derogado_compilado_por,
         }
     )
 

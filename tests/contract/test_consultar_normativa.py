@@ -307,6 +307,8 @@ async def test_consultar_normativa_estructura_respuesta_coincide_con_contrato(se
             "articulo", "titulo", "libro", "parte", "texto_cita", "similitud",
             # Campos aditivos F4 (SC-005): norma de origen por ítem.
             "norma", "source_name",
+            # Campos aditivos Fase 4: retrieval híbrido + metadatos v3.
+            "score_hibrido", "tema", "estado",
         }
         assert isinstance(resultado["articulo"], int) and resultado["articulo"] >= 1
         assert isinstance(resultado["titulo"], str)
@@ -394,6 +396,9 @@ async def _consultar_normativa_con_chunks_sinteticos(servidor, respuesta_llm: st
     """
     coleccion_fake = MagicMock()
     coleccion_fake.query.return_value = _respuesta_chroma_con_metadatos_norma()
+    # La pata léxica del retrieval híbrido (Fase 4) consulta `coleccion.get`:
+    # sin resultados léxicos la fusión RRF degrada al ranking vectorial puro.
+    coleccion_fake.get.return_value = {"ids": [], "documents": [], "metadatas": []}
     with patch.object(NormativaProvider, "_get_coleccion", return_value=coleccion_fake), \
          patch.object(NormativaProvider, "_verificar_ollama_chat", new=AsyncMock()), \
          patch.object(
