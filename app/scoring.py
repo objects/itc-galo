@@ -10,13 +10,15 @@ Reglas (data-model.md:205-227, research D3):
 - Positivas: UPL resuelta +10; localidad derivada +5; market_context disponible
   +10; economic_context disponible +10; normative_evidence con items +5;
   urbanistic_parameters con tratamiento+edificabilidad +10;
-  estacionamientos requeridos > 0 +5.
+  estacionamientos requeridos > 0 +5; espacio publico EPT >= 15 m2/hab +5
+  (Fase 3); frente vial de jerarquia alta (avenida) +5 (Fase 3);
+  equipamientos de salud/educacion cercanos +5 (Fase 3).
 - Negativas: reserva vial que afecta el lote -15; UPL ausente -5; cada bloque
   tematico/economico en no_encontrado -5; evidencia normativa vacia -5;
   riesgo geotecncico alto -10; patrimonio cultural -10; tratamiento de
   conservacion -15.
 - `score = clamp(50 + Σ, 0, 100)` entero.
-- `confidence` por cobertura de los 13 bloques evaluables: high >= 10 disponibles,
+- `confidence` por cobertura de los 16 bloques evaluables: high >= 10 disponibles,
   medium 5-9, low <= 4. Con confidence low, las reasons enumeran los faltantes.
 - `reasons`: textos fijos por regla con el dato interpolado y el source_name.
 - `rules_applied`: codigos de regla aplicados (auditoria interna).
@@ -34,9 +36,12 @@ from app.models import (
     BloqueContextoSocioeconomico,
     BloqueDestinoEconomico,
     BloqueEntornoRegulatorio,
+    BloqueEquipamientosCercanos,
+    BloqueEspacioPublico,
     BloqueObrasPublicas,
     BloqueParametrosUrbanisticos,
     BloquePatrimonioCultural,
+    BloqueRedVial,
     BloqueReservaVial,
     BloqueRiesgosGeotecnicos,
     BloqueValorReferencia,
@@ -55,6 +60,12 @@ PUNTOS_CONTEXTO_SOCIO = 5
 PUNTOS_ACCESO_MOVILIDAD = 5
 PUNTOS_PARAMETROS_URBANISTICOS = 10  # F8: parámetros urbanísticos disponibles
 PUNTOS_ESTACIONAMIENTOS = 5  # F8: estacionamientos calculados
+# Fase 3: espacio publico suficiente, frente vial de jerarquia alta y
+# equipamientos cercanos (salud/educacion) en radio.
+PUNTOS_ESPACIO_PUBLICO_SUFICIENTE = 5
+UMBRAL_ESPACIO_PUBLICO_M2_HAB = 15.0  # estandar distrital de espacio publico (m2/hab)
+PUNTOS_FRENTE_VIAL_AVENIDA = 5
+PUNTOS_EQUIPAMIENTOS_CERCANOS = 5
 PENALIZACION_RESERVA_VIAL = 15
 PENALIZACION_UPL_AUSENTE = 5
 PENALIZACION_BLOQUE_NO_ENCONTRADO = 5
@@ -63,7 +74,10 @@ PENALIZACION_RIESGO_GEOTECNICO_ALTO = 10
 PENALIZACION_PATRIMONIO_CULTURAL = 10
 PENALIZACION_CONSERVACION = 15  # F8: tratamiento de conservación
 
-# Los bloques evaluables del confidence (6 originales F3 + 6 nuevos F6/F7 + 1 F8).
+# Los bloques evaluables del confidence (6 originales F3 + 6 nuevos F6/F7 + 1 F8
+# + 3 nuevos Fase 3). Los umbrales de confidence (high >= 10, medium 5-9,
+# low <= 4) se mantienen absolutos: miden cobertura minima suficiente, no una
+# proporcion de la lista.
 BLOQUES_EVALUABLES = (
     "administrative_context",
     "planning_constraints",
@@ -76,13 +90,21 @@ BLOQUES_EVALUABLES = (
     "cultural_heritage",
     "transit_access",
     "catastro_data",
+    "public_space_context",
+    "road_network_context",
+    "nearby_facilities",
     "normative_evidence",
     "urbanistic_parameters",
 )
 
 
 class BloquesEvaluables(BaseModel):
-    """Estructura tipada de los bloques evaluables del score (data-model)."""
+    """Estructura tipada de los bloques evaluables del score (data-model).
+
+    Los bloques Fase 3 son opcionales (None = no evaluado, p. ej. en tests que
+    construyen la estructura parcialmente): no penalizan ni cuentan para el
+    confidence, mismo tratamiento de `urbanistic_parameters` desde F8.
+    """
 
     administrative_context: ContextoAdministrativo
     planning_constraints: BloqueReservaVial
@@ -95,6 +117,9 @@ class BloquesEvaluables(BaseModel):
     cultural_heritage: BloquePatrimonioCultural
     transit_access: BloqueAccesoMovilidad
     catastro_data: BloqueCatastroData
+    public_space_context: BloqueEspacioPublico | None = None
+    road_network_context: BloqueRedVial | None = None
+    nearby_facilities: BloqueEquipamientosCercanos | None = None
     normative_evidence: EvidenciaNormativa
     urbanistic_parameters: BloqueParametrosUrbanisticos | None = None
 
@@ -250,6 +275,56 @@ def _reglas_positivas(
             f"(criterio del POT)."
         )
 
+    # --- Fase 3: espacio publico, frente vial y equipamientos cercanos ---
+
+    # Regla r_espacio_publico_suficiente: EPT >= 15 m2/hab (estandar distrital
+    # de espacio publico efectivo por habitante de la Defensoria del Espacio
+    # Publico). Solo con dato real de la capa; sin dato no hay bonus.
+    if (
+        bloques.public_space_context is not None
+        and bloques.public_space_context.estado == "disponible"
+        and bloques.public_space_context.dato is not None
+        and bloques.public_space_context.dato.ep_total_m2_hab is not None
+        and bloques.public_space_context.dato.ep_total_m2_hab >= UMBRAL_ESPACIO_PUBLICO_M2_HAB
+    ):
+        puntos += PUNTOS_ESPACIO_PUBLICO_SUFICIENTE
+        reglas.append("r_espacio_publico_suficiente")
+        ept = bloques.public_space_context.dato.ep_total_m2_hab
+        razones.append(
+            f"Espacio público suficiente: {_formatear_numero(ept)} m²/hab en la UPL "
+            f"(umbral {int(UMBRAL_ESPACIO_PUBLICO_M2_HAB)} m²/hab)."
+        )
+
+    # Regla r_frente_vial_avenida: via de jerarquia alta (avenida) en el frente.
+    if (
+        bloques.road_network_context is not None
+        and bloques.road_network_context.estado == "disponible"
+        and bloques.road_network_context.dato is not None
+        and bloques.road_network_context.dato.jerarquia_maxima == "alta"
+    ):
+        puntos += PUNTOS_FRENTE_VIAL_AVENIDA
+        reglas.append("r_frente_vial_avenida")
+        razones.append(
+            "Frente vial de jerarquía alta: el lote colinda con una avenida."
+        )
+
+    # Regla r_equipamientos_cercanos: al menos un equipamiento de salud o
+    # educacion en radio (servicios esenciales de uso diario).
+    if (
+        bloques.nearby_facilities is not None
+        and bloques.nearby_facilities.estado == "disponible"
+        and bloques.nearby_facilities.dato is not None
+        and (
+            (bloques.nearby_facilities.dato.total_salud or 0) > 0
+            or (bloques.nearby_facilities.dato.total_educacion or 0) > 0
+        )
+    ):
+        puntos += PUNTOS_EQUIPAMIENTOS_CERCANOS
+        reglas.append("r_equipamientos_cercanos")
+        razones.append(
+            "Equipamientos cercanos: salud o educación disponibles en el radio consultado."
+        )
+
     return puntos, reglas, razones
 
 
@@ -361,11 +436,17 @@ def _bloques_con_estado(
     # se inyecta); solo se incluye cuando está presente.
     if bloques.urbanistic_parameters is not None:
         items.append(("urbanistic_parameters", bloques.urbanistic_parameters))
+    # Fase 3: los 3 bloques nuevos son opcionales (None = no evaluado); solo
+    # se incluyen cuando están presentes, mismo tratamiento de F8.
+    for nombre_fase3 in ("public_space_context", "road_network_context", "nearby_facilities"):
+        bloque_fase3 = getattr(bloques, nombre_fase3)
+        if bloque_fase3 is not None:
+            items.append((nombre_fase3, bloque_fase3))
     return items
 
 
 def _confidence_por_cobertura(bloques: BloquesEvaluables) -> Literal["high", "medium", "low"]:
-    """Confidence por cobertura de los 13 bloques evaluables (data-model.md:102-108).
+    """Confidence por cobertura de los 16 bloques evaluables (data-model.md:102-108).
 
     Disponible = bloque con dato (upl o localidad, estado == "disponible",
     items no vacios). high >= 10, medium 5-9, low <= 4.
@@ -397,8 +478,18 @@ def _contar_bloques_disponibles(bloques: BloquesEvaluables) -> int:
             # F8: urbanistic_parameters disponible si tratamiento poblado
             bloques.urbanistic_parameters is not None
             and bloques.urbanistic_parameters.estado == "disponible",
+            # Fase 3: los 3 bloques nuevos cuentan solo cuando están presentes
+            _bloque_fase3_disponible(bloques, "public_space_context"),
+            _bloque_fase3_disponible(bloques, "road_network_context"),
+            _bloque_fase3_disponible(bloques, "nearby_facilities"),
         ]
     )
+
+
+def _bloque_fase3_disponible(bloques: BloquesEvaluables, nombre: str) -> bool:
+    """Disponibilidad de un bloque Fase 3 opcional (None = no evaluado -> False)."""
+    bloque = getattr(bloques, nombre)
+    return bloque is not None and bloque.estado == "disponible"
 
 
 def _reasons_datos_faltantes(bloques: BloquesEvaluables) -> list[str]:
@@ -416,6 +507,9 @@ def _reasons_datos_faltantes(bloques: BloquesEvaluables) -> list[str]:
         "cultural_heritage": bloques.cultural_heritage.estado == "disponible",
         "transit_access": bloques.transit_access.estado == "disponible",
         "catastro_data": bloques.catastro_data.estado == "disponible",
+        "public_space_context": _bloque_fase3_disponible(bloques, "public_space_context"),
+        "road_network_context": _bloque_fase3_disponible(bloques, "road_network_context"),
+        "nearby_facilities": _bloque_fase3_disponible(bloques, "nearby_facilities"),
         "normative_evidence": bool(bloques.normative_evidence.items),
         "urbanistic_parameters": (
             bloques.urbanistic_parameters is not None

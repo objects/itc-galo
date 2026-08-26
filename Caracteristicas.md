@@ -31,7 +31,7 @@ Las 7 tools:
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo por CHIP. |
 | `get_upl` | UPL + localidad del lote por CHIP, dirección o coordenadas. |
 | `consultar_normativa` | Consulta RAG en lenguaje natural sobre el POT, con citas literales. |
-| `get_feasibility_report` | Informe de factibilidad orquestado en 17 bloques. |
+| `get_feasibility_report` | Informe de factibilidad orquestado en 20 bloques. |
 
 ## 2. Requisitos previos
 
@@ -291,22 +291,29 @@ lugar de fallar (ver sección 7).
   | `consulta` | string | No | 1–500 caracteres, no vacía tras strip. Si se omite, se construye automáticamente (UPL + localidad + clasificación de suelo). |
   | `top_k` | integer | No | 1–6, default 3. |
 
-- **Salida (17 bloques)**: `lot_identity`, `administrative_context` (`upl` + `localidad` +
+- **Salida (20 bloques)**: `lot_identity`, `administrative_context` (`upl` + `localidad` +
   `clasificacion_suelo`), `planning_constraints`, `market_context`, `environment_context`
   (`dato.radio_m` = 500), `economic_context` (`codigo_destino`, `descripcion_destino`,
   `uso`, `area_uso`, `usos[]`, `area_terreno`, `area_construccion`, `direccion`, `barrio`,
   `vigencia` = `PREVACTUAL`), `geotechnical_risks`, `socioeconomic_context`,
   `regulatory_environment`, `cultural_heritage`, `transit_access` (F6), `catastro_data`
-  (F7), `urbanistic_parameters` (F8: tratamiento SINUPOT/SDP layer 2, edificabilidad capa
-  14 con precedencia sobre el RAG, retiros y estacionamientos vía parsing regex del texto
-  RAG), `normative_evidence` (`items`, `consulta`,
+  (F7), `public_space_context` (Fase 3: EPT m²/hab de la UPL), `road_network_context`
+  (Fase 3: ejes viales del frente con jerarquía derivada, radio 100 m), `nearby_facilities`
+  (Fase 3: equipamientos por tipo con distancias haversine; multifuente con
+  `source_traces`), `urbanistic_parameters` (F8: tratamiento SINUPOT/SDP layer 2,
+  edificabilidad capa 14 con precedencia sobre el RAG, retiros y estacionamientos vía parsing
+  regex del texto RAG), `normative_evidence` (`items`, `consulta`,
   `consulta_automatica`, `sin_resultados`, `causa`, `source_trace`), `feasibility_score`
   (`score` 0–100, `confidence` ∈ {high, medium, low}, `reasons`, `rules_applied`),
-  `warnings[]`, `query_timestamp`. Cada bloque con `source_trace` de 5 campos.
+  `warnings[]`, `llm_ready_summary` (resumen determinista en español),
+  `query_timestamp`. Cada bloque con `source_trace` de 5 campos.
 - **Fuentes**: capa Lote 38; capa UPL (`unidadplaneamientolocal.0`); `catastro/valorreferencia`;
   `ordenamientoterritorial/reservavial`; `gestionpublica/obraspublicas`; **capa tabular Predio**
   `catastro/lote/MapServer/3` (join por `PRECHIP` o `BARMANPRE`, `f=pjson`); capas catastrales F7;
   **SINUPOT/SDP** (`sinu.sdp.gov.co`, layer 2 tratamiento + layer 14 edificabilidad, CRS EPSG:4686);
+  capas Fase 3 (`espaciopublico/indicadorespaciopublico` [8], `Mapa_Referencia` [13],
+  `salud/serviciosips` [7], `educacion/infraestructuraeducativa` [0],
+  `recreaciondeporte/equipamientocultural` [1,2,3]);
   `Decreto 555 de 2021`.
 - **Errores fatales (6)**: `PARAMETROS_INVALIDOS`, `LOTE_NO_ENCONTRADO`,
   `FUERA_DE_COBERTURA`, `DIRECCION_NO_LOCALIZADA`, `CREDENCIAL_FALTANTE`, `FUENTE_5XX`.
@@ -402,4 +409,16 @@ cat data/corpus/decreto_555_2021.jsonl.sha256
   adicionales (F6: geotecnia, socioeconomía, regulatorio, patrimonio, movilidad; F7:
   `catastro_data`; F8: `urbanistic_parameters` vía SINUPOT/SDP + RAG) y extienden el scoring
   (+10 parámetros urbanísticos, +5 estacionamientos calculados, −15 tratamiento Conservación;
-  confidence sobre 13 bloques evaluables), sin cambiar las 7 tools.
+  confidence sobre 16 bloques evaluables), sin cambiar las 7 tools.
+- **Fase 3 no añade tools MCP**: cierra las brechas temáticas del doc de visión con los bloques
+  `public_space_context` (`espaciopublico/indicadorespaciopublico` [8]: EPT m²/hab de la UPL),
+  `road_network_context` (`Mapa_Referencia` [13], radio 100 m; jerarquía DERIVADA de `MVITIPO`
+  porque la capa no publica jerarquía funcional explícita) y `nearby_facilities`
+  (`salud/serviciosips` [7] + `educacion/infraestructuraeducativa` [0] +
+  `recreaciondeporte/equipamientocultural` [1,2,3]; distancias haversine desde el centroide).
+  Scoring: +5 espacio público suficiente (EPT ≥ 15 m²/hab), +5 frente vial de avenida,
+  +5 equipamientos de salud/educación cercanos. Añade además el campo `llm_ready_summary`
+  (resumen determinista en español del informe). Las tools `get_lot_geometry` y
+  `get_access_context` del doc de visión NO se implementan: la geometría vive en
+  `lot_identity.geometry` (+ `centroid`) y el acceso en `transit_access` +
+  `road_network_context`.

@@ -13,7 +13,7 @@ CAMPOS_TRAZA = {
     "query_timestamp",
 }
 
-# Los 17 bloques raiz del reporte (FR-001, F3 + F5 + F7 + F8).
+# Los 20 bloques raiz del reporte (FR-001, F3 + F5 + F7 + F8 + Fase 3).
 BLOQUES_RAIZ = {
     "lot_identity",
     "administrative_context",
@@ -27,10 +27,14 @@ BLOQUES_RAIZ = {
     "cultural_heritage",
     "transit_access",
     "catastro_data",
+    "public_space_context",
+    "road_network_context",
+    "nearby_facilities",
     "urbanistic_parameters",
     "normative_evidence",
     "feasibility_score",
     "warnings",
+    "llm_ready_summary",
     "query_timestamp",
 }
 
@@ -46,6 +50,9 @@ BLOQUES_CON_ESTADO = {
     "cultural_heritage",
     "transit_access",
     "catastro_data",
+    "public_space_context",
+    "road_network_context",
+    "nearby_facilities",
     "urbanistic_parameters",
 }
 
@@ -58,4 +65,5 @@ BLOQUES_MULTIFUENTE = {
     "cultural_heritage",
     "transit_access",
     "catastro_data",
+    "nearby_facilities",
 }

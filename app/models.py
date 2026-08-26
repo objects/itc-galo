@@ -677,6 +677,102 @@ class BloqueCatastroData(BaseModel):
     source_traces: list[SourceTrace] = []
 
 
+# --- Fase 3: bloques tematicos faltantes (espacio publico, malla vial, equipamientos) ---
+
+
+class EspacioPublicoLote(BaseModel):
+    """Indicador de espacio publico de la UPL del lote (espaciopublico/indicadorespaciopublico/8).
+
+    `ep_total_m2_hab` es el espacio publico total efectivo por habitante (EPT,
+    m2/hab) que publica la Defensoria del Espacio Publico para la UPL que
+    contiene al lote (join punto-en-poligono sobre el centroide).
+    """
+
+    codigo_upl: str | None = None
+    nombre_upl: str | None = None
+    ep_total_m2_hab: float | None = None
+
+
+class ViaFrenteLote(BaseModel):
+    """Eje vial del frente del lote (Mapa_Referencia layer 13, Malla Vial).
+
+    `jerarquia` se DERIVA del tipo de via (`MVITIPO`: AC/AK avenida -> alta,
+    CL/KR calle/carrera -> media, DG/TV diagonal/transversal -> baja); la capa
+    no publica un campo de jerarquia funcional explicita (limitacion
+    documentada en AGENTS.md). Nunca se inventa una jerarquia ausente (FR-014).
+    """
+
+    tipo_via: str | None = None
+    nombre_via: str | None = None
+    carriles: int | None = None
+    velocidad_reglamentaria: str | None = None
+    jerarquia: Literal["alta", "media", "baja", "desconocida"] | None = None
+
+
+class RedVialLote(BaseModel):
+    """Red vial del frente del lote: ejes viales en un radio de 50 m del centroide."""
+
+    vias_frente: list[ViaFrenteLote] = []
+    jerarquia_maxima: Literal["alta", "media", "baja", "desconocida"] | None = None
+
+
+class EquipamientoCercano(BaseModel):
+    """Un equipamiento cercano al lote con su distancia aproximada (haversine)."""
+
+    tipo: Literal["salud", "educacion", "cultura"]
+    nombre: str | None = None
+    direccion: str | None = None
+    distancia_m: float | None = None
+
+
+class EquipamientosCercanos(BaseModel):
+    """Equipamientos cercanos al lote por tipo (salud, educacion, cultura).
+
+    Consulta 5 capas puntuales en paralelo con radio (800 m salud/cultura,
+    500 m educacion); las distancias se calculan con haversine desde el
+    centroide del lote sobre la geometria real de cada feature.
+    """
+
+    total_salud: int | None = None
+    total_educacion: int | None = None
+    total_cultura: int | None = None
+    equipamientos: list[EquipamientoCercano] = []
+    mas_cercano: EquipamientoCercano | None = None
+
+
+class BloqueEspacioPublico(BaseModel):
+    """Bloque public_space_context con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: EspacioPublicoLote | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloqueRedVial(BaseModel):
+    """Bloque road_network_context con el patron {estado, dato, interpretation, source_trace}."""
+
+    estado: EstadoDato
+    dato: RedVialLote | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+class BloqueEquipamientosCercanos(BaseModel):
+    """Bloque nearby_facilities con el patron {estado, dato, interpretation, source_trace}.
+
+    Multifuente (5 capas: IPS, colegios y 3 subcapas de equipamiento cultural):
+    procedencia por sub-fuente en `source_traces` (hallazgo M4); `source_trace`
+    conserva la traza principal.
+    """
+
+    estado: EstadoDato
+    dato: EquipamientosCercanos | None = None
+    interpretation: str
+    source_trace: SourceTrace
+    source_traces: list[SourceTrace] = []
+
+
 # --- Feature 8: Parámetros urbanísticos del lote (tratamiento, edificabilidad, retiros, estacionamientos) ---
 
 
@@ -782,10 +878,12 @@ class Warning(BaseModel):
 
 
 class InformeFactibilidad(BaseModel):
-    """Entidad raiz del contrato get_feasibility_report: los 16 bloques.
+    """Entidad raiz del contrato get_feasibility_report: los 20 bloques.
 
     `query_timestamp` es ISO 8601 UTC de generacion del reporte; no participa
-    del score (SC-003: el score es deterministico).
+    del score (SC-003: el score es deterministico). `llm_ready_summary` es un
+    resumen en espanol generado deterministicamente (sin LLM) pensado para
+    pegar en cualquier LLM evaluador.
     """
 
     lot_identity: IdentidadLote
@@ -800,8 +898,12 @@ class InformeFactibilidad(BaseModel):
     cultural_heritage: BloquePatrimonioCultural
     transit_access: BloqueAccesoMovilidad
     catastro_data: BloqueCatastroData
+    public_space_context: BloqueEspacioPublico | None = None
+    road_network_context: BloqueRedVial | None = None
+    nearby_facilities: BloqueEquipamientosCercanos | None = None
     urbanistic_parameters: BloqueParametrosUrbanisticos | None = None
     normative_evidence: EvidenciaNormativa
     feasibility_score: FeasibilityScore
     warnings: list[Warning]
+    llm_ready_summary: str | None = None
     query_timestamp: str

@@ -47,6 +47,7 @@ de retorno para que el limite emita el warning BLOQUE_DEGRADADO con la causa rea
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 from collections.abc import Coroutine, Sequence
 from datetime import datetime, timezone
@@ -67,13 +68,18 @@ from app.models import (
     ContextoSocioeconomico,
     DestinoEconomico,
     EntornoRegulatorio,
+    EquipamientoCercano,
+    EquipamientosCercanos,
+    EspacioPublicoLote,
     ObraPublica,
     PatrimonioCultural,
+    RedVialLote,
     ReservaVial,
     RiesgoGeotecnicos,
     SourceTrace,
     UsoEconomico,
     ValorReferencia,
+    ViaFrenteLote,
 )
 from app.providers.arcgis_utils import (
     RAIZ_ARCGIS,
@@ -118,6 +124,16 @@ VIGENCIAS_DEFAULT: dict[str, str] = {
     "densidad_predial": "2024",
     "variacion_area": "2024",
     "sector_catastral": "2024",
+    # Fase 3 (espacio publico, malla vial, equipamientos): vigencia de
+    # publicacion del servicio (asumida, no declarada en la metadata), salvo
+    # malla_vial que hereda el ano 2019 del Mapa de Referencia.
+    "espacio_publico": "2024",
+    "malla_vial": "2019",
+    "facilidad_salud": "2025",
+    "facilidad_educacion": "2025",
+    "facilidad_cultura_ciencia": "2025",
+    "facilidad_cultura_arte": "2025",
+    "facilidad_cultura_historia": "2025",
 }
 
 
@@ -161,6 +177,13 @@ _NOMBRES_CANONICOS = {
     "densidad_predial": "Catastro — Densidad Predial",
     "variacion_area": "Catastro — Variación Área Construida",
     "sector_catastral": "Catastro — Sector Catastral",
+    "espacio_publico": "Indicadores de Espacio Público — Total por UPL",
+    "malla_vial": "Mapa de Referencia — Malla Vial",
+    "facilidad_salud": "Salud — IPS con Servicio de Vacunación",
+    "facilidad_educacion": "Educación — Colegios",
+    "facilidad_cultura_ciencia": "Cultura — Equipamientos culturales (Ciencia)",
+    "facilidad_cultura_arte": "Cultura — Equipamientos culturales (Arte)",
+    "facilidad_cultura_historia": "Cultura — Equipamientos culturales (Historia)",
 }
 
 _URLS_CANONICOS = {
@@ -189,6 +212,13 @@ _URLS_CANONICOS = {
     "densidad_predial": f"{RAIZ_ARCGIS}/catastro/densidadpredialmz/MapServer",
     "variacion_area": f"{RAIZ_ARCGIS}/catastro/variacionareaconstruida/MapServer",
     "sector_catastral": f"{RAIZ_ARCGIS}/catastro/sectorcatastral/MapServer",
+    "espacio_publico": f"{RAIZ_ARCGIS}/espaciopublico/indicadorespaciopublico/MapServer",
+    "malla_vial": f"{RAIZ_ARCGIS}/Mapa_Referencia/Mapa_Referencia/MapServer",
+    "facilidad_salud": f"{RAIZ_ARCGIS}/salud/serviciosips/MapServer",
+    "facilidad_educacion": f"{RAIZ_ARCGIS}/educacion/infraestructuraeducativa/MapServer",
+    "facilidad_cultura_ciencia": f"{RAIZ_ARCGIS}/recreaciondeporte/equipamientocultural/MapServer",
+    "facilidad_cultura_arte": f"{RAIZ_ARCGIS}/recreaciondeporte/equipamientocultural/MapServer",
+    "facilidad_cultura_historia": f"{RAIZ_ARCGIS}/recreaciondeporte/equipamientocultural/MapServer",
 }
 
 _CAPAS_CANONICOS = {
@@ -219,6 +249,18 @@ _CAPAS_CANONICOS = {
     "densidad_predial": "0",
     "variacion_area": "1",
     "sector_catastral": "0",
+    # Fase 3: layer 8 = "Total por UPL" (poligonos con EPT m2/hab); layer 13 =
+    # "Malla Vial" (ejes polyline del Mapa de Referencia); IPS de vacunacion
+    # (layer 7) y colegios oficiales (layer 0); equipamiento cultural por
+    # categoria (layers 1-3). El layer 6 "Museos" responde 400 en vivo y se
+    # excluye (limitacion documentada en AGENTS.md).
+    "espacio_publico": "8",
+    "malla_vial": "13",
+    "facilidad_salud": "7",
+    "facilidad_educacion": "0",
+    "facilidad_cultura_ciencia": "1",
+    "facilidad_cultura_arte": "2",
+    "facilidad_cultura_historia": "3",
 }
 
 # --- Dominios versionados de la capa Predio (catastro/lote/MapServer/3) ---
@@ -1103,6 +1145,171 @@ class ArcGISProvider:
         """Consulta un feature por punto usando los params estandar (inSR=4326)."""
         return await self._consultar(capa, self._params_punto(lng, lat))
 
+    # --- Fase 3: espacio publico, malla vial y equipamientos cercanos ---
+
+    async def consultar_espacio_publico(
+        self, lng: float, lat: float
+    ) -> tuple[EspacioPublicoLote, SourceTrace, list[SourceTrace], list[FalloCapa]]:
+        """Consulta el indicador de espacio publico de la UPL del lote (layer 8).
+
+        Join punto-en-poligono sobre el centroide: la capa "Total por UPL"
+        publica EPT (m2/hab) por UPL. Retorna la tupla uniforme de bloques
+        (dato, source_trace, source_traces, fallos) para que el limite degrada
+        independientemente con la causa real (FR-009).
+        """
+        capa = self._capas["espacio_publico"]
+        tareas = [(capa, self._consultar_feature_punto(capa, lng, lat))]
+        resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
+
+        resultado = resultados[0]
+        if isinstance(resultado, BaseException):
+            return EspacioPublicoLote(), traza_principal, trazas_subfuente, fallos
+        features = resultado.get("features") or []
+        if not features:
+            return EspacioPublicoLote(), traza_principal, trazas_subfuente, fallos
+        propiedades = features[0].get("properties") or {}
+        return (
+            EspacioPublicoLote(
+                codigo_upl=_primer_texto(propiedades, ["CODIGO_UPL"]),
+                nombre_upl=_primer_texto(propiedades, ["NOMBRE"]),
+                ep_total_m2_hab=_extraer_numero(propiedades, ["EPT", "EP_TOTAL", "TOTAL"]),
+            ),
+            traza_principal,
+            trazas_subfuente,
+            fallos,
+        )
+
+    async def consultar_red_vial(
+        self, lng: float, lat: float, radio_m: int = 100
+    ) -> tuple[RedVialLote, SourceTrace, list[SourceTrace], list[FalloCapa]]:
+        """Consulta los ejes viales del frente del lote (Mapa_Referencia layer 13).
+
+        Radio de 100 m sobre el centroide: el eje vial del frente queda a menos
+        de una manzana corta del lote (verificado en vivo: ejes de la Avenida
+        Mariscal Sucre a ~60-100 m del centroide de un lote interior). La
+        jerarquia se DERIVA del tipo de via (MVITIPO) porque la capa no publica
+        un campo de jerarquia funcional explicita (limitacion documentada);
+        nunca se inventa una jerarquia ausente (FR-014).
+        """
+        if radio_m is None or radio_m <= 0:
+            raise ValueError("radio_m debe ser un valor positivo en metros")
+        capa = self._capas["malla_vial"]
+        tareas = [
+            (capa, self._consultar_radio(capa, lng, lat, radio_m, ["MVINOMBRE"]))
+        ]
+        resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
+
+        resultado = resultados[0]
+        if isinstance(resultado, BaseException):
+            return RedVialLote(), traza_principal, trazas_subfuente, fallos
+        features = resultado.get("features") or []
+        vias: list[ViaFrenteLote] = []
+        for feature in features:
+            propiedades = feature.get("properties") or {}
+            tipo_via = _primer_texto(propiedades, ["MVITIPO"])
+            carriles = _extraer_numero(propiedades, ["MVINUMC"])
+            vias.append(
+                ViaFrenteLote(
+                    tipo_via=tipo_via,
+                    nombre_via=_primer_texto(propiedades, ["MVINOMBRE", "MVIETIQUET"]),
+                    carriles=int(carriles) if carriles is not None else None,
+                    velocidad_reglamentaria=_primer_texto(propiedades, ["MVIVELREG"]),
+                    jerarquia=_jerarquia_de_via(tipo_via),
+                )
+            )
+        jerarquia_maxima = _jerarquia_maxima(vias)
+        return (
+            RedVialLote(vias_frente=vias, jerarquia_maxima=jerarquia_maxima),
+            traza_principal,
+            trazas_subfuente,
+            fallos,
+        )
+
+    async def consultar_equipamientos_cercanos(
+        self, lng: float, lat: float
+    ) -> tuple[EquipamientosCercanos, SourceTrace, list[SourceTrace], list[FalloCapa]]:
+        """Consulta equipamientos cercanos por tipo en paralelo (5 capas).
+
+        Salud: IPS con servicio de vacunacion (800 m); educacion: colegios
+        oficiales (500 m); cultura: equipamientos culturales por categoria
+        Ciencia/Arte/Historia (800 m; el layer 6 "Museos" responde 400 en vivo
+        y se excluye). Las distancias se calculan con haversine desde el
+        centroide del lote sobre la geometria real de cada feature. Retorna la
+        tupla uniforme de bloques con trazas por sub-fuente y fallos tipados
+        (FR-009).
+        """
+        configuracion_radio: list[tuple[str, int, Literal["salud", "educacion", "cultura"]]] = [
+            ("facilidad_salud", 800, "salud"),
+            ("facilidad_educacion", 500, "educacion"),
+            ("facilidad_cultura_ciencia", 800, "cultura"),
+            ("facilidad_cultura_arte", 800, "cultura"),
+            ("facilidad_cultura_historia", 800, "cultura"),
+        ]
+        tareas = [
+            (
+                self._capas[clave],
+                self._consultar_radio_con_geometria(self._capas[clave], lng, lat, radio),
+            )
+            for clave, radio, _ in configuracion_radio
+        ]
+        resultados, fallos = await _gather_con_fallos(tareas)
+        traza_principal, trazas_subfuente = _trazas_de_bloque(tareas, resultados)
+
+        campos_nombre_por_capa = {
+            "facilidad_salud": ["NOMBRE_IPS"],
+            "facilidad_educacion": ["NOMBRE_EST", "NOMBRE_SED"],
+            "facilidad_cultura_ciencia": ["NOMBRE_D_1", "NOMBRE"],
+            "facilidad_cultura_arte": ["NOMBRE_D_1", "NOMBRE"],
+            "facilidad_cultura_historia": ["NOMBRE_D_1", "NOMBRE"],
+        }
+        campos_direccion_por_capa = {
+            "facilidad_salud": ["DIR_IPS"],
+            "facilidad_educacion": ["DIRECCION"],
+            "facilidad_cultura_ciencia": ["DIRECCIO_1", "DIRECCION"],
+            "facilidad_cultura_arte": ["DIRECCIO_1", "DIRECCION"],
+            "facilidad_cultura_historia": ["DIRECCIO_1", "DIRECCION"],
+        }
+
+        equipamientos: list[EquipamientoCercano] = []
+        totales: dict[str, int | None] = {"salud": None, "educacion": None, "cultura": None}
+        for (clave, _, tipo), resultado in zip(configuracion_radio, resultados):
+            if isinstance(resultado, BaseException):
+                continue
+            features = resultado.get("features") or []
+            totales[tipo] = len(features)
+            for feature in features:
+                propiedades = feature.get("properties") or {}
+                distancia = _distancia_del_feature(feature, lng, lat)
+                equipamientos.append(
+                    EquipamientoCercano(
+                        tipo=tipo,
+                        nombre=_primer_texto(propiedades, campos_nombre_por_capa[clave]),
+                        direccion=_primer_texto(propiedades, campos_direccion_por_capa[clave]),
+                        distancia_m=distancia,
+                    )
+                )
+
+        mas_cercano = (
+            min(equipamientos, key=lambda eq: eq.distancia_m or float("inf"))
+            if equipamientos
+            else None
+        )
+        return (
+            EquipamientosCercanos(
+                total_salud=totales["salud"],
+                total_educacion=totales["educacion"],
+                total_cultura=totales["cultura"],
+                equipamientos=equipamientos,
+                mas_cercano=mas_cercano,
+            ),
+            traza_principal,
+            trazas_subfuente,
+            fallos,
+        )
+
+
     async def _consultar_radio(
         self,
         capa: CapaConfig,
@@ -1122,6 +1329,30 @@ class ArcGISProvider:
             "units": "esriSRUnit_Meter",
             "outSR": "4326",
             "returnGeometry": "false",
+            "outFields": "*",
+        }
+        return await self._consultar(capa, params)
+
+    async def _consultar_radio_con_geometria(
+        self, capa: CapaConfig, lng: float, lat: float, radio_m: int
+    ) -> dict[str, Any]:
+        """Consulta features en un radio CON geometria (para calcular distancias).
+
+        Patron de `consultar_equipamientos_cercanos`: la geometria Point del
+        feature permite computar la distancia haversine desde el centroide del
+        lote de forma determinista (sin depender de campos de distancia de la
+        fuente).
+        """
+        params = {
+            "f": "geojson",
+            "geometry": f"{lng},{lat}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "distance": str(radio_m),
+            "units": "esriSRUnit_Meter",
+            "outSR": "4326",
+            "returnGeometry": "true",
             "outFields": "*",
         }
         return await self._consultar(capa, params)
@@ -1215,6 +1446,82 @@ def _parsear_geometria(feature: dict[str, Any], capa: CapaConfig) -> dict[str, A
 
 def _vigencia_del_feature(propiedades: dict[str, Any]) -> str | None:
     return _primer_texto(propiedades, ["ANIO", "ANO", "VIGENCIA", "ANIO_VIGENCIA"])
+
+
+# --- Fase 3: jerarquia vial derivada y distancia haversine ---
+
+# Jerarquia DERIVADA del tipo de via (MVITIPO). La capa Malla Vial no publica
+# un campo de jerarquia funcional explicita: MVITCLA ("Tipo de clasificacion")
+# no tiene dominio publicado y no correlaciona con una jerarquia funcional.
+# La capa publica el tipo en dos formas (abreviada viva 'AC'/'KR' y nombre
+# largo de la metadata 'Avenida Calle'/'Carrera'); ambas se mapean. Criterio
+# documentado: avenida > calle/carrera > diagonal/transversal (limitacion
+# documentada en AGENTS.md; nunca se inventa una jerarquia ausente, FR-014).
+_JERARQUIA_POR_TIPO_VIA: dict[str, Literal["alta", "media", "baja"]] = {
+    "ac": "alta",
+    "ak": "alta",
+    "avenida calle": "alta",
+    "avenida carrera": "alta",
+    "cl": "media",
+    "kr": "media",
+    "calle": "media",
+    "carrera": "media",
+    "dg": "baja",
+    "tv": "baja",
+    "diagonal": "baja",
+    "transversal": "baja",
+}
+
+_ORDEN_JERARQUIA: dict[str, int] = {"alta": 3, "media": 2, "baja": 1, "desconocida": 0}
+
+_RADIO_TIERRA_M = 6_371_000.0
+
+
+def _jerarquia_de_via(tipo_via: str | None) -> Literal["alta", "media", "baja", "desconocida"]:
+    """Deriva la jerarquia vial desde el tipo de via (MVITIPO), sin inventarla."""
+    if tipo_via is None:
+        return "desconocida"
+    return _JERARQUIA_POR_TIPO_VIA.get(tipo_via.strip().lower(), "desconocida")
+
+
+def _jerarquia_maxima(vias: list[ViaFrenteLote]) -> Literal["alta", "media", "baja", "desconocida"]:
+    """Jerarquia mas alta entre las vias del frente ('desconocida' si no hay vias)."""
+    if not vias:
+        return "desconocida"
+    return max(
+        (via.jerarquia or "desconocida" for via in vias),
+        key=lambda jerarquia: _ORDEN_JERARQUIA[jerarquia],
+    )
+
+
+def _distancia_haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Distancia haversine en metros entre dos puntos WGS84 (funcion pura)."""
+    lat1_rad, lat2_rad = math.radians(lat1), math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lng = math.radians(lng2 - lng1)
+    a = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lng / 2) ** 2
+    )
+    return 2 * _RADIO_TIERRA_M * math.asin(math.sqrt(a))
+
+
+def _distancia_del_feature(
+    feature: dict[str, Any], lng_centroide: float, lat_centroide: float
+) -> float | None:
+    """Distancia haversine del feature Point al centroide; None sin geometria utilizable."""
+    geometria = feature.get("geometry")
+    if not isinstance(geometria, dict):
+        return None
+    coordenadas = geometria.get("coordinates")
+    if (
+        not isinstance(coordenadas, list)
+        or len(coordenadas) != 2
+        or not all(isinstance(c, (int, float)) for c in coordenadas)
+    ):
+        return None
+    lng_feature, lat_feature = float(coordenadas[0]), float(coordenadas[1])
+    return _distancia_haversine_m(lat_centroide, lng_centroide, lat_feature, lng_feature)
 
 
 def _primer_valor(objeto: dict[str, Any], claves: list[str]) -> Any:

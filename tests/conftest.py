@@ -362,6 +362,20 @@ def provider_arcgis_f3(lotes=None, valor=None, reserva=None, obras=None, predio=
             return httpx.Response(200, json=geojson([]))
         if "catastro/sectorcatastral" in url:
             return httpx.Response(200, json=geojson([]))
+        # Fase 3: espacio publico, malla vial y equipamientos (vacias por
+        # defecto: los bloques se degradan a no_encontrado + BLOQUE_SIN_DATO
+        # sin afectar el resto del informe; los tests especificos inyectan
+        # features o fallos).
+        if "indicadorespaciopublico" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "Mapa_Referencia/Mapa_Referencia/MapServer/13/query" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "serviciosips" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "infraestructuraeducativa" in url:
+            return httpx.Response(200, json=geojson([]))
+        if "equipamientocultural" in url:
+            return httpx.Response(200, json=geojson([]))
         return httpx.Response(404, json={"error": f"sin respuesta simulada para {url}"})
 
     return ArcGISProvider(transport=httpx.MockTransport(handler))

@@ -114,6 +114,31 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
   - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools).
   - Commits: `37b0175` (implementación completa + specs) + commit de cierre (correcciones de revisión
     M1–M6, tests T027 ampliados y documentación).
+- **Fase 3 — cobertura temática faltante** (sin spec Spec Kit; implementación directa): COMPLETA.
+  - Añade 3 bloques al informe de factibilidad: `public_space_context` (espacio público efectivo
+    EPT m²/hab de la UPL del lote), `road_network_context` (ejes viales del frente, jerarquía
+    DERIVADA del tipo de vía) y `nearby_facilities` (equipamientos de salud/educación/cultura con
+    distancias haversine). 20 bloques en informe, 16 evaluables.
+  - Capas nuevas (verificadas en vivo): `espaciopublico/indicadorespaciopublico` [8] (Total por UPL:
+    `CODIGO_UPL`, `NOMBRE`, `EPT`), `Mapa_Referencia/Mapa_Referencia` [13] (Malla Vial: `MVITIPO`,
+    `MVINOMBRE`, `MVINUMC`, `MVIVELREG`; radio 100 m), `salud/serviciosips` [7] (IPS vacunación,
+    radio 800 m), `educacion/infraestructuraeducativa` [0] (colegios, radio 500 m),
+    `recreaciondeporte/equipamientocultural` [1,2,3] (cultura Ciencia/Arte/Historia, radio 800 m).
+  - Limitaciones documentadas: la Malla Vial NO publica un campo de jerarquía funcional explícita
+    (`MVITCLA` sin dominio publicado); la jerarquía se deriva de `MVITIPO` (AC/AK→alta, CL/KR→media,
+    DG/TV→baja). El layer 6 "Museos" de `equipamientocultural` responde 400 en vivo y se excluye.
+  - Scoring nuevo: `r_espacio_publico_suficiente` +5 (EPT ≥ 15 m²/hab, estándar distrital),
+    `r_frente_vial_avenida` +5 (jerarquía alta en el frente), `r_equipamientos_cercanos` +5
+    (salud o educación en radio); los 3 bloques nuevos también caen en el −5 genérico de
+    `r_no_encontrado`. Umbrales de confidence SIN cambios (high ≥10, medium 5–9, low ≤4: cobertura
+    mínima absoluta, no proporcional a la lista).
+  - **Divergencia deliberada del doc de visión**: las tools `get_lot_geometry` y `get_access_context`
+    NO se añaden — la geometría ya está en `lot_identity.geometry` (+`centroid`) y el acceso está
+    cubierto por `transit_access` (transporte público) y `road_network_context` (frente vial/jerarquía).
+  - Campo nuevo `llm_ready_summary`: párrafo en español generado DETERMINÍSTICAMENTE (sin LLM,
+    SC-003) que resume lote/UPL/localidad/score/confidence/bloques degradados; pensado para pegar
+    en cualquier LLM evaluador.
+  - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools).
 - `20260809-01-perplexity.md` es la **fuente de verdad del producto** (arquitectura, fuentes de
   datos, herramientas MCP, pipeline RAG). Léelo antes de especificar o planificar.
 
@@ -165,7 +190,7 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
 - Herramientas MCP: **7 implementadas** (`resolve_lot_by_chip`, `resolve_lot_by_address`,
   `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`, `get_upl`, `consultar_normativa`,
   `get_feasibility_report`) registradas por `crear_servidor_mcp()` en `app/main.py`.
-  `get_feasibility_report` (F3) orquesta el informe en 17 bloques con scoring heurístico determinístico
+  `get_feasibility_report` (F3) orquesta el informe en 20 bloques con scoring heurístico determinístico
   (`calcular_score`) y degrada UPL/RAG con warnings en lugar de errores. FastMCP (mcp>=1.x) con fallback
   a MCPServer (mcp 2.x); transporte stdio;
   lifespan cierra providers (httpx.AsyncClient); validaciones fail-fast (FR-012/FR-013).
@@ -194,6 +219,11 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
     → tratamiento urbanístico = **layer 2**, edificabilidad (complementaria) = **layer 14**;
     CRS EPSG:4686 (MAGNA-SIRGAS), consulta con `inSR=4326&outSR=4686` — bloque
     `urbanistic_parameters` en el informe y resumen (ver `app/providers/sdp.py`).
+  - **Fase 3 — espacio público, malla vial y equipamientos**: `espaciopublico/indicadorespaciopublico`
+    [8] (bloque `public_space_context`), `Mapa_Referencia/Mapa_Referencia` [13] (bloque
+    `road_network_context`, radio 100 m), `salud/serviciosips` [7] + `educacion/infraestructuraeducativa`
+    [0] + `recreaciondeporte/equipamientocultural` [1,2,3] (bloque `nearby_facilities`, radios
+    800/500/800 m, distancias haversine desde el centroide).
 - RAG normativo: corpus consolidado = Decreto 555 de 2021 (POT "Bogotá Reverdece 2022-2035", 608
   artículos, micrositio POT + compendio de Datos Abiertos) + actos modificatorios del 555 (F4).
   **608 artículos del 555 en `data/corpus/decreto_555_2021.jsonl` + `.sha256` y actos en
@@ -208,10 +238,12 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
 ## Estructura del proyecto
 
 - `app/`: código de aplicación. `main.py` (servidor MCP + lógica de dominio de las 7 tools, incluida
-  la orquestación de 17 bloques y `_construir_consulta_automatica` de F3),
+  la orquestación de 20 bloques, `_construir_consulta_automatica` y `_construir_llm_ready_summary`
+  de F3),
   `models.py` (pydantic v2: F1 SourceTrace/Lote/DatoTematico; F2 UPL/Localidad/ArticuloNormativo/
-  Chunk; F3 InformeFactibilidad y bloques; F7 ContextoCatastro; F8 BloqueParametrosUrbanisticos),
-  `errores.py` (taxonomía), `scoring.py` (F3+F7+F8, función
+  Chunk; F3 InformeFactibilidad y bloques; F7 ContextoCatastro; F8 BloqueParametrosUrbanisticos;
+  Fase 3 EspacioPublicoLote/RedVialLote/EquipamientosCercanos y sus bloques),
+  `errores.py` (taxonomía), `scoring.py` (F3+F7+F8+Fase 3, función
   pura `calcular_score`, determinista, sin LLM).
 - `app/providers/`: un provider por fuente (Principio II): `arcgis.py` (Lote, contexto temático,
   Predio F3, obras por radio, contexto catastral F7), `arcgis_utils.py` (`CapaConfig`, params/consulta compartidos),
@@ -226,7 +258,9 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   (14 archivos F1/F2 + 6 archivos F3: get_feasibility_report, validación, errores, normativa,
   scoring y trazabilidad + `_f3_shared.py` con constantes compartidas + 3 archivos F4:
   test_ingesta_actos, test_corpus_consolidado, test_precedencia + extensiones aditivas de
-  test_consultar_normativa y test_get_feasibility_report + test_urbanistic_parameters.py F8).
+  test_consultar_normativa y test_get_feasibility_report + test_urbanistic_parameters.py F8 +
+  test_bloques_tematicos_fase3.py (Fase 3: espacio público, malla vial, equipamientos,
+  llm_ready_summary).
   Fixtures con `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
 - `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/006-*`, `specs/007-*`,
   `specs/008-*`: features Spec Kit (ver "Estado actual").
@@ -242,7 +276,8 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
 - Salida para el LLM: JSON estructurado con trazabilidad por fuente (`source_name`, `layer_id`,
   `service_url`, `data_vigencia`, `query_timestamp`). No mezclar capas de vigencias distintas
   como una sola fotografía temporal. Los bloques multifuente (F6/F7: geotecnia, socioeconómico,
-  regulatorio, patrimonio, movilidad, catastro) publican además `source_traces` con la procedencia
+  regulatorio, patrimonio, movilidad, catastro; Fase 3: nearby_facilities) publican además
+  `source_traces` con la procedencia
   por sub-fuente (hallazgo M4): una traza por capa exitosa con su vigencia propia; las capas caídas
   van solo en `FalloCapa`/`BLOQUE_DEGRADADO`, nunca como trazas fabricadas; `source_trace` se
   conserva poblado (primera capa exitosa) por retrocompatibilidad.

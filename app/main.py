@@ -54,9 +54,12 @@ from app.models import (
     BloqueContextoSocioeconomico,
     BloqueDestinoEconomico,
     BloqueEntornoRegulatorio,
+    BloqueEquipamientosCercanos,
+    BloqueEspacioPublico,
     BloqueObrasPublicas,
     BloqueParametrosUrbanisticos,
     BloquePatrimonioCultural,
+    BloqueRedVial,
     BloqueReservaVial,
     BloqueRiesgosGeotecnicos,
     BloqueValorReferencia,
@@ -66,6 +69,7 @@ from app.models import (
     EntornoRegulatorio,
     EvidenciaNormativa,
     EstacionamientosRequeridos,
+    FeasibilityScore,
     ItemEvidenciaNormativa,
     Localidad,
     Lote,
@@ -634,21 +638,44 @@ class ServidorLotes:
         t_catastro = self._arcgis.consultar_contexto_catastro(
             lote.centroid.lng, lote.centroid.lat
         )
+        # Fase 3: espacio publico, malla vial y equipamientos cercanos.
+        t_espacio_publico = self._arcgis.consultar_espacio_publico(
+            lote.centroid.lng, lote.centroid.lat
+        )
+        t_red_vial = self._arcgis.consultar_red_vial(lote.centroid.lng, lote.centroid.lat)
+        t_equipamientos = self._arcgis.consultar_equipamientos_cercanos(
+            lote.centroid.lng, lote.centroid.lat
+        )
+        # Dos gathers anidados bajo un gather externo: los 9 bloques corren en
+        # paralelo y cada grupo conserva la tupla tipada de resultados (la
+        # sobrecarga tipada de asyncio.gather degrada a uniones combinatorias
+        # con mas de 6 corutinas).
         (
-            r_geotecnia,
-            r_socio,
-            r_regulatorio,
-            r_patrimonio,
-            r_movilidad,
-            r_catastro,
+            (
+                r_geotecnia,
+                r_socio,
+                r_regulatorio,
+                r_patrimonio,
+                r_movilidad,
+                r_catastro,
+            ),
+            (r_espacio_publico, r_red_vial, r_equipamientos),
         ) = await asyncio.gather(
-            t_geotecnia,
-            t_socio,
-            t_regulatorio,
-            t_patrimonio,
-            t_movilidad,
-            t_catastro,
-            return_exceptions=True,
+            asyncio.gather(
+                t_geotecnia,
+                t_socio,
+                t_regulatorio,
+                t_patrimonio,
+                t_movilidad,
+                t_catastro,
+                return_exceptions=True,
+            ),
+            asyncio.gather(
+                t_espacio_publico,
+                t_red_vial,
+                t_equipamientos,
+                return_exceptions=True,
+            ),
         )
 
         # --- Bloques con el patron {estado, dato, interpretation, source_trace} ---
@@ -1183,6 +1210,195 @@ class ServidorLotes:
                 source_traces=trazas_catastro_f3,
             )
 
+        # --- Bloques Fase 3: espacio publico, malla vial y equipamientos ---
+        # Mismo patron de degradacion independiente que los bloques F6/F7:
+        # fallos sin datos -> no_encontrado + BLOQUE_DEGRADADO; fallos con
+        # datos -> disponible + BLOQUE_DEGRADADO parcial; sin fallos y sin
+        # datos -> no_encontrado + BLOQUE_SIN_DATO.
+
+        # Bloque public_space_context (monofuente: indicadorespaciopublico/8)
+        if isinstance(r_espacio_publico, BaseException):
+            return _error_de_fuente(r_espacio_publico)
+        espacio_publico, trace_espacio, _, fallos_espacio = r_espacio_publico
+        tiene_datos_espacio = espacio_publico.ep_total_m2_hab is not None
+        if fallos_espacio and not tiene_datos_espacio:
+            bloque_espacio = BloqueEspacioPublico(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los datos de espacio público.",
+                source_trace=trace_espacio,
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": (
+                    f"Bloque public_space_context degradado: "
+                    f"{_mensaje_fallos(fallos_espacio)}."
+                ),
+            })
+        else:
+            if fallos_espacio:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque public_space_context degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_espacio)}."
+                    ),
+                })
+            if tiene_datos_espacio:
+                ept_texto = _formatear_numero(espacio_publico.ep_total_m2_hab or 0.0)
+                upl_ep_texto = espacio_publico.nombre_upl or espacio_publico.codigo_upl or "la UPL"
+                interpretation_espacio = (
+                    f"Espacio público total efectivo de {upl_ep_texto}: "
+                    f"{ept_texto} m²/habitante."
+                )
+            else:
+                interpretation_espacio = (
+                    "No se encontró un indicador de espacio público para la UPL del lote "
+                    "en la fuente consultada."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque public_space_context no encontrado: no se halló "
+                        "indicador de espacio público para la UPL del lote."
+                    ),
+                })
+            bloque_espacio = BloqueEspacioPublico(
+                estado="disponible" if tiene_datos_espacio else "no_encontrado",
+                dato=espacio_publico if tiene_datos_espacio else None,
+                interpretation=interpretation_espacio,
+                source_trace=trace_espacio,
+            )
+
+        # Bloque road_network_context (monofuente: Mapa_Referencia layer 13)
+        if isinstance(r_red_vial, BaseException):
+            return _error_de_fuente(r_red_vial)
+        red_vial, trace_vial, _, fallos_vial = r_red_vial
+        tiene_datos_vial = bool(red_vial.vias_frente)
+        if fallos_vial and not tiene_datos_vial:
+            bloque_vial = BloqueRedVial(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los datos de la malla vial.",
+                source_trace=trace_vial,
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": (
+                    f"Bloque road_network_context degradado: "
+                    f"{_mensaje_fallos(fallos_vial)}."
+                ),
+            })
+        else:
+            if fallos_vial:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque road_network_context degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_vial)}."
+                    ),
+                })
+            if tiene_datos_vial:
+                primera_via = red_vial.vias_frente[0]
+                detalle_via = primera_via.nombre_via or primera_via.tipo_via or "vía sin nombre"
+                jerarquia_texto = red_vial.jerarquia_maxima or "desconocida"
+                interpretation_vial = (
+                    f"Frente vial del lote: {len(red_vial.vias_frente)} vía(s) en el "
+                    f"entorno inmediato; la principal es {detalle_via} con jerarquía "
+                    f"derivada {jerarquia_texto}."
+                )
+            else:
+                interpretation_vial = (
+                    "No se encontraron ejes viales en el entorno inmediato del lote "
+                    "en la fuente consultada."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque road_network_context no encontrado: no se hallaron "
+                        "ejes viales en el radio consultado."
+                    ),
+                })
+            bloque_vial = BloqueRedVial(
+                estado="disponible" if tiene_datos_vial else "no_encontrado",
+                dato=red_vial if tiene_datos_vial else None,
+                interpretation=interpretation_vial,
+                source_trace=trace_vial,
+            )
+
+        # Bloque nearby_facilities (multifuente: 5 capas de equipamientos)
+        if isinstance(r_equipamientos, BaseException):
+            return _error_de_fuente(r_equipamientos)
+        equipamientos, trace_facilidades, trazas_facilidades, fallos_facilidades = (
+            r_equipamientos
+        )
+        tiene_datos_facilidades = bool(equipamientos.equipamientos)
+        if fallos_facilidades and not tiene_datos_facilidades:
+            bloque_facilidades = BloqueEquipamientosCercanos(
+                estado="no_encontrado",
+                interpretation="No se pudieron consultar los equipamientos cercanos.",
+                source_trace=trace_facilidades,
+                source_traces=trazas_facilidades,
+            )
+            warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": (
+                    f"Bloque nearby_facilities degradado: "
+                    f"{_mensaje_fallos(fallos_facilidades)}."
+                ),
+            })
+        else:
+            if fallos_facilidades:
+                warnings.append({
+                    "codigo": "BLOQUE_DEGRADADO",
+                    "mensaje": (
+                        f"Bloque nearby_facilities degradado parcialmente: "
+                        f"{_mensaje_fallos(fallos_facilidades)}."
+                    ),
+                })
+            if tiene_datos_facilidades:
+                partes_fac = []
+                for tipo, total in (
+                    ("salud", equipamientos.total_salud),
+                    ("educación", equipamientos.total_educacion),
+                    ("cultura", equipamientos.total_cultura),
+                ):
+                    if total is not None:
+                        plural_tipo = "s" if total != 1 else ""
+                        partes_fac.append(f"{total} de {tipo}{plural_tipo}")
+                detalle_cercano = ""
+                if equipamientos.mas_cercano is not None and equipamientos.mas_cercano.nombre:
+                    distancia_texto = (
+                        f" ({int(equipamientos.mas_cercano.distancia_m)} m)"
+                        if equipamientos.mas_cercano.distancia_m is not None
+                        else ""
+                    )
+                    detalle_cercano = (
+                        f"; el más cercano: {equipamientos.mas_cercano.nombre}"
+                        f"{distancia_texto}"
+                    )
+                interpretation_facilidades = (
+                    f"Equipamientos cercanos al lote: {', '.join(partes_fac)}"
+                    f"{detalle_cercano}."
+                )
+            else:
+                interpretation_facilidades = (
+                    "No se encontraron equipamientos de salud, educación o cultura "
+                    "en los radios consultados."
+                )
+                warnings.append({
+                    "codigo": "BLOQUE_SIN_DATO",
+                    "mensaje": (
+                        "Bloque nearby_facilities no encontrado: no se hallaron "
+                        "equipamientos cercanos al lote."
+                    ),
+                })
+            bloque_facilidades = BloqueEquipamientosCercanos(
+                estado="disponible" if tiene_datos_facilidades else "no_encontrado",
+                dato=equipamientos if tiene_datos_facilidades else None,
+                interpretation=interpretation_facilidades,
+                source_trace=trace_facilidades,
+                source_traces=trazas_facilidades,
+            )
+
         # --- Cuarta ronda: parámetros urbanísticos (F8, degradación independiente) ---
         # Consulta SDP (tratamiento espacial) + RAG (parámetros numéricos).
         # No afecta a otros bloques si falla (FR-008, SC-004).
@@ -1284,6 +1500,9 @@ class ServidorLotes:
             cultural_heritage=bloque_patrimonio,
             transit_access=bloque_movilidad,
             catastro_data=bloque_catastro,
+            public_space_context=bloque_espacio,
+            road_network_context=bloque_vial,
+            nearby_facilities=bloque_facilidades,
             normative_evidence=evidencia,
             urbanistic_parameters=bloque_urbanistic,
         )
@@ -1304,10 +1523,21 @@ class ServidorLotes:
             "cultural_heritage": _bloque_a_contrato(bloque_patrimonio),
             "transit_access": _bloque_a_contrato(bloque_movilidad),
             "catastro_data": _bloque_a_contrato(bloque_catastro),
+            "public_space_context": _bloque_a_contrato(bloque_espacio),
+            "road_network_context": _bloque_a_contrato(bloque_vial),
+            "nearby_facilities": _bloque_a_contrato(bloque_facilidades),
             "urbanistic_parameters": _bloque_a_contrato(bloque_urbanistic),
             "normative_evidence": evidencia.model_dump(),
             "feasibility_score": score.model_dump(),
             "warnings": warnings,
+            "llm_ready_summary": _construir_llm_ready_summary(
+                lote=lote,
+                upl=upl,
+                localidad=localidad,
+                clasificacion_suelo=clasificacion_suelo,
+                score=score,
+                warnings=warnings,
+            ),
             "query_timestamp": _ahora_iso(),
         }
 
@@ -1638,6 +1868,65 @@ def _mensaje_fallos(fallos: list[FalloCapa]) -> str:
         f"error al consultar la capa {fallo.source_name} ({fallo.detalle})"
         for fallo in fallos
     )
+
+
+# Nombres de bloque reconocibles en el mensaje de un warning (patron
+# "Bloque <nombre> ..."): alimenta el resumen llm_ready_summary sin depender
+# de una lista manual que podria desincronizarse.
+_PATRON_BLOQUE_EN_WARNING = re.compile(r"Bloque ([a-z_]+)")
+
+
+def _construir_llm_ready_summary(
+    *,
+    lote: Lote,
+    upl: UPL | None,
+    localidad: Localidad | None,
+    clasificacion_suelo: str | None,
+    score: FeasibilityScore,
+    warnings: list[dict[str, str]],
+) -> str:
+    """Resumen en espanol del informe generado DETERMINISTICAMENTE (sin LLM).
+
+    Un parrafo normalizado con identidad del lote, UPL/localidad/suelo, score,
+    confidence y bloques degradados o sin dato (derivados de los warnings por
+    regex, no de una lista manual). Pensado para pegar en cualquier LLM
+    evaluador; mismo input -> mismo texto (SC-003).
+    """
+    chip_texto = lote.chip if lote.chip is not None else "sin CHIP"
+    direccion_texto = lote.direccion_normalizada or "no disponible"
+    partes = [
+        (
+            f"Lote {lote.codigo_catastral} (CHIP {chip_texto}), manzana "
+            f"{lote.manzana}, dirección {direccion_texto}"
+        )
+    ]
+    if lote.barrio:
+        partes.append(f"barrio {lote.barrio}")
+    if upl is not None:
+        partes.append(f"UPL {upl.codigo_upl} {upl.nombre}")
+    if localidad is not None:
+        partes.append(f"localidad {localidad.nombre}")
+    if clasificacion_suelo is not None:
+        partes.append(f"suelo {clasificacion_suelo}")
+    resumen = f"{', '.join(partes)}. "
+
+    confidence_es = {"high": "alta", "medium": "media", "low": "baja"}[score.confidence]
+    resumen += (
+        f"Score de factibilidad {score.score}/100 con confianza {confidence_es}."
+    )
+
+    bloques_con_problema: list[str] = []
+    for warning in warnings:
+        match = _PATRON_BLOQUE_EN_WARNING.search(warning.get("mensaje", ""))
+        if match and match.group(1) not in bloques_con_problema:
+            bloques_con_problema.append(match.group(1))
+    if bloques_con_problema:
+        resumen += (
+            " Bloques degradados o sin datos: "
+            + ", ".join(bloques_con_problema)
+            + "."
+        )
+    return resumen
 
 
 def _trace_upl_por_defecto() -> dict[str, str]:

@@ -370,7 +370,7 @@ def test_confidence_low_con_2_o_menos_bloques_y_reasons_de_datos_faltantes():
 
     assert resultado.confidence == "low"
     faltantes = [r for r in resultado.reasons if r.startswith("Dato faltante:")]
-    assert len(faltantes) == 12  # 13 evaluables - 1 disponible (economic_context)
+    assert len(faltantes) == 15  # 16 evaluables - 1 disponible (economic_context)
     nombres_faltantes = {f.replace("Dato faltante: ", "").rstrip(".") for f in faltantes}
     assert nombres_faltantes == {
         "administrative_context",
@@ -383,6 +383,9 @@ def test_confidence_low_con_2_o_menos_bloques_y_reasons_de_datos_faltantes():
         "cultural_heritage",
         "transit_access",
         "catastro_data",
+        "public_space_context",
+        "road_network_context",
+        "nearby_facilities",
         "normative_evidence",
         "urbanistic_parameters",
     }
