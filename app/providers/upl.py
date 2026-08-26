@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import unicodedata
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -21,6 +20,13 @@ from pydantic import BaseModel
 
 from app.errores import Fuente4xxError, Fuente5xxError, FuenteDatosInvalidosError, UplNoEncontradaError
 from app.models import UPL, SourceTrace
+# Helpers compartidos (hallazgo m7): unica definicion en app/utilidades.py.
+from app.utilidades import (
+    ahora_iso as _ahora_iso,
+    extraer_numero as _extraer_numero,
+    primer_texto as _primer_texto,
+    primer_valor as _primer_valor,
+)
 from app.providers.arcgis_utils import (
     RAIZ_ARCGIS,
     CapaConfig,
@@ -276,31 +282,5 @@ class UPLProvider:
         )
 
 
-def _primer_texto(objeto: dict[str, Any], claves: list[str]) -> str | None:
-    for clave in claves:
-        if clave in objeto and objeto[clave] is not None:
-            texto = str(objeto[clave]).strip()
-            if texto:
-                return texto
-    return None
-
-
-def _extraer_numero(objeto: dict[str, Any], claves: list[str]) -> float | None:
-    valor = _primer_valor(objeto, claves)
-    if valor is None or valor == "":
-        return None
-    try:
-        return float(valor)
-    except (TypeError, ValueError):
-        return None
-
-
-def _primer_valor(objeto: dict[str, Any], claves: list[str]) -> Any:
-    for clave in claves:
-        if clave in objeto and objeto[clave] is not None:
-            return objeto[clave]
-    return None
-
-
-def _ahora_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# _primer_texto/_extraer_numero/_primer_valor/_ahora_iso viven en
+# app/utilidades.py (hallazgo m7).

@@ -25,7 +25,6 @@ URL base del servicio (FR-022): constante configurable SDP_BASE_URL.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -36,6 +35,13 @@ from app.models import (
     TratamientoUrbanistico,
 )
 from app.providers.arcgis_utils import CapaConfig, consultar_query
+# Helpers compartidos (hallazgo m7): unica definicion en app/utilidades.py.
+from app.utilidades import (
+    ahora_iso as _ahora_iso,
+    extraer_numero as _extraer_numero,
+    primer_texto as _primer_texto,
+    primer_valor as _primer_valor,
+)
 
 # --- Constantes del servicio SINUPOT/SDP (FR-022) ---
 
@@ -226,37 +232,5 @@ class SDPProvider:
 
 
 # --- Utilidades de parsing defensivo (patrón upl.py) ---
-
-
-def _primer_texto(objeto: dict[str, Any], claves: list[str]) -> str | None:
-    """Retorna el primer valor de texto no vacío para las claves dadas."""
-    for clave in claves:
-        if clave in objeto and objeto[clave] is not None:
-            texto = str(objeto[clave]).strip()
-            if texto:
-                return texto
-    return None
-
-
-def _extraer_numero(objeto: dict[str, Any], claves: list[str]) -> float | None:
-    """Extrae el primer valor numérico de las claves dadas."""
-    valor = _primer_valor(objeto, claves)
-    if valor is None or valor == "":
-        return None
-    try:
-        return float(valor)
-    except (TypeError, ValueError):
-        return None
-
-
-def _primer_valor(objeto: dict[str, Any], claves: list[str]) -> Any:
-    """Retorna el primer valor no None para las claves dadas."""
-    for clave in claves:
-        if clave in objeto and objeto[clave] is not None:
-            return objeto[clave]
-    return None
-
-
-def _ahora_iso() -> str:
-    """Timestamp ISO 8601 UTC actual."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# _primer_texto/_extraer_numero/_primer_valor/_ahora_iso viven en
+# app/utilidades.py (hallazgo m7).

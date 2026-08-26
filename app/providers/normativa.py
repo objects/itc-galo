@@ -24,13 +24,13 @@ chunks al LLM:
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import re
 import time
 import unicodedata
 from collections import Counter
-from datetime import datetime, timezone
 from typing import Any
 
 import chromadb
@@ -40,6 +40,8 @@ from pydantic import BaseModel
 
 from app.errores import CorpusNoIngestadoError, OllamaNoDisponibleError
 from app.models import COLECCION_NORMATIVA, SourceTrace
+# Helper compartido (hallazgo m7): unica definicion en app/utilidades.py.
+from app.utilidades import ahora_iso as _ahora_iso
 from app.providers.upl import construir_filtro_territorial
 
 
@@ -219,12 +221,23 @@ class NormativaProvider:
             ) from e
 
     def _get_http_client(self) -> httpx.AsyncClient:
+        # NOTA (nitpick singleton, Fase 5): el cliente httpx es un singleton por
+        # instancia creado perezosamente y compartido entre healthcheck y chat.
+        # Se deja ASI deliberadamente: moverlo a nivel de modulo arriesga tests
+        # que inyectan `_http_client` con MockTransport, y los clientes creados
+        # al importar serian benignos pero innecesarios. Se cierra en aclose().
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout)
         return self._http_client
 
     async def _verificar_ollama_chat(self) -> None:
-        """Verifica que Ollama chat esté disponible y el modelo exista (FIX 9).
+        """Verifica que Ollama esté disponible y el modelo de chat exista (FIX 9, hallazgo m6).
+
+        Healthcheck BARATO: `GET /api/tags` (listado de modelos) en lugar de una
+        generación completa con "ping": no consume tokens ni ciclos del modelo y
+        reduce la latencia del healthcheck a un round-trip trivial. La presencia
+        del modelo se verifica contra el listado comparando el nombre base (con
+        o sin tag): Ollama reporta p. ej. "qwen3:8b" tal cual.
 
         El resultado exitoso se cachea con TTL corto (OLLAMA_HEALTHCHECK_TTL_SEG)
         para no duplicar la latencia del ping en cada consulta. Un fallo nunca se
@@ -240,23 +253,31 @@ class NormativaProvider:
 
         client = self._get_http_client()
         try:
-            resp = await client.post(
-                "/api/chat",
-                json={
-                    "model": self._chat_model,
-                    "messages": [{"role": "user", "content": "ping"}],
-                    "stream": False,
-                },
-            )
+            resp = await client.get("/api/tags")
             if resp.status_code == 404:
-                # Modelo no encontrado: el ping ya distingue el caso y falla
-                # con el error tipado del provider (OllamaNoDisponibleError).
+                # Endpoint ausente: la instancia no es un servidor Ollama valido.
                 raise OllamaNoDisponibleError(modelo=self._chat_model)
             resp.raise_for_status()
+            modelos = resp.json().get("models", [])
+            if not self._modelo_en_listado(modelos):
+                raise OllamaNoDisponibleError(modelo=self._chat_model)
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
             raise OllamaNoDisponibleError(modelo=self._chat_model) from e
 
         self._ollama_verificado_en = ahora
+
+    def _modelo_en_listado(self, modelos: list[dict]) -> bool:
+        """True si el modelo de chat aparece en el listado de /api/tags.
+
+        Comparacion por nombre BASE (sin tag): "qwen3" matchea "qwen3:8b"; el
+        tag exacto tambien matchea. Un listado vacio nunca contiene el modelo.
+        """
+        nombre_base = self._chat_model.split(":")[0]
+        for entrada in modelos:
+            nombre = str(entrada.get("name", ""))
+            if nombre == self._chat_model or nombre.split(":")[0] == nombre_base:
+                return True
+        return False
 
     def _construir_trace(self) -> SourceTrace:
         return SourceTrace(
@@ -306,17 +327,25 @@ class NormativaProvider:
         # Recuperación híbrida (Fase 4): pata vectorial + pata léxica BM25,
         # fusionadas con RRF y filtradas por las reglas deterministas de
         # vigencia/jerarquía antes de llegar al LLM.
-        coleccion = self._get_coleccion()
+        # Hallazgo m5: ChromaDB y el embedding de Ollama son llamadas SINCRONAS
+        # (red + HNSW); se envuelven con asyncio.to_thread para no bloquear el
+        # event loop mientras corren.
+        coleccion = await asyncio.to_thread(self._get_coleccion)
         where = construir_filtro_territorial(upl) if upl else None
 
         n_vector = min(top_k * FACTOR_CANDIDATOS_HIBRIDO, TOPE_CANDIDATOS_HIBRIDO)
-        results = coleccion.query(
+        results = await asyncio.to_thread(
+            coleccion.query,
             query_texts=[consulta],
             n_results=n_vector,
             where=where,
         )
         ranking_vector = self._procesar_resultados(results, upl)
-        ranking_keyword = self._recuperar_candidatos_keyword(coleccion, consulta, where)
+        # Pata léxica: `coleccion.get` también es sincrónico (hallazgo m5).
+        datos = await asyncio.to_thread(
+            coleccion.get, where=where, include=["documents", "metadatas"]
+        )
+        ranking_keyword = self._recuperar_candidatos_keyword(datos, consulta)
 
         chunks = _aplicar_reglas_vigencia_y_jerarquia(
             _fusion_rrf(ranking_vector, ranking_keyword), top_k
@@ -368,21 +397,22 @@ class NormativaProvider:
         }
 
     def _recuperar_candidatos_keyword(
-        self, coleccion, consulta: str, where: dict | None
+        self, datos: dict, consulta: str
     ) -> list[ChunkRecuperado]:
         """Pata léxica del retrieval híbrido: BM25 local sobre el filtro.
 
-        Recupera TODOS los chunks que cumplen el filtro territorial
-        (`coleccion.get`) y los puntúa con BM25 (k1=1.2, b=0.75) contra los
-        términos de la consulta. El IDF se calcula sobre el propio conjunto
-        filtrado: determinista para un índice dado (SC-003), sin red ni LLM.
+        Recibe los chunks que cumplen el filtro territorial (ya recuperados con
+        `coleccion.get` por el llamador: la llamada sincrónica vive fuera para
+        poder envolverla en asyncio.to_thread, hallazgo m5) y los puntúa con
+        BM25 (k1=1.2, b=0.75) contra los términos de la consulta. El IDF se
+        calcula sobre el propio conjunto filtrado: determinista para un índice
+        dado (SC-003), sin red ni LLM.
 
         Returns:
             Ranking léxico (score desc, id asc en empates) acotado a
             TOPE_CANDIDATOS_HIBRIDO. Los chunks llevan `similitud` 0.0: no hay
             señal vectorial para ellos hasta que la fusión RRF los combine.
         """
-        datos = coleccion.get(where=where, include=["documents", "metadatas"])
         ids = datos.get("ids") or []
         documentos = datos.get("documents") or []
         metadatas = datos.get("metadatas") or []
@@ -539,8 +569,7 @@ class NormativaProvider:
         }
 
 
-def _ahora_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# _ahora_iso vive en app/utilidades.py (hallazgo m7).
 
 
 # --- Retrieval híbrido: funciones puras deterministas (Fase 4, SC-003) ---

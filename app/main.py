@@ -33,9 +33,9 @@ import asyncio
 import os
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from typing import Any
 
+from app.cache import CacheLRUConTTL, construir_cache_por_defecto
 from app.errores import (
     CodigoError,
     CorpusNoIngestadoError,
@@ -98,6 +98,13 @@ from app.providers.normativa import (
 from app.providers.sdp import SDPProvider
 from app.providers.upl import UPLProvider, VIGENCIA_UPL_DEFAULT
 from app.scoring import BloquesEvaluables, calcular_score
+# Helpers compartidos (hallazgo m7): unica definicion en app/utilidades.py,
+# importados con alias privado para no tocar los call sites de este modulo.
+from app.utilidades import (
+    PATRON_CHIP,
+    ahora_iso as _ahora_iso,
+    formatear_numero as _formatear_numero,
+)
 
 try:  # mcp >= 1.x: FastMCP
     from mcp.server.fastmcp import FastMCP as _ClaseServidorMCP
@@ -105,7 +112,6 @@ except ImportError:  # mcp 2.x renombro FastMCP a MCPServer
     from mcp.server.mcpserver import MCPServer as _ClaseServidorMCP
 
 NOMBRE_SERVIDOR = "mcp-bogota-factibilidad"
-PATRON_CHIP = re.compile(r"^[A-Z0-9]{11}$")
 
 CAMPOS_TRAZA = {"source_name", "layer_id", "service_url", "data_vigencia", "query_timestamp"}
 
@@ -161,12 +167,20 @@ class ServidorLotes:
         provider_upl: UPLProvider,
         provider_normativa: NormativaProvider,
         provider_sdp: SDPProvider | None = None,
+        cache_lotes: CacheLRUConTTL | None = None,
     ) -> None:
         self._mapas = provider_mapas
         self._arcgis = provider_arcgis
         self._upl = provider_upl
         self._normativa = provider_normativa
         self._sdp = provider_sdp or SDPProvider()
+        # Cache LRU+TTL de resolucion de lote (Fase 5): por defecto se lee de
+        # CACHE_TTL_SEGUNDOS (0 = desactivada); los tests inyectan la suya.
+        # Chequeo explicito de None (no `or`): una cache vacia tiene __len__ 0
+        # y seria falsy, sustituida silenciosamente por la de entorno.
+        self._cache_lotes = (
+            cache_lotes if cache_lotes is not None else construir_cache_por_defecto()
+        )
 
     async def aclose(self) -> None:
         await self._mapas.aclose()
@@ -190,11 +204,9 @@ class ServidorLotes:
 
     async def resolve_lot_by_address(self, address: str) -> dict[str, Any]:
         """Resuelve el lote asociado a una direccion (requiere MAPAS_BOGOTA_APIKEY; falla rapido si falta)."""
-        if not isinstance(address, str) or not address.strip():
-            return construir_error(
-                CodigoError.PARAMETROS_INVALIDOS,
-                message="Parámetros inválidos: la dirección no puede estar vacía.",
-            )
+        error_direccion = _validar_direccion(address)
+        if error_direccion:
+            return error_direccion
         if not self._mapas.tiene_api_key():
             return construir_error(CodigoError.CREDENCIAL_FALTANTE)
         try:
@@ -332,11 +344,9 @@ class ServidorLotes:
                 return error
 
         elif direccion is not None:
-            if not isinstance(direccion, str) or not direccion.strip():
-                return construir_error(
-                    CodigoError.PARAMETROS_INVALIDOS,
-                    message="Parámetros inválidos: la dirección no puede estar vacía.",
-                )
+            error_direccion = _validar_direccion(direccion)
+            if error_direccion:
+                return error_direccion
             if not self._mapas.tiene_api_key():
                 return construir_error(CodigoError.CREDENCIAL_FALTANTE)
             try:
@@ -349,10 +359,7 @@ class ServidorLotes:
                 return construir_error(CodigoError.DIRECCION_NO_LOCALIZADA)
             if len(candidatos) > 1:
                 return self._respuesta_multiples_candidatos(candidatos)
-            res = await self._resolver_lote_por_candidato(candidatos[0])
-            if isinstance(res, dict) and "error" in res:
-                return res
-            lote, error = res
+            lote, error = await self._resolver_lote_por_candidato(candidatos[0])
             if error:
                 return error
 
@@ -440,19 +447,9 @@ class ServidorLotes:
             if error_chip:
                 return error_chip
         if direccion is not None:
-            if not isinstance(direccion, str) or not direccion.strip():
-                return construir_error(
-                    CodigoError.PARAMETROS_INVALIDOS,
-                    message="Parámetros inválidos: la dirección no puede estar vacía.",
-                )
-            if len(direccion.strip()) > DIRECCION_MAX_CHARS:
-                return construir_error(
-                    CodigoError.PARAMETROS_INVALIDOS,
-                    message=(
-                        f"Parámetros inválidos: la dirección no puede superar "
-                        f"{DIRECCION_MAX_CHARS} caracteres."
-                    ),
-                )
+            error_direccion = _validar_direccion(direccion)
+            if error_direccion:
+                return error_direccion
         if coordenadas is not None:
             if not isinstance(coordenadas, dict):
                 return construir_error(
@@ -557,7 +554,13 @@ class ServidorLotes:
         clasificacion_suelo = None
         if upl is not None:
             nombre_localidad = upl.localidad_derivada
-            if nombre_localidad is None:
+            codigo_localidad = (
+                _LOCALIDAD_A_CODIGO.get(nombre_localidad) if nombre_localidad else None
+            )
+            if nombre_localidad is None or codigo_localidad is None:
+                # Hallazgo m3: sin codigo derivado NO se construye Localidad con
+                # centinela "": el bloque queda en null + warning (mismo trato
+                # que un nombre fuera del mapeo estatico).
                 warnings.append(
                     {
                         "codigo": "LOCALIDAD_NO_DERIVADA",
@@ -568,10 +571,7 @@ class ServidorLotes:
                     }
                 )
             else:
-                localidad = Localidad(
-                    codigo=_LOCALIDAD_A_CODIGO.get(nombre_localidad, ""),
-                    nombre=nombre_localidad,
-                )
+                localidad = Localidad(codigo=codigo_localidad, nombre=nombre_localidad)
             vocacion = (upl.vocacion or "").strip().lower()
             clasificacion_suelo = _CLASIFICACION_POR_VOCACION.get(vocacion)
 
@@ -1552,7 +1552,16 @@ class ServidorLotes:
         (direccion_chip); la capa manda sobre el enriquecimiento si trae el dato.
         Los campos enriquecidos no declaran vigencia propia: no se mezclan
         vigencias (FR-008) ni se atribuye a ArcGIS datos de Mapas Bogota.
+
+        Cache (Fase 5): solo los resultados EXITOSOS se cachean bajo
+        `chip:<CHIP>`; errores de fuente y "no encontrado" nunca se cachean para
+        que un fallo transitorio o un CHIP dado de alta a medias no quede
+        congelado durante el TTL. La cache es transparente: mismo resultado.
         """
+        clave_cache = f"chip:{chip}"
+        cacheado = self._cache_lotes.obtener(clave_cache)
+        if cacheado is not None:
+            return cacheado
         try:
             predio = await self._mapas.buscar_por_chip(chip)
         except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError) as exc:
@@ -1567,7 +1576,7 @@ class ServidorLotes:
             return None, self._error_chip_no_encontrado(chip)
         # La identidad oficial (CHIP) proviene del criterio de entrada; la capa
         # Lote manda sobre los campos enriquecidos cuando los trae.
-        return (
+        resuelto = (
             Lote(
                 chip=chip,
                 codigo_catastral=lote.codigo_catastral,
@@ -1580,6 +1589,8 @@ class ServidorLotes:
             ),
             None,
         )
+        self._cache_lotes.guardar(clave_cache, resuelto)
+        return resuelto
 
     async def _resolver_lote_por_candidato(
         self, candidato: CandidatoDireccion, incluir_contexto: bool = True
@@ -1799,6 +1810,28 @@ def _validar_chip(chip: Any) -> dict | None:
     return None
 
 
+def _validar_direccion(direccion: Any) -> dict | None:
+    """Validacion de direccion uniforme en las 3 tools que la aceptan (hallazgo m4).
+
+    Mismas reglas FR-012 para resolve_lot_by_address, get_upl y
+    get_feasibility_report: no vacia y maximo DIRECCION_MAX_CHARS caracteres.
+    """
+    if not isinstance(direccion, str) or not direccion.strip():
+        return construir_error(
+            CodigoError.PARAMETROS_INVALIDOS,
+            message="Parámetros inválidos: la dirección no puede estar vacía.",
+        )
+    if len(direccion.strip()) > DIRECCION_MAX_CHARS:
+        return construir_error(
+            CodigoError.PARAMETROS_INVALIDOS,
+            message=(
+                f"Parámetros inválidos: la dirección no puede superar "
+                f"{DIRECCION_MAX_CHARS} caracteres."
+            ),
+        )
+    return None
+
+
 def _validar_coordenadas(latitude: Any, longitude: Any) -> dict | None:
     es_numero = lambda valor: isinstance(valor, (int, float)) and not isinstance(valor, bool)
     if not es_numero(latitude) or not es_numero(longitude):
@@ -1845,16 +1878,7 @@ def _identidad_a_contrato(lote: Lote) -> dict[str, Any]:
 # --- Feature 3: serializacion del informe de factibilidad ---
 
 
-def _ahora_iso() -> str:
-    """Marca temporal ISO 8601 UTC (patron F1/F2); no participa del score (SC-003)."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _formatear_numero(valor: float) -> str:
-    """Formato determinista del numero en interpretations (4500000.0 -> "4500000")."""
-    if float(valor).is_integer():
-        return str(int(valor))
-    return str(valor)
+# _ahora_iso y _formatear_numero viven en app/utilidades.py (hallazgo m7).
 
 
 def _mensaje_fallos(fallos: list[FalloCapa]) -> str:
@@ -2010,23 +2034,26 @@ def _parsear_parametros_rag(respuesta_rag: str) -> dict[str, Any]:
     que extraen COS, CUS, altura, retiros frontales/laterales/posteriores y
     estacionamientos desde el texto del LLM. Los patrones de retiros aceptan
     singular y plural ("retiro lateral" / "retiros laterales", "posterior" /
-    "posteriores") para tolerar la formulación del LLM (hallazgo m2). Si un
-    patrón no matchea, el campo queda None (FR-014: sin LLM para
-    interpretaciones).
+    "posteriores") para tolerar la formulación del LLM (hallazgo m2). Antes de
+    extraer se NORMALIZA la coma decimal a punto ("0,5" -> "0.5", nitpick
+    Fase 5): los LLM en español a veces responden con coma decimal y sin esta
+    normalización el valor se perdería. Si un patrón no matchea, el campo
+    queda None (FR-014: sin LLM para interpretaciones).
     """
-    cos = _extraer_float_patron(respuesta_rag, r"COS[:\s]+(\d+\.?\d*)")
-    cus = _extraer_float_patron(respuesta_rag, r"CUS[:\s]+(\d+\.?\d*)")
-    altura = _extraer_float_patron(respuesta_rag, r"altura[:\s]+(\d+\.?\d*)\s*m")
+    texto_normalizado = respuesta_rag.replace(",", ".")
+    cos = _extraer_float_patron(texto_normalizado, r"COS[:\s]+(\d+\.?\d*)")
+    cus = _extraer_float_patron(texto_normalizado, r"CUS[:\s]+(\d+\.?\d*)")
+    altura = _extraer_float_patron(texto_normalizado, r"altura[:\s]+(\d+\.?\d*)\s*m")
     frontal = _extraer_float_patron(
-        respuesta_rag, r"(?:frontales|frontal)[:\s]+(\d+\.?\d*)\s*m"
+        texto_normalizado, r"(?:frontales|frontal)[:\s]+(\d+\.?\d*)\s*m"
     )
     laterales = _extraer_float_patron(
-        respuesta_rag, r"(?:laterales|lateral)[:\s]+(\d+\.?\d*)\s*m"
+        texto_normalizado, r"(?:laterales|lateral)[:\s]+(\d+\.?\d*)\s*m"
     )
     posterior = _extraer_float_patron(
-        respuesta_rag, r"(?:posteriores|posterior)[:\s]+(\d+\.?\d*)\s*m"
+        texto_normalizado, r"(?:posteriores|posterior)[:\s]+(\d+\.?\d*)\s*m"
     )
-    estacionamientos = _extraer_int_patron(respuesta_rag, r"(\d+)\s*estacionamiento")
+    estacionamientos = _extraer_int_patron(texto_normalizado, r"(\d+)\s*estacionamiento")
     return {
         "cos": cos,
         "cus": cus,
@@ -2129,8 +2156,8 @@ async def _bloque_parametros_urbanisticos(
     1. Consulta SDP capa 2 (tratamiento espacial): fallo → BLOQUE_DEGRADADO;
        respuesta sin features/denominación → BLOQUE_SIN_DATO (contrato:62-67)
     2. Si tratamiento OK → consulta RAG normativo para parámetros numéricos;
-       fallo del RAG → warning BLOQUE_DEGRADADO deduplicado sin perder el
-       tratamiento (FR-008, FR-016)
+       fallo del RAG → warning BLOQUE_DEGRADADO sin perder el tratamiento
+       (FR-008, FR-016)
     3. Consulta capa 14 SINUPOT (edificabilidad oficial, FR-006/FR-021): sus
        valores tienen precedencia sobre el parsing RAG; los campos que la capa
        no entregue se complementan con el RAG. Degradación independiente.

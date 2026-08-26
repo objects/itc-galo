@@ -7,23 +7,41 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
+- **Fase 5 — cierre: re-indexado v3, caché por lote con TTL e higiene general** (post-Fase 4):
+  - **Índice real en esquema v3**: `python -m app.ingesta.corpus indexar` reconstruyó `.data/chroma`
+    con metadata `tema`/`estado` por chunk (`esquema_metadatos=3` en la colección); el CLI debug
+    `consultar` muestra los campos aditivos (`tema`, `estado`) de cada resultado.
+  - **Caché por lote (LRU + TTL)** en `app/cache.py`: `ServidorLotes._resolver_lote_por_chip`
+    cachea SOLO resultados exitosos (CHIP → lote+geometría; errores y "no encontrado" nunca se
+    cachean). TTL configurable con `CACHE_TTL_SEGUNDOS` (default 3600, `0` = desactivada), LRU
+    acotada a 128 entradas, reloj inyectable para tests. Transparente: mismo input → mismo
+    resultado (SC-003). NO se cachea el informe ni nada que dependa de Ollama. Tests:
+    `tests/contract/test_cache_lote.py`.
+  - **Higiene (hallazgos del code review)**: helpers duplicados unificados en `app/utilidades.py`
+    (`PATRON_CHIP`, `_primer_texto`/`_extraer_numero`/`_primer_valor`, `_ahora_iso`,
+    `_formatear_numero`, `_clave_sin_tildes`); rama muerta `isinstance(res, dict)` eliminada;
+    `Localidad(codigo="")` centinela sustituido por `localidad: null` + warning
+    `LOCALIDAD_NO_DERIVADA`; validación `DIRECCION_MAX_CHARS` uniforme en las 3 tools que aceptan
+    dirección (`_validar_direccion`); ChromaDB/embeddings síncronos envueltos con
+    `asyncio.to_thread` en `normativa.py`; healthcheck de Ollama BARATO vía `GET /api/tags`
+    (verifica presencia del modelo de chat) en vez de generación completa; parsing RAG acepta
+    decimales con coma ("0,5"); comparación "Conservación" sin tildes en scoring.
 - **Fase 4 — RAG híbrido + reglas de vigencia/jerarquía en retrieval** (post-F8): la metadata por
   chunk sube a **esquema v3** (`VERSION_ESQUEMA_METADATOS = "3"` en `app/ingesta/corpus.py`): cada
   chunk indexado lleva `tema` (clasificación temática determinista desde título/sección, mapeo
   `TEMAS_NORMATIVOS` con default "general"), `estado` ("vigente"/"derogado" según el banner sisjur
-  H7 del acto; el 555 es siempre vigente) y `fecha_vigencia` garantizada. **PENDIENTE: re-indexar el
-  índice real** (`python -m app.ingesta.corpus indexar`); el rebuild es automático al detectar
-  esquema legado. El provider RAG (`app/providers/normativa.py`) ahora recupera de forma HÍBRIDA:
+  H7 del acto; el 555 es siempre vigente) y `fecha_vigencia` garantizada. El provider RAG
+  (`app/providers/normativa.py`) ahora recupera de forma HÍBRIDA:
   pata vectorial (ChromaDB) + pata léxica BM25 local sobre el filtro territorial, fusionadas con
   Reciprocal Rank Fusion (RRF k=60, determinista); cada ítem expone `score_hibrido`, `tema` y
   `estado` aditivos. Antes del LLM se aplican reglas deterministas: chunks derogados EXCLUIDOS salvo
   fallback downranked cuando los vigentes no llenan `top_k`, y jerarquía 555 > acto modificatorio en
   empates de score (desempates: fecha_vigencia más reciente, luego id). Tests:
   `tests/contract/test_rag_hibrido_vigencia.py`.
-- **Repositorio en `master`; HEAD `37b0175` (implementación F8) + commit de cierre (correcciones de
-  revisión y documentación de F8).**
+- **Repositorio en `master`; HEAD `670cac4` (Fase 4: RAG híbrido) + commits de Fase 5 (re-indexado
+  v3, caché por lote e higiene).**
   La aplicación está implementada y probada: F1, F2,
-  F3, F4, F6, F7 y F8 completas, **332 tests passing (suite completa: smoke 6 + contract), 0 failed**,
+  F3, F4, F6, F7 y F8 completas, **419 tests passing (suite completa: smoke + contract), 0 failed**,
   gate PASS, con las **7 tools** registradas (F4, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
@@ -257,7 +275,11 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   Chunk; F3 InformeFactibilidad y bloques; F7 ContextoCatastro; F8 BloqueParametrosUrbanisticos;
   Fase 3 EspacioPublicoLote/RedVialLote/EquipamientosCercanos y sus bloques),
   `errores.py` (taxonomía), `scoring.py` (F3+F7+F8+Fase 3, función
-  pura `calcular_score`, determinista, sin LLM).
+  pura `calcular_score`, determinista, sin LLM), `cache.py` (Fase 5: caché en
+  memoria LRU+TTL para resolución de lote por CHIP, TTL via
+  `CACHE_TTL_SEGUNDOS`) y `utilidades.py` (Fase 5: helpers compartidos —
+  `PATRON_CHIP`, parsing defensivo de atributos, `_ahora_iso`,
+  `_formatear_numero`, `_clave_sin_tildes`).
 - `app/providers/`: un provider por fuente (Principio II): `arcgis.py` (Lote, contexto temático,
   Predio F3, obras por radio, contexto catastral F7), `arcgis_utils.py` (`CapaConfig`, params/consulta compartidos),
   `mapas_bogota.py` (Mapas Bogotá), `upl.py` (capa UPL), `normativa.py` (RAG ChromaDB + Ollama),

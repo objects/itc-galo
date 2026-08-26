@@ -15,7 +15,6 @@ import json
 import os
 import re
 import sys
-import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +37,8 @@ from app.models import (
     METADATA_ESQUEMA_METADATOS,
 )
 from app.providers.upl import UPLS_BOGOTA, construir_filtro_territorial
+# Helper compartido (hallazgo m7): unica definicion en app/utilidades.py.
+from app.utilidades import clave_sin_tildes as _clave_sin_tildes
 
 # Alternativas de numeral romano de mayor a menor longitud: sin ese orden el
 # motor de regex elegiria "I" dentro de "II"/"III"/"IV" y el libro se perderia.
@@ -99,12 +100,6 @@ NOMBRES_UPL_SEGUROS: dict[str, str] = {
     for codigo, registro in UPLS_BOGOTA.items()
     if codigo not in NOMBRES_UPL_EXCLUIDOS_POR_AMBIGUEDAD
 }
-
-
-def _clave_sin_tildes(texto: str) -> str:
-    """Clave de comparación textual: minúsculas sin tildes (determinista)."""
-    sin_tildes = unicodedata.normalize("NFD", texto)
-    return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn").lower()
 
 
 def _cuerpo_nombre(nombre: str) -> str:
@@ -1633,7 +1628,12 @@ def cmd_consultar(
     upl_filtro: str | None,
     ruta_indice: str,
 ) -> None:
-    """Consulta el índice vectorial."""
+    """Consulta el índice vectorial (debug).
+
+    Además de id/artículo/parte/similitud, muestra los metadatos aditivos del
+    esquema v3 (`tema`, `estado`) cuando el chunk los lleva; en índices legacy
+    se omiten.
+    """
     ef = _crear_embedding_function()
     resultados = consultar_corpus(ruta_indice, ef, consulta, top_k, umbral, upl_filtro)
 
@@ -1641,9 +1641,32 @@ def cmd_consultar(
         print(f"Sin resultados por encima del umbral {umbral}")
         return
 
+    # Metadatos v3 por id (una sola lectura extra, solo CLI debug). La lectura
+    # por ids NO requiere embeddings: se pide la coleccion sin embedding
+    # function para no re-instanciarla.
+    metadatas_por_id: dict[str, Any] = {}
+    try:
+        cliente = chromadb.PersistentClient(path=ruta_indice)
+        coleccion = cliente.get_collection(name=COLECCION_NORMATIVA)
+        datos_ids = coleccion.get(ids=[c.id for c, _ in resultados])
+        ids_leidos = datos_ids.get("ids") or []
+        metadatas_leidas = datos_ids.get("metadatas") or []
+        for id_chunk, metadata in zip(ids_leidos, metadatas_leidas):
+            metadatas_por_id[str(id_chunk)] = metadata
+    except Exception:
+        metadatas_por_id = {}
+
     for chunk, sim in resultados:
         parte_str = f"{chunk.libro}/{chunk.parte}" if chunk.parte else f"{chunk.libro}/sin parte"
         print(f"{chunk.id} (art {chunk.articulo}, {parte_str}): similitud={sim:.4f}")
+        metadata = metadatas_por_id.get(chunk.id) or {}
+        aditivos = [
+            f"{clave}={metadata[clave]}"
+            for clave in ("tema", "estado")
+            if clave in metadata
+        ]
+        if aditivos:
+            print(f"  [{', '.join(aditivos)}]")
         print(f"  {chunk.texto[:200]}...")
 
 

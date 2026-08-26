@@ -50,11 +50,19 @@ import asyncio
 import math
 import re
 from collections.abc import Coroutine, Sequence
-from datetime import datetime, timezone
 from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel
+
+# Helpers compartidos (hallazgo m7): unica definicion en app/utilidades.py.
+from app.utilidades import (
+    PATRON_CHIP,
+    ahora_iso as _ahora_iso,
+    extraer_numero as _extraer_numero,
+    primer_texto as _primer_texto,
+    primer_valor as _primer_valor,
+)
 
 from app.errores import (
     Fuente4xxError,
@@ -390,8 +398,6 @@ D_USOTUSO: dict[str, str] = {
     "097": "Bodega Economica en PH",
     "098": "Deposito de Almacenamiento en PH",
 }
-
-PATRON_CHIP = re.compile(r"^[A-Z0-9]{11}$")
 
 
 class FalloCapa(BaseModel):
@@ -1524,33 +1530,8 @@ def _distancia_del_feature(
     return _distancia_haversine_m(lat_centroide, lng_centroide, lat_feature, lng_feature)
 
 
-def _primer_valor(objeto: dict[str, Any], claves: list[str]) -> Any:
-    for clave in claves:
-        if clave in objeto and objeto[clave] is not None:
-            return objeto[clave]
-    return None
-
-
-def _primer_texto(objeto: dict[str, Any], claves: list[str]) -> str | None:
-    valor = _primer_valor(objeto, claves)
-    if valor is None:
-        return None
-    texto = str(valor).strip()
-    return texto or None
-
-
-def _extraer_numero(objeto: dict[str, Any], claves: list[str]) -> float | None:
-    valor = _primer_valor(objeto, claves)
-    if valor is None or valor == "":
-        return None
-    try:
-        return float(valor)
-    except (TypeError, ValueError):
-        return None
-
-
-def _ahora_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# _primer_valor/_primer_texto/_extraer_numero/_ahora_iso viven en
+# app/utilidades.py (hallazgo m7).
 
 
 def _parsear_filas_predio(data: dict[str, Any]) -> list[dict[str, Any]]:

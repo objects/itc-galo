@@ -49,6 +49,11 @@ from app.models import (
     EvidenciaNormativa,
     FeasibilityScore,
 )
+# Helpers compartidos (hallazgo m7): unica definicion en app/utilidades.py.
+from app.utilidades import (
+    clave_sin_tildes as _clave_sin_tildes,
+    formatear_numero as _formatear_numero,
+)
 
 PUNTOS_BASE = 50
 PUNTOS_UPL = 10
@@ -127,7 +132,7 @@ class BloquesEvaluables(BaseModel):
 def calcular_score(bloques: BloquesEvaluables) -> FeasibilityScore:
     """Calcula el score heuristico 0-100 con reglas puras (research D3).
 
-    `bloques` es una estructura tipada de los 6 bloques evaluables; el score es
+    `bloques` es una estructura tipada de los 16 bloques evaluables; el score es
     deterministico: misma entrada -> mismo score/confidence/reasons (SC-003).
     """
     puntos_positivos, reglas_positivas, razones_positivas = _reglas_positivas(bloques)
@@ -399,13 +404,17 @@ def _reglas_negativas(
             )
 
     # --- F8: Penalización por tratamiento de conservación ---
-    # Regla r_tratamiento_conservacion: tratamiento == "Conservación" -> −15
+    # Regla r_tratamiento_conservacion: tratamiento == "Conservación" -> −15.
+    # Comparacion SIN tildes (nitpick Fase 5): "conservacion" y "Conservación"
+    # (y cualquier variante de acentuacion) penalizan igual; la clave
+    # normalizada es determinista (SC-003).
     if (
         bloques.urbanistic_parameters is not None
         and bloques.urbanistic_parameters.estado == "disponible"
         and bloques.urbanistic_parameters.dato is not None
         and bloques.urbanistic_parameters.dato.tratamiento is not None
-        and bloques.urbanistic_parameters.dato.tratamiento.denominacion.lower() == "conservación"
+        and _clave_sin_tildes(bloques.urbanistic_parameters.dato.tratamiento.denominacion)
+        == "conservacion"
     ):
         puntos += PENALIZACION_CONSERVACION
         reglas.append("r_tratamiento_conservacion")
@@ -524,8 +533,4 @@ def _clamp(valor: int) -> int:
     return max(0, min(100, valor))
 
 
-def _formatear_numero(valor: float) -> str:
-    """Formato determinista del numero para las reasons (4500000.0 -> "4500000")."""
-    if float(valor).is_integer():
-        return str(int(valor))
-    return str(valor)
+# _formatear_numero y _clave_sin_tildes viven en app/utilidades.py (hallazgo m7).

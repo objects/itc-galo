@@ -31,7 +31,6 @@ import asyncio
 import json
 import math
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -45,6 +44,8 @@ from app.errores import (
     verificar_body_sin_error,
 )
 from app.models import SourceTrace
+# Helper compartido (hallazgo m7): unica definicion en app/utilidades.py.
+from app.utilidades import ahora_iso as _ahora_iso
 from app.providers.geom import punto_interior_seguro
 
 URL_SERVICIO = "https://catalogopmb.catastrobogota.gov.co/PMBWeb/web"
@@ -336,5 +337,4 @@ def _a_float(valor: Any) -> float | None:
         return None
 
 
-def _ahora_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# _ahora_iso vive en app/utilidades.py (hallazgo m7).
