@@ -469,41 +469,12 @@ def _confidence_por_cobertura(bloques: BloquesEvaluables) -> Literal["high", "me
 
 
 def _contar_bloques_disponibles(bloques: BloquesEvaluables) -> int:
-    return sum(
-        [
-            bloques.administrative_context.upl is not None
-            or bloques.administrative_context.localidad is not None,
-            bloques.planning_constraints.estado == "disponible",
-            bloques.market_context.estado == "disponible",
-            bloques.environment_context.estado == "disponible",
-            bloques.economic_context.estado == "disponible",
-            bloques.geotechnical_risks.estado == "disponible",
-            bloques.socioeconomic_context.estado == "disponible",
-            bloques.regulatory_environment.estado == "disponible",
-            bloques.cultural_heritage.estado == "disponible",
-            bloques.transit_access.estado == "disponible",
-            bloques.catastro_data.estado == "disponible",
-            bool(bloques.normative_evidence.items),
-            # F8: urbanistic_parameters disponible si tratamiento poblado
-            bloques.urbanistic_parameters is not None
-            and bloques.urbanistic_parameters.estado == "disponible",
-            # Fase 3: los 3 bloques nuevos cuentan solo cuando están presentes
-            _bloque_fase3_disponible(bloques, "public_space_context"),
-            _bloque_fase3_disponible(bloques, "road_network_context"),
-            _bloque_fase3_disponible(bloques, "nearby_facilities"),
-        ]
-    )
+    return sum(_disponibilidad_bloques(bloques).values())
 
 
-def _bloque_fase3_disponible(bloques: BloquesEvaluables, nombre: str) -> bool:
-    """Disponibilidad de un bloque Fase 3 opcional (None = no evaluado -> False)."""
-    bloque = getattr(bloques, nombre)
-    return bloque is not None and bloque.estado == "disponible"
-
-
-def _reasons_datos_faltantes(bloques: BloquesEvaluables) -> list[str]:
-    """Enumera los bloques ausentes cuando confidence es low (escenario US3.2)."""
-    disponibles = {
+def _disponibilidad_bloques(bloques: BloquesEvaluables) -> dict[str, bool]:
+    """Mapa nombre -> disponible para todos los bloques evaluables."""
+    return {
         "administrative_context": bloques.administrative_context.upl is not None
         or bloques.administrative_context.localidad is not None,
         "planning_constraints": bloques.planning_constraints.estado == "disponible",
@@ -525,6 +496,17 @@ def _reasons_datos_faltantes(bloques: BloquesEvaluables) -> list[str]:
             and bloques.urbanistic_parameters.estado == "disponible"
         ),
     }
+
+
+def _bloque_fase3_disponible(bloques: BloquesEvaluables, nombre: str) -> bool:
+    """Disponibilidad de un bloque Fase 3 opcional (None = no evaluado -> False)."""
+    bloque = getattr(bloques, nombre)
+    return bloque is not None and bloque.estado == "disponible"
+
+
+def _reasons_datos_faltantes(bloques: BloquesEvaluables) -> list[str]:
+    """Enumera los bloques ausentes cuando confidence es low (escenario US3.2)."""
+    disponibles = _disponibilidad_bloques(bloques)
     return [f"Dato faltante: {nombre}." for nombre in BLOQUES_EVALUABLES if not disponibles[nombre]]
 
 

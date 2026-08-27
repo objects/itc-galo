@@ -77,3 +77,8 @@ def clave_sin_tildes(texto: str) -> str:
     """
     normalizado = unicodedata.normalize("NFD", texto)
     return "".join(c for c in normalizado if unicodedata.category(c) != "Mn").lower()
+
+
+def es_numero(valor: Any) -> bool:
+    """True si valor es int/float pero no bool (que es subclass de int)."""
+    return isinstance(valor, (int, float)) and not isinstance(valor, bool)

@@ -33,7 +33,7 @@ import asyncio
 import os
 import re
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Callable
 
 from app.cache import CacheLRUConTTL, construir_cache_por_defecto
 from app.errores import (
@@ -103,6 +103,7 @@ from app.scoring import BloquesEvaluables, calcular_score
 from app.utilidades import (
     PATRON_CHIP,
     ahora_iso as _ahora_iso,
+    es_numero as _es_numero,
     formatear_numero as _formatear_numero,
 )
 
@@ -112,6 +113,17 @@ except ImportError:  # mcp 2.x renombro FastMCP a MCPServer
     from mcp.server.mcpserver import MCPServer as _ClaseServidorMCP
 
 NOMBRE_SERVIDOR = "mcp-bogota-factibilidad"
+
+
+def _tiene_datos_catastro(ctx) -> bool:
+    """True si el contexto catastral tiene al menos un campo poblado."""
+    return any([
+        ctx.construccion is not None,
+        ctx.manzana is not None,
+        ctx.densidad_predial is not None,
+        ctx.variacion_area is not None,
+        ctx.sector_catastral is not None,
+    ])
 
 CAMPOS_TRAZA = {"source_name", "layer_id", "service_url", "data_vigencia", "query_timestamp"}
 
@@ -207,19 +219,7 @@ class ServidorLotes:
         error_direccion = _validar_direccion(address)
         if error_direccion:
             return error_direccion
-        if not self._mapas.tiene_api_key():
-            return construir_error(CodigoError.CREDENCIAL_FALTANTE)
-        try:
-            candidatos = await self._mapas.geocodificar(address.strip())
-        except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError, CredencialFaltanteError) as exc:
-            if isinstance(exc, CredencialFaltanteError):
-                return construir_error(CodigoError.CREDENCIAL_FALTANTE)
-            return _error_de_fuente(exc)
-        if not candidatos:
-            return construir_error(CodigoError.DIRECCION_NO_LOCALIZADA)
-        if len(candidatos) > 1:
-            return self._respuesta_multiples_candidatos(candidatos)
-        lote, error = await self._resolver_lote_por_candidato(candidatos[0])
+        lote, error = await self._resolver_por_direccion(address)
         if error:
             return error
         contexto, error = await self._consultar_contexto_seguro(lote)
@@ -271,7 +271,7 @@ class ServidorLotes:
                 lote.centroid.lng, lote.centroid.lat
             )
         )
-        catastro_disponible = contexto_catastro.construccion is not None or contexto_catastro.manzana is not None or contexto_catastro.densidad_predial is not None or contexto_catastro.variacion_area is not None or contexto_catastro.sector_catastral is not None
+        catastro_disponible = _tiene_datos_catastro(contexto_catastro)
 
         # Consulta parámetros urbanísticos (F8, degradación independiente)
         summary_warnings: list[dict[str, str]] = []
@@ -347,19 +347,7 @@ class ServidorLotes:
             error_direccion = _validar_direccion(direccion)
             if error_direccion:
                 return error_direccion
-            if not self._mapas.tiene_api_key():
-                return construir_error(CodigoError.CREDENCIAL_FALTANTE)
-            try:
-                candidatos = await self._mapas.geocodificar(direccion.strip())
-            except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError, CredencialFaltanteError) as exc:
-                if isinstance(exc, CredencialFaltanteError):
-                    return construir_error(CodigoError.CREDENCIAL_FALTANTE)
-                return _error_de_fuente(exc)
-            if not candidatos:
-                return construir_error(CodigoError.DIRECCION_NO_LOCALIZADA)
-            if len(candidatos) > 1:
-                return self._respuesta_multiples_candidatos(candidatos)
-            lote, error = await self._resolver_lote_por_candidato(candidatos[0])
+            lote, error = await self._resolver_por_direccion(direccion)
             if error:
                 return error
 
@@ -485,32 +473,24 @@ class ServidorLotes:
         if chip is not None:
             lote, error = await self._resolver_lote_por_chip(chip)
         elif direccion is not None:
-            if not self._mapas.tiene_api_key():
-                return construir_error(CodigoError.CREDENCIAL_FALTANTE)
-            try:
-                candidatos = await self._mapas.geocodificar(direccion.strip())
-            except (
-                Fuente5xxError,
-                Fuente4xxError,
-                FuenteDatosInvalidosError,
-                CredencialFaltanteError,
-            ) as exc:
-                if isinstance(exc, CredencialFaltanteError):
-                    return construir_error(CodigoError.CREDENCIAL_FALTANTE)
-                return _error_de_fuente(exc)
-            if not candidatos:
-                return construir_error(CodigoError.DIRECCION_NO_LOCALIZADA)
-            if len(candidatos) > 1:
-                return construir_error(
+            lote, error = await self._resolver_por_direccion(direccion, incluir_contexto=False)
+            if error and error.get("multiples_candidatos"):
+                error = construir_error(
                     CodigoError.LOTE_NO_ENCONTRADO,
                     message=(
                         "No se encontró un lote único para la dirección: hay varios "
                         "candidatos. Refina la dirección para elegir uno."
                     ),
                 )
-            lote, error = await self._resolver_lote_por_candidato(
-                candidatos[0], incluir_contexto=False
-            )
+            if error:
+                return error
+            if lote is None:
+                return construir_error(
+                    CodigoError.FUERA_DE_COBERTURA,
+                    message="El punto ({lat}, {lng}) está fuera del área de cobertura (Bogotá).",
+                    lat=lat_entrada,
+                    lng=lng_entrada,
+                )
         else:
             lote, error = await self._resolver_lote_por_punto(lng_entrada, lat_entrada)
             if error:
@@ -801,414 +781,111 @@ class ServidorLotes:
         if isinstance(r_geotecnia, BaseException):
             return _error_de_fuente(r_geotecnia)
         riesgos_geotec, trace_geotecnia, trazas_geotec, fallos_geotec = r_geotecnia
-        tiene_datos_geotec = any([
-            riesgos_geotec.amenaza_movimientos,
-            riesgos_geotec.geologia,
-            riesgos_geotec.respuesta_sismica,
-            riesgos_geotec.zonificacion_geotecnica,
-        ])
-        if fallos_geotec and not tiene_datos_geotec:
-            bloque_geotecnia = BloqueRiesgosGeotecnicos(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los datos geotécnicos.",
-                source_trace=trace_geotecnia,
-                source_traces=trazas_geotec,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque geotechnical_risks degradado: "
-                    f"{_mensaje_fallos(fallos_geotec)}."
-                ),
-            })
-        else:
-            if fallos_geotec:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque geotechnical_risks degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_geotec)}."
-                    ),
-                })
-            if tiene_datos_geotec:
-                partes_geotec = []
-                if riesgos_geotec.amenaza_movimientos:
-                    partes_geotec.append(f"amenaza: {riesgos_geotec.amenaza_movimientos}")
-                if riesgos_geotec.geologia:
-                    partes_geotec.append(f"geología: {riesgos_geotec.geologia}")
-                if riesgos_geotec.respuesta_sismica:
-                    partes_geotec.append(f"sísmica: {riesgos_geotec.respuesta_sismica}")
-                if riesgos_geotec.zonificacion_geotecnica:
-                    partes_geotec.append(
-                        f"zonificación: {riesgos_geotec.zonificacion_geotecnica}"
-                    )
-                interpretation_geotec = (
-                    f"Clasificación geotécnica del lote: {', '.join(partes_geotec)}."
-                )
-            else:
-                interpretation_geotec = (
-                    "No se encontraron datos geotécnicos para el lote en la fuente consultada."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque geotechnical_risks no encontrado: no se hallaron "
-                        "datos geotécnicos para el lote."
-                    ),
-                })
-            bloque_geotecnia = BloqueRiesgosGeotecnicos(
-                estado="disponible" if tiene_datos_geotec else "no_encontrado",
-                dato=riesgos_geotec if tiene_datos_geotec else None,
-                interpretation=interpretation_geotec,
-                source_trace=trace_geotecnia,
-                source_traces=trazas_geotec,
-            )
+        bloque_geotecnia = _construir_bloque_degradable(
+            "geotechnical_risks",
+            dato=riesgos_geotec, trace=trace_geotecnia, trazas=trazas_geotec,
+            fallos=fallos_geotec,
+            tiene_datos_fn=lambda d: any([
+                d.amenaza_movimientos, d.geologia,
+                d.respuesta_sismica, d.zonificacion_geotecnica,
+            ]),
+            interpretacion_fn=_interpretar_geotecnia,
+            bloque_class=BloqueRiesgosGeotecnicos,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los datos geotécnicos.",
+            msg_no_encontrado="no se hallaron datos geotécnicos para el lote.",
+        )
 
         # Bloque socioeconomic_context
         if isinstance(r_socio, BaseException):
             return _error_de_fuente(r_socio)
         contexto_socio, trace_socio, trazas_socio, fallos_socio = r_socio
-        tiene_datos_socio = any([
-            contexto_socio.estrato is not None,
-            contexto_socio.uso_predominante,
-            contexto_socio.altura_media is not None,
-            contexto_socio.mediana_avaluo is not None,
-        ])
-        if fallos_socio and not tiene_datos_socio:
-            bloque_socio = BloqueContextoSocioeconomico(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los datos socioeconómicos.",
-                source_trace=trace_socio,
-                source_traces=trazas_socio,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque socioeconomic_context degradado: "
-                    f"{_mensaje_fallos(fallos_socio)}."
-                ),
-            })
-        else:
-            if fallos_socio:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque socioeconomic_context degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_socio)}."
-                    ),
-                })
-            partes_socio = []
-            if contexto_socio.estrato is not None:
-                partes_socio.append(f"estrato {contexto_socio.estrato}")
-            if contexto_socio.uso_predominante:
-                partes_socio.append(f"uso: {contexto_socio.uso_predominante}")
-            if contexto_socio.altura_media is not None:
-                partes_socio.append(f"altura media: {_formatear_numero(contexto_socio.altura_media)} pisos")
-            if contexto_socio.mediana_avaluo is not None:
-                partes_socio.append(
-                    f"avalúo catastral mediano: {_formatear_numero(contexto_socio.mediana_avaluo)} COP"
-                )
-            if partes_socio:
-                interpretation_socio = (
-                    f"Contexto socioeconómico del lote: {', '.join(partes_socio)}."
-                )
-            else:
-                interpretation_socio = (
-                    "No se encontraron datos socioeconómicos para el lote en la fuente consultada."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque socioeconomic_context no encontrado: no se hallaron "
-                        "datos socioeconómicos para el lote."
-                    ),
-                })
-            bloque_socio = BloqueContextoSocioeconomico(
-                estado="disponible" if tiene_datos_socio else "no_encontrado",
-                dato=contexto_socio if tiene_datos_socio else None,
-                interpretation=interpretation_socio,
-                source_trace=trace_socio,
-                source_traces=trazas_socio,
-            )
+        bloque_socio = _construir_bloque_degradable(
+            "socioeconomic_context",
+            dato=contexto_socio, trace=trace_socio, trazas=trazas_socio,
+            fallos=fallos_socio,
+            tiene_datos_fn=lambda d: any([
+                d.estrato is not None, d.uso_predominante,
+                d.altura_media is not None, d.mediana_avaluo is not None,
+            ]),
+            interpretacion_fn=_interpretar_socio,
+            bloque_class=BloqueContextoSocioeconomico,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los datos socioeconómicos.",
+            msg_no_encontrado="no se hallaron datos socioeconómicos para el lote.",
+        )
 
         # Bloque regulatory_environment
         if isinstance(r_regulatorio, BaseException):
             return _error_de_fuente(r_regulatorio)
         entorno_reg, trace_regulatorio, trazas_regulatorio, fallos_regulatorio = r_regulatorio
-        tiene_datos_reg = any([
-            entorno_reg.licencias_encontradas is not None,
-            entorno_reg.zona_plusvalia is not None,
-        ])
-        if fallos_regulatorio and not tiene_datos_reg:
-            bloque_regulatorio = BloqueEntornoRegulatorio(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los datos regulatorios.",
-                source_trace=trace_regulatorio,
-                source_traces=trazas_regulatorio,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque regulatory_environment degradado: "
-                    f"{_mensaje_fallos(fallos_regulatorio)}."
-                ),
-            })
-        else:
-            if fallos_regulatorio:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque regulatory_environment degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_regulatorio)}."
-                    ),
-                })
-            partes_reg = []
-            if entorno_reg.licencias_encontradas is not None:
-                plural_lic = "s" if entorno_reg.licencias_encontradas != 1 else ""
-                partes_reg.append(
-                    f"{entorno_reg.licencias_encontradas} licencia{plural_lic} aprobada{plural_lic}"
-                )
-            if entorno_reg.zona_plusvalia is True:
-                detalle_plan = ""
-                if entorno_reg.nombre_plan_plusvalia:
-                    detalle_plan = f" ({entorno_reg.nombre_plan_plusvalia})"
-                partes_reg.append(f"zona de plusvalía{detalle_plan}")
-            if partes_reg:
-                interpretation_reg = (
-                    f"Entorno regulatorio del lote: {', '.join(partes_reg)}."
-                )
-            else:
-                interpretation_reg = (
-                    "No se encontraron datos regulatorios para el lote en la fuente consultada."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque regulatory_environment no encontrado: no se hallaron "
-                        "datos regulatorios para el lote."
-                    ),
-                })
-            bloque_regulatorio = BloqueEntornoRegulatorio(
-                estado="disponible" if tiene_datos_reg else "no_encontrado",
-                dato=entorno_reg if tiene_datos_reg else None,
-                interpretation=interpretation_reg,
-                source_trace=trace_regulatorio,
-                source_traces=trazas_regulatorio,
-            )
+        bloque_regulatorio = _construir_bloque_degradable(
+            "regulatory_environment",
+            dato=entorno_reg, trace=trace_regulatorio, trazas=trazas_regulatorio,
+            fallos=fallos_regulatorio,
+            tiene_datos_fn=lambda d: any([
+                d.licencias_encontradas is not None, d.zona_plusvalia is not None,
+            ]),
+            interpretacion_fn=_interpretar_regulatorio,
+            bloque_class=BloqueEntornoRegulatorio,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los datos regulatorios.",
+            msg_no_encontrado="no se hallaron datos regulatorios para el lote.",
+        )
 
         # Bloque cultural_heritage
         if isinstance(r_patrimonio, BaseException):
             return _error_de_fuente(r_patrimonio)
         patrimonio, trace_patrimonio, trazas_patrimonio, fallos_patrimonio = r_patrimonio
-        tiene_datos_pat = any([
-            patrimonio.bic_cercano is not None,
-            patrimonio.zona_arqueologica is not None,
-        ])
-        if fallos_patrimonio and not tiene_datos_pat:
-            bloque_patrimonio = BloquePatrimonioCultural(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los datos de patrimonio cultural.",
-                source_trace=trace_patrimonio,
-                source_traces=trazas_patrimonio,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque cultural_heritage degradado: "
-                    f"{_mensaje_fallos(fallos_patrimonio)}."
-                ),
-            })
-        else:
-            if fallos_patrimonio:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque cultural_heritage degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_patrimonio)}."
-                    ),
-                })
-            partes_pat = []
-            if patrimonio.bic_cercano is True:
-                detalle_bic = ""
-                if patrimonio.nombre_bic:
-                    detalle_bic = f" ({patrimonio.nombre_bic})"
-                partes_pat.append(f"BIC cercano{detalle_bic}")
-            if patrimonio.zona_arqueologica is True:
-                partes_pat.append("zona arqueológica")
-            if partes_pat:
-                interpretation_pat = (
-                    f"Patrimonio cultural del lote: {', '.join(partes_pat)}."
-                )
-            else:
-                interpretation_pat = (
-                    "No se encontraron elementos de patrimonio cultural para el lote "
-                    "en la fuente consultada."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque cultural_heritage no encontrado: no se hallaron "
-                        "elementos de patrimonio cultural para el lote."
-                    ),
-                })
-            bloque_patrimonio = BloquePatrimonioCultural(
-                estado="disponible" if tiene_datos_pat else "no_encontrado",
-                dato=patrimonio if tiene_datos_pat else None,
-                interpretation=interpretation_pat,
-                source_trace=trace_patrimonio,
-                source_traces=trazas_patrimonio,
-            )
+        bloque_patrimonio = _construir_bloque_degradable(
+            "cultural_heritage",
+            dato=patrimonio, trace=trace_patrimonio, trazas=trazas_patrimonio,
+            fallos=fallos_patrimonio,
+            tiene_datos_fn=lambda d: any([
+                d.bic_cercano is not None, d.zona_arqueologica is not None,
+            ]),
+            interpretacion_fn=_interpretar_patrimonio,
+            bloque_class=BloquePatrimonioCultural,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los datos de patrimonio cultural.",
+            msg_no_encontrado="no se hallaron elementos de patrimonio cultural para el lote.",
+        )
 
         # Bloque transit_access
         if isinstance(r_movilidad, BaseException):
             return _error_de_fuente(r_movilidad)
         movilidad, trace_movilidad, trazas_movilidad, fallos_movilidad = r_movilidad
-        tiene_datos_mov = any([
-            movilidad.estaciones_transmilenio is not None,
-            movilidad.paraderos_sitp is not None,
-            movilidad.estaciones_metro is not None,
-        ])
-        if fallos_movilidad and not tiene_datos_mov:
-            bloque_movilidad = BloqueAccesoMovilidad(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los datos de transporte público.",
-                source_trace=trace_movilidad,
-                source_traces=trazas_movilidad,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque transit_access degradado: "
-                    f"{_mensaje_fallos(fallos_movilidad)}."
-                ),
-            })
-        else:
-            if fallos_movilidad:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque transit_access degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_movilidad)}."
-                    ),
-                })
-            partes_mov = []
-            if movilidad.estaciones_transmilenio is not None:
-                plural_tm = "s" if movilidad.estaciones_transmilenio != 1 else ""
-                partes_mov.append(
-                    f"{movilidad.estaciones_transmilenio} estación{plural_tm} TransMilenio"
-                )
-            if movilidad.paraderos_sitp is not None:
-                plural_sitp = "s" if movilidad.paraderos_sitp != 1 else ""
-                partes_mov.append(
-                    f"{movilidad.paraderos_sitp} paradero{plural_sitp} SITP"
-                )
-            if movilidad.estaciones_metro is not None:
-                plural_metro = "s" if movilidad.estaciones_metro != 1 else ""
-                partes_mov.append(
-                    f"{movilidad.estaciones_metro} estación{plural_metro} Metro"
-                )
-            if movilidad.estacion_cercana:
-                partes_mov.append(f"estación más cercana: {movilidad.estacion_cercana}")
-            if partes_mov:
-                interpretation_mov = (
-                    f"Acceso a transporte público del lote: {', '.join(partes_mov)}."
-                )
-            else:
-                interpretation_mov = (
-                    "No se encontraron estaciones de transporte público cercanas al lote "
-                    "en la fuente consultada."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque transit_access no encontrado: no se identificaron "
-                        "estaciones de transporte público cercanas al lote."
-                    ),
-                })
-            bloque_movilidad = BloqueAccesoMovilidad(
-                estado="disponible" if tiene_datos_mov else "no_encontrado",
-                dato=movilidad if tiene_datos_mov else None,
-                interpretation=interpretation_mov,
-                source_trace=trace_movilidad,
-                source_traces=trazas_movilidad,
-            )
+        bloque_movilidad = _construir_bloque_degradable(
+            "transit_access",
+            dato=movilidad, trace=trace_movilidad, trazas=trazas_movilidad,
+            fallos=fallos_movilidad,
+            tiene_datos_fn=lambda d: any([
+                d.estaciones_transmilenio is not None,
+                d.paraderos_sitp is not None,
+                d.estaciones_metro is not None,
+            ]),
+            interpretacion_fn=_interpretar_movilidad,
+            bloque_class=BloqueAccesoMovilidad,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los datos de transporte público.",
+            msg_no_encontrado="no se identificaron estaciones de transporte público cercanas al lote.",
+        )
 
         # Bloque catastro_data
         if isinstance(r_catastro, BaseException):
             return _error_de_fuente(r_catastro)
         contexto_catastro, trace_catastro, trazas_catastro_f3, fallos_catastro_f3 = r_catastro
-        tiene_datos_catastro = any([
-            contexto_catastro.construccion is not None,
-            contexto_catastro.manzana is not None,
-            contexto_catastro.densidad_predial is not None,
-            contexto_catastro.variacion_area is not None,
-            contexto_catastro.sector_catastral is not None,
-        ])
-        if fallos_catastro_f3 and not tiene_datos_catastro:
-            bloque_catastro = BloqueCatastroData(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los datos catastrales adicionales.",
-                source_trace=trace_catastro,
-                source_traces=trazas_catastro_f3,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque catastro_data degradado: "
-                    f"{_mensaje_fallos(fallos_catastro_f3)}."
-                ),
-            })
-        else:
-            if fallos_catastro_f3:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque catastro_data degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_catastro_f3)}."
-                    ),
-                })
-            partes_catastro = []
-            if contexto_catastro.sector_catastral:
-                partes_catastro.append(f"sector: {contexto_catastro.sector_catastral}")
-            if contexto_catastro.manzana:
-                codigo_mz = contexto_catastro.manzana.get("codigo_manzana")
-                if codigo_mz:
-                    partes_catastro.append(f"manzana: {codigo_mz}")
-            if contexto_catastro.densidad_predial:
-                num_predios = contexto_catastro.densidad_predial.get("num_predios")
-                if num_predios is not None:
-                    partes_catastro.append(f"predios en manzana: {int(num_predios)}")
-            if contexto_catastro.construccion:
-                pisos = contexto_catastro.construccion.get("pisos")
-                if pisos is not None:
-                    partes_catastro.append(f"pisos: {int(pisos)}")
-            if contexto_catastro.variacion_area:
-                periodo = contexto_catastro.variacion_area.get("periodo")
-                if periodo:
-                    partes_catastro.append(f"variación: {periodo}")
-            if partes_catastro:
-                interpretation_catastro = (
-                    f"Datos catastrales del lote: {', '.join(partes_catastro)}."
-                )
-            else:
-                interpretation_catastro = (
-                    "No se encontraron datos catastrales adicionales para el lote "
-                    "en la fuente consultada."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque catastro_data no encontrado: no se hallaron "
-                        "datos catastrales adicionales para el lote."
-                    ),
-                })
-            bloque_catastro = BloqueCatastroData(
-                estado="disponible" if tiene_datos_catastro else "no_encontrado",
-                dato=contexto_catastro if tiene_datos_catastro else None,
-                interpretation=interpretation_catastro,
-                source_trace=trace_catastro,
-                source_traces=trazas_catastro_f3,
-            )
+        bloque_catastro = _construir_bloque_degradable(
+            "catastro_data",
+            dato=contexto_catastro, trace=trace_catastro, trazas=trazas_catastro_f3,
+            fallos=fallos_catastro_f3,
+            tiene_datos_fn=_tiene_datos_catastro,
+            interpretacion_fn=_interpretar_catastro,
+            bloque_class=BloqueCatastroData,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los datos catastrales adicionales.",
+            msg_no_encontrado="no se hallaron datos catastrales adicionales para el lote.",
+        )
 
         # --- Bloques Fase 3: espacio publico, malla vial y equipamientos ---
         # Mismo patron de degradacion independiente que los bloques F6/F7:
@@ -1220,109 +897,35 @@ class ServidorLotes:
         if isinstance(r_espacio_publico, BaseException):
             return _error_de_fuente(r_espacio_publico)
         espacio_publico, trace_espacio, _, fallos_espacio = r_espacio_publico
-        tiene_datos_espacio = espacio_publico.ep_total_m2_hab is not None
-        if fallos_espacio and not tiene_datos_espacio:
-            bloque_espacio = BloqueEspacioPublico(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los datos de espacio público.",
-                source_trace=trace_espacio,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque public_space_context degradado: "
-                    f"{_mensaje_fallos(fallos_espacio)}."
-                ),
-            })
-        else:
-            if fallos_espacio:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque public_space_context degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_espacio)}."
-                    ),
-                })
-            if tiene_datos_espacio:
-                ept_texto = _formatear_numero(espacio_publico.ep_total_m2_hab or 0.0)
-                upl_ep_texto = espacio_publico.nombre_upl or espacio_publico.codigo_upl or "la UPL"
-                interpretation_espacio = (
-                    f"Espacio público total efectivo de {upl_ep_texto}: "
-                    f"{ept_texto} m²/habitante."
-                )
-            else:
-                interpretation_espacio = (
-                    "No se encontró un indicador de espacio público para la UPL del lote "
-                    "en la fuente consultada."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque public_space_context no encontrado: no se halló "
-                        "indicador de espacio público para la UPL del lote."
-                    ),
-                })
-            bloque_espacio = BloqueEspacioPublico(
-                estado="disponible" if tiene_datos_espacio else "no_encontrado",
-                dato=espacio_publico if tiene_datos_espacio else None,
-                interpretation=interpretation_espacio,
-                source_trace=trace_espacio,
-            )
+        bloque_espacio = _construir_bloque_degradable(
+            "public_space_context",
+            dato=espacio_publico, trace=trace_espacio, trazas=None,
+            fallos=fallos_espacio,
+            tiene_datos_fn=lambda d: d.ep_total_m2_hab is not None,
+            interpretacion_fn=_interpretar_espacio_publico,
+            bloque_class=BloqueEspacioPublico,
+            tiene_source_traces=False,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los datos de espacio público.",
+            msg_no_encontrado="no se halló indicador de espacio público para la UPL del lote.",
+        )
 
         # Bloque road_network_context (monofuente: Mapa_Referencia layer 13)
         if isinstance(r_red_vial, BaseException):
             return _error_de_fuente(r_red_vial)
         red_vial, trace_vial, _, fallos_vial = r_red_vial
-        tiene_datos_vial = bool(red_vial.vias_frente)
-        if fallos_vial and not tiene_datos_vial:
-            bloque_vial = BloqueRedVial(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los datos de la malla vial.",
-                source_trace=trace_vial,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque road_network_context degradado: "
-                    f"{_mensaje_fallos(fallos_vial)}."
-                ),
-            })
-        else:
-            if fallos_vial:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque road_network_context degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_vial)}."
-                    ),
-                })
-            if tiene_datos_vial:
-                primera_via = red_vial.vias_frente[0]
-                detalle_via = primera_via.nombre_via or primera_via.tipo_via or "vía sin nombre"
-                jerarquia_texto = red_vial.jerarquia_maxima or "desconocida"
-                interpretation_vial = (
-                    f"Frente vial del lote: {len(red_vial.vias_frente)} vía(s) en el "
-                    f"entorno inmediato; la principal es {detalle_via} con jerarquía "
-                    f"derivada {jerarquia_texto}."
-                )
-            else:
-                interpretation_vial = (
-                    "No se encontraron ejes viales en el entorno inmediato del lote "
-                    "en la fuente consultada."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque road_network_context no encontrado: no se hallaron "
-                        "ejes viales en el radio consultado."
-                    ),
-                })
-            bloque_vial = BloqueRedVial(
-                estado="disponible" if tiene_datos_vial else "no_encontrado",
-                dato=red_vial if tiene_datos_vial else None,
-                interpretation=interpretation_vial,
-                source_trace=trace_vial,
-            )
+        bloque_vial = _construir_bloque_degradable(
+            "road_network_context",
+            dato=red_vial, trace=trace_vial, trazas=None,
+            fallos=fallos_vial,
+            tiene_datos_fn=lambda d: bool(d.vias_frente),
+            interpretacion_fn=_interpretar_red_vial,
+            bloque_class=BloqueRedVial,
+            tiene_source_traces=False,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los datos de la malla vial.",
+            msg_no_encontrado="no se hallaron ejes viales en el radio consultado.",
+        )
 
         # Bloque nearby_facilities (multifuente: 5 capas de equipamientos)
         if isinstance(r_equipamientos, BaseException):
@@ -1330,74 +933,17 @@ class ServidorLotes:
         equipamientos, trace_facilidades, trazas_facilidades, fallos_facilidades = (
             r_equipamientos
         )
-        tiene_datos_facilidades = bool(equipamientos.equipamientos)
-        if fallos_facilidades and not tiene_datos_facilidades:
-            bloque_facilidades = BloqueEquipamientosCercanos(
-                estado="no_encontrado",
-                interpretation="No se pudieron consultar los equipamientos cercanos.",
-                source_trace=trace_facilidades,
-                source_traces=trazas_facilidades,
-            )
-            warnings.append({
-                "codigo": "BLOQUE_DEGRADADO",
-                "mensaje": (
-                    f"Bloque nearby_facilities degradado: "
-                    f"{_mensaje_fallos(fallos_facilidades)}."
-                ),
-            })
-        else:
-            if fallos_facilidades:
-                warnings.append({
-                    "codigo": "BLOQUE_DEGRADADO",
-                    "mensaje": (
-                        f"Bloque nearby_facilities degradado parcialmente: "
-                        f"{_mensaje_fallos(fallos_facilidades)}."
-                    ),
-                })
-            if tiene_datos_facilidades:
-                partes_fac = []
-                for tipo, total in (
-                    ("salud", equipamientos.total_salud),
-                    ("educación", equipamientos.total_educacion),
-                    ("cultura", equipamientos.total_cultura),
-                ):
-                    if total is not None:
-                        plural_tipo = "s" if total != 1 else ""
-                        partes_fac.append(f"{total} de {tipo}{plural_tipo}")
-                detalle_cercano = ""
-                if equipamientos.mas_cercano is not None and equipamientos.mas_cercano.nombre:
-                    distancia_texto = (
-                        f" ({int(equipamientos.mas_cercano.distancia_m)} m)"
-                        if equipamientos.mas_cercano.distancia_m is not None
-                        else ""
-                    )
-                    detalle_cercano = (
-                        f"; el más cercano: {equipamientos.mas_cercano.nombre}"
-                        f"{distancia_texto}"
-                    )
-                interpretation_facilidades = (
-                    f"Equipamientos cercanos al lote: {', '.join(partes_fac)}"
-                    f"{detalle_cercano}."
-                )
-            else:
-                interpretation_facilidades = (
-                    "No se encontraron equipamientos de salud, educación o cultura "
-                    "en los radios consultados."
-                )
-                warnings.append({
-                    "codigo": "BLOQUE_SIN_DATO",
-                    "mensaje": (
-                        "Bloque nearby_facilities no encontrado: no se hallaron "
-                        "equipamientos cercanos al lote."
-                    ),
-                })
-            bloque_facilidades = BloqueEquipamientosCercanos(
-                estado="disponible" if tiene_datos_facilidades else "no_encontrado",
-                dato=equipamientos if tiene_datos_facilidades else None,
-                interpretation=interpretation_facilidades,
-                source_trace=trace_facilidades,
-                source_traces=trazas_facilidades,
-            )
+        bloque_facilidades = _construir_bloque_degradable(
+            "nearby_facilities",
+            dato=equipamientos, trace=trace_facilidades, trazas=trazas_facilidades,
+            fallos=fallos_facilidades,
+            tiene_datos_fn=lambda d: bool(d.equipamientos),
+            interpretacion_fn=_interpretar_equipamientos,
+            bloque_class=BloqueEquipamientosCercanos,
+            warnings=warnings,
+            msg_degradado="No se pudieron consultar los equipamientos cercanos.",
+            msg_no_encontrado="no se hallaron equipamientos cercanos al lote.",
+        )
 
         # --- Cuarta ronda: parámetros urbanísticos (F8, degradación independiente) ---
         # Consulta SDP (tratamiento espacial) + RAG (parámetros numéricos).
@@ -1702,6 +1248,32 @@ class ServidorLotes:
             return _error_de_fuente(exc)
         return _respuesta_upl(upl, metodo="punto_directo")
 
+    async def _resolver_por_direccion(
+        self, direccion: str, *, incluir_contexto: bool = True
+    ) -> tuple[Lote | None, dict | None]:
+        """Resuelve un lote por dirección geocodificada.
+
+        Returns (lote, error_dict). error_dict is None on success.
+        When multiple candidates exist, returns (None, multiples_dict) with the
+        candidates response from _respuesta_multiples_candidatos.
+        """
+        if not self._mapas.tiene_api_key():
+            return None, construir_error(CodigoError.CREDENCIAL_FALTANTE)
+        try:
+            candidatos = await self._mapas.geocodificar(direccion.strip())
+        except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError, CredencialFaltanteError) as exc:
+            if isinstance(exc, CredencialFaltanteError):
+                return None, construir_error(CodigoError.CREDENCIAL_FALTANTE)
+            return None, _error_de_fuente(exc)
+        if not candidatos:
+            return None, construir_error(CodigoError.DIRECCION_NO_LOCALIZADA)
+        if len(candidatos) > 1:
+            return None, self._respuesta_multiples_candidatos(candidatos)
+        lote, error = await self._resolver_lote_por_candidato(
+            candidatos[0], incluir_contexto=incluir_contexto
+        )
+        return lote, error
+
     def _respuesta_multiples_candidatos(
         self, candidatos: list[CandidatoDireccion]
     ) -> dict[str, Any]:
@@ -1833,8 +1405,7 @@ def _validar_direccion(direccion: Any) -> dict | None:
 
 
 def _validar_coordenadas(latitude: Any, longitude: Any) -> dict | None:
-    es_numero = lambda valor: isinstance(valor, (int, float)) and not isinstance(valor, bool)
-    if not es_numero(latitude) or not es_numero(longitude):
+    if not _es_numero(latitude) or not _es_numero(longitude):
         return construir_error(
             CodigoError.PARAMETROS_INVALIDOS,
             message="Parámetros inválidos: latitud y longitud deben ser numéricos.",
@@ -1891,6 +1462,300 @@ def _mensaje_fallos(fallos: list[FalloCapa]) -> str:
     return "; ".join(
         f"error al consultar la capa {fallo.source_name} ({fallo.detalle})"
         for fallo in fallos
+    )
+
+
+# --- Helper de construccion de bloques con patron de degradacion (FR-012) ---
+# Patrin comun de los bloques F6/F7/Fase3: este helper elimina la duplicacion
+# estructural (isinstance, unpack, tiene_datos, warnings, bloque construction)
+# y deja la logica especifica de cada bloque en lambdas/funciones pequenas.
+
+
+def _construir_bloque_degradable(
+    nombre: str,
+    *,
+    dato: Any,
+    trace: Any,
+    trazas: list | None,
+    fallos: list | None,
+    tiene_datos_fn: Callable[[Any], bool],
+    interpretacion_fn: Callable[[Any, bool], str],
+    bloque_class: type,
+    tiene_source_traces: bool = True,
+    warnings: list[dict[str, str]],
+    msg_degradado: str | None = None,
+    msg_no_encontrado: str | None = None,
+) -> Any:
+    """Construye un bloque con patron de degradacion independiente (FR-012).
+
+    Patron comun de los bloques F6/F7/Fase3:
+    - fallos + sin datos -> no_encontrado + BLOQUE_DEGRADADO
+    - fallos + con datos -> disponible + BLOQUE_DEGRADADO parcial
+    - sin fallos + sin datos -> no_encontrado + BLOQUE_SIN_DATO
+    - sin fallos + con datos -> disponible
+
+    El caller debe manejar separadamente el caso isinstance(result, BaseException)
+    para poder hacer ``return _error_de_fuente(result)`` (fail loud).
+
+    Args:
+        nombre: Nombre del bloque (e.g. "geotechnical_risks")
+        dato: Dato desempaquetado de la tupla del provider
+        trace: SourceTrace principal del bloque
+        trazas: Lista de source_traces (None si el bloque no las soporta)
+        fallos: Lista de FalloCapa (None o vacia = sin fallos)
+        tiene_datos_fn: Callable(dato) -> bool; evalua si hay datos reales
+        interpretacion_fn: Callable((dato, tiene_datos)) -> str; genera texto
+        bloque_class: Clase Pydantic del bloque
+        tiene_source_traces: Si el bloque soporta source_traces (True por defecto)
+        warnings: Lista de warnings a la que se anexan los generados
+        msg_degradado: Interpretacion cuando fallos + sin datos (override)
+        msg_no_encontrado: Detalle del BLOQUE_SIN_DATO (override)
+    """
+    tiene_datos = tiene_datos_fn(dato)
+    tiene_fallos = bool(fallos)
+
+    if tiene_fallos and not tiene_datos:
+        warnings.append({
+            "codigo": "BLOQUE_DEGRADADO",
+            "mensaje": f"Bloque {nombre} degradado: {_mensaje_fallos(fallos)}.",
+        })
+        kwargs: dict[str, Any] = dict(
+            estado="no_encontrado",
+            interpretation=msg_degradado or f"No se pudieron consultar los datos de {nombre}.",
+            source_trace=trace,
+        )
+        if tiene_source_traces and trazas is not None:
+            kwargs["source_traces"] = trazas
+        return bloque_class(**kwargs)
+
+    if tiene_fallos:
+        warnings.append({
+            "codigo": "BLOQUE_DEGRADADO",
+            "mensaje": f"Bloque {nombre} degradado parcialmente: {_mensaje_fallos(fallos)}.",
+        })
+
+    interpretacion = interpretacion_fn(dato, tiene_datos)
+
+    if not tiene_datos and not tiene_fallos:
+        detalle = msg_no_encontrado or f"no se hallaron datos de {nombre} para el lote."
+        warnings.append({
+            "codigo": "BLOQUE_SIN_DATO",
+            "mensaje": f"Bloque {nombre} no encontrado: {detalle}",
+        })
+
+    kwargs = dict(
+        estado="disponible" if tiene_datos else "no_encontrado",
+        dato=dato if tiene_datos else None,
+        interpretation=interpretacion,
+        source_trace=trace,
+    )
+    if tiene_source_traces and trazas is not None:
+        kwargs["source_traces"] = trazas
+    return bloque_class(**kwargs)
+
+
+# --- Funciones de interpretacion por bloque (usadas por _construir_bloque_degradable) ---
+
+
+def _interpretar_geotecnia(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return "No se encontraron datos geotécnicos para el lote en la fuente consultada."
+    partes = []
+    if dato.amenaza_movimientos:
+        partes.append(f"amenaza: {dato.amenaza_movimientos}")
+    if dato.geologia:
+        partes.append(f"geología: {dato.geologia}")
+    if dato.respuesta_sismica:
+        partes.append(f"sísmica: {dato.respuesta_sismica}")
+    if dato.zonificacion_geotecnica:
+        partes.append(f"zonificación: {dato.zonificacion_geotecnica}")
+    return f"Clasificación geotécnica del lote: {', '.join(partes)}."
+
+
+def _interpretar_socio(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return "No se encontraron datos socioeconómicos para el lote en la fuente consultada."
+    partes = []
+    if dato.estrato is not None:
+        partes.append(f"estrato {dato.estrato}")
+    if dato.uso_predominante:
+        partes.append(f"uso: {dato.uso_predominante}")
+    if dato.altura_media is not None:
+        partes.append(f"altura media: {_formatear_numero(dato.altura_media)} pisos")
+    if dato.mediana_avaluo is not None:
+        partes.append(
+            f"avalúo catastral mediano: {_formatear_numero(dato.mediana_avaluo)} COP"
+        )
+    if partes:
+        return f"Contexto socioeconómico del lote: {', '.join(partes)}."
+    return "No se encontraron datos socioeconómicos para el lote en la fuente consultada."
+
+
+def _interpretar_regulatorio(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return "No se encontraron datos regulatorios para el lote en la fuente consultada."
+    partes = []
+    if dato.licencias_encontradas is not None:
+        plural_lic = "s" if dato.licencias_encontradas != 1 else ""
+        partes.append(
+            f"{dato.licencias_encontradas} licencia{plural_lic} aprobada{plural_lic}"
+        )
+    if dato.zona_plusvalia is True:
+        detalle_plan = ""
+        if dato.nombre_plan_plusvalia:
+            detalle_plan = f" ({dato.nombre_plan_plusvalia})"
+        partes.append(f"zona de plusvalía{detalle_plan}")
+    if partes:
+        return f"Entorno regulatorio del lote: {', '.join(partes)}."
+    return "No se encontraron datos regulatorios para el lote en la fuente consultada."
+
+
+def _interpretar_patrimonio(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return (
+            "No se encontraron elementos de patrimonio cultural para el lote "
+            "en la fuente consultada."
+        )
+    partes = []
+    if dato.bic_cercano is True:
+        detalle_bic = ""
+        if dato.nombre_bic:
+            detalle_bic = f" ({dato.nombre_bic})"
+        partes.append(f"BIC cercano{detalle_bic}")
+    if dato.zona_arqueologica is True:
+        partes.append("zona arqueológica")
+    if partes:
+        return f"Patrimonio cultural del lote: {', '.join(partes)}."
+    return (
+        "No se encontraron elementos de patrimonio cultural para el lote "
+        "en la fuente consultada."
+    )
+
+
+def _interpretar_movilidad(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return (
+            "No se encontraron estaciones de transporte público cercanas al lote "
+            "en la fuente consultada."
+        )
+    partes = []
+    if dato.estaciones_transmilenio is not None:
+        plural_tm = "s" if dato.estaciones_transmilenio != 1 else ""
+        partes.append(
+            f"{dato.estaciones_transmilenio} estación{plural_tm} TransMilenio"
+        )
+    if dato.paraderos_sitp is not None:
+        plural_sitp = "s" if dato.paraderos_sitp != 1 else ""
+        partes.append(
+            f"{dato.paraderos_sitp} paradero{plural_sitp} SITP"
+        )
+    if dato.estaciones_metro is not None:
+        plural_metro = "s" if dato.estaciones_metro != 1 else ""
+        partes.append(
+            f"{dato.estaciones_metro} estación{plural_metro} Metro"
+        )
+    if dato.estacion_cercana:
+        partes.append(f"estación más cercana: {dato.estacion_cercana}")
+    if partes:
+        return f"Acceso a transporte público del lote: {', '.join(partes)}."
+    return (
+        "No se encontraron estaciones de transporte público cercanas al lote "
+        "en la fuente consultada."
+    )
+
+
+def _interpretar_catastro(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return (
+            "No se encontraron datos catastrales adicionales para el lote "
+            "en la fuente consultada."
+        )
+    partes = []
+    if dato.sector_catastral:
+        partes.append(f"sector: {dato.sector_catastral}")
+    if dato.manzana:
+        codigo_mz = dato.manzana.get("codigo_manzana")
+        if codigo_mz:
+            partes.append(f"manzana: {codigo_mz}")
+    if dato.densidad_predial:
+        num_predios = dato.densidad_predial.get("num_predios")
+        if num_predios is not None:
+            partes.append(f"predios en manzana: {int(num_predios)}")
+    if dato.construccion:
+        pisos = dato.construccion.get("pisos")
+        if pisos is not None:
+            partes.append(f"pisos: {int(pisos)}")
+    if dato.variacion_area:
+        periodo = dato.variacion_area.get("periodo")
+        if periodo:
+            partes.append(f"variación: {periodo}")
+    if partes:
+        return f"Datos catastrales del lote: {', '.join(partes)}."
+    return (
+        "No se encontraron datos catastrales adicionales para el lote "
+        "en la fuente consultada."
+    )
+
+
+def _interpretar_espacio_publico(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return (
+            "No se encontró un indicador de espacio público para la UPL del lote "
+            "en la fuente consultada."
+        )
+    ept_texto = _formatear_numero(dato.ep_total_m2_hab or 0.0)
+    upl_ep_texto = dato.nombre_upl or dato.codigo_upl or "la UPL"
+    return (
+        f"Espacio público total efectivo de {upl_ep_texto}: "
+        f"{ept_texto} m²/habitante."
+    )
+
+
+def _interpretar_red_vial(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return (
+            "No se encontraron ejes viales en el entorno inmediato del lote "
+            "en la fuente consultada."
+        )
+    primera_via = dato.vias_frente[0]
+    detalle_via = primera_via.nombre_via or primera_via.tipo_via or "vía sin nombre"
+    jerarquia_texto = dato.jerarquia_maxima or "desconocida"
+    return (
+        f"Frente vial del lote: {len(dato.vias_frente)} vía(s) en el "
+        f"entorno inmediato; la principal es {detalle_via} con jerarquía "
+        f"derivada {jerarquia_texto}."
+    )
+
+
+def _interpretar_equipamientos(dato: Any, tiene_datos: bool) -> str:
+    if not tiene_datos:
+        return (
+            "No se encontraron equipamientos de salud, educación o cultura "
+            "en los radios consultados."
+        )
+    partes = []
+    for tipo, total in (
+        ("salud", dato.total_salud),
+        ("educación", dato.total_educacion),
+        ("cultura", dato.total_cultura),
+    ):
+        if total is not None:
+            plural_tipo = "s" if total != 1 else ""
+            partes.append(f"{total} de {tipo}{plural_tipo}")
+    detalle_cercano = ""
+    if dato.mas_cercano is not None and dato.mas_cercano.nombre:
+        distancia_texto = (
+            f" ({int(dato.mas_cercano.distancia_m)} m)"
+            if dato.mas_cercano.distancia_m is not None
+            else ""
+        )
+        detalle_cercano = (
+            f"; el más cercano: {dato.mas_cercano.nombre}"
+            f"{distancia_texto}"
+        )
+    return (
+        f"Equipamientos cercanos al lote: {', '.join(partes)}"
+        f"{detalle_cercano}."
     )
 
 
