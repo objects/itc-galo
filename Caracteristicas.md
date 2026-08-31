@@ -18,8 +18,7 @@ normativa** del POT (RAG local sobre el Decreto 555 de 2021).
 - **100 % determinista sin LLM** en la resolución de lote, el contexto temático y el
   `feasibility_score` (`app/scoring.py`, función pura). El LLM se usa **solo** en el RAG
   normativo opcional (`consultar_normativa` y la evidencia de `get_feasibility_report`).
-- Suite: **332 tests passing, 0 failed** (suite completa: smoke 6 + contract; sin red
-  real ni Ollama).
+- Suite: **419 tests passing (smoke 6 + contract 413), 0 failed** (sin red real ni Ollama).
 
 Las 7 tools:
 
@@ -333,6 +332,34 @@ lugar de fallar (ver sección 7).
   ```
 
 - **Contrato**: `specs/003-informe-factibilidad/contracts/get-feasibility-report.md`.
+
+## 4.8 Interfaz Web de Prefactibilidad (Feature 5)
+
+La interfaz web de prefactibilidad es una aplicación **FastAPI + Jinja2 + HTMX 2.0.4** que
+expone las 7 tools MCP a través de una UI interactiva, sin protocolo MCP. Construye su propio
+`ServidorLotes` con providers reales en el lifespan de FastAPI.
+
+- **Stack**: FastAPI (servidor), Jinja2 (templates), HTMX 2.0.4 (vendorizado, interactividad
+  sin JavaScript propio), SQLite (`ProyectoRepositorio` en `app/web/db.py`).
+- **Identidad visual "Bogotá Reverdece"**: 5 Pillars de diseño, fuente Fraunces (vendorizada),
+  anillo de score SVG.
+- **Rutas principales**:
+
+  | Ruta | Método | Propósito |
+  |------|--------|-----------|
+  | `/` | GET | Landing page (formulario de nuevo proyecto). |
+  | `/proyectos` | POST | Crear proyecto + ejecutar informe (303 PRG → detalle). |
+  | `/proyectos/{id}` | GET | Detalle del proyecto con informe completo. |
+  | `/proyectos/{id}/reevaluar` | POST | Re-ejecutar informe con los mismos parámetros. |
+  | `/proyectos/{id}/json` | GET | Exportar informe como JSON. |
+
+- **Mapeo errores taxonomía → HTTP**: `PARAMETROS_INVALIDOS`→400,
+  `LOTE_NO_ENCONTRADO`/`FUERA_DE_COBERTURA`/`DIRECCION_NO_LOCALIZADA`→404,
+  `CREDENCIAL_FALTANTE`→503, `FUENTE_5XX`→502, resto→500.
+- **NO añade tools MCP**: la web usa las 7 tools existentes internamente (construye
+  `ServidorLotes` directamente, sin transporte MCP).
+- **Ejecución**: `python -m app.web.main` (o entrada de consola `web-mcp-bogota-factibilidad`).
+  Variables de entorno: `WEB_HOST`, `WEB_PORT`, `PROYECTOS_DB_PATH` (ver `.env.example`).
 
 ## 5. Pipeline de ingesta normativa
 

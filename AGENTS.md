@@ -38,11 +38,10 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
   fallback downranked cuando los vigentes no llenan `top_k`, y jerarquía 555 > acto modificatorio en
   empates de score (desempates: fecha_vigencia más reciente, luego id). Tests:
   `tests/contract/test_rag_hibrido_vigencia.py`.
-- **Repositorio en `master`; HEAD `670cac4` (Fase 4: RAG híbrido) + commits de Fase 5 (re-indexado
-  v3, caché por lote e higiene).**
-  La aplicación está implementada y probada: F1, F2,
-  F3, F4, F6, F7 y F8 completas, **419 tests passing (suite completa: smoke + contract), 0 failed**,
-  gate PASS, con las **7 tools** registradas (F4, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
+- **Repositorio en `master`; HEAD `23f3015` (Fase 5: caché por lote con TTL e higiene general).**
+  La aplicación está implementada y probada: F1, F2, F3, F4, F5, F6, F7, F8 y Fase 3 completas,
+  **419 tests passing (smoke 6 + contract 413), 0 failed**, gate PASS, con las **7 tools**
+  registradas (F4, F5, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
 - **Filtro territorial FR-002 funcional + enriquecimiento UPL del corpus** (post-F8): la metadata
@@ -102,7 +101,25 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
     (corpus real del Decreto 122, SC-001) y `7c55f82` (fixes SC-001). La implementación T001–T026
     está completa y commiteada; **SC-001 verificado** con la ingesta real del Decreto 122 de 2023
     (13 artículos, `estado_documento: "derogado"`, `indexado: true`, archivos 0644 y RAG con
-    precedencia temporal del acto sobre el 555).
+     precedencia temporal del acto sobre el 555).
+- **F5 — `specs/005-interfaz-web-prefactibilidad/`**: COMPLETA e implementada (feature activa,
+  `.specify/feature.json` → `specs/005-interfaz-web-prefactibilidad`). spec.md, plan.md, research.md,
+  data-model.md, contracts/, quickstart.md y checklists/ (requirements.md 20/20). tasks.md con
+  40 tareas T001–T040 (8 fases) **TODAS marcadas `[x]`**.
+  - Implementa la interfaz web de prefactibilidad: FastAPI + Jinja2 + HTMX 2.0.4 (vendorizado),
+    SQLite (`ProyectoRepositorio` en `app/web/db.py`), identidad visual "Bogotá Reverdece"
+    (5 Pillars, fuente Fraunces vendorizada, anillo de score SVG).
+  - Rutas: `GET /` (landing), `POST /proyectos` (303 PRG), `GET /proyectos/{id}` (detalle),
+    `POST /proyectos/{id}/reevaluar` (re-ejecutar informe), `GET /proyectos/{id}/json` (export JSON).
+  - Mapeo errores taxonomía → HTTP: `PARAMETROS_INVALIDOS`→400, `LOTE_NO_ENCONTRADO`/`FUERA_DE_COBERTURA`/`DIRECCION_NO_LOCALIZADA`→404,
+    `CREDENCIAL_FALTANTE`→503, `FUENTE_5XX`→502, resto→500.
+  - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools). La web NO comparte estado con el
+    servidor MCP (construye su propio `ServidorLotes` con providers reales en lifespan).
+  - Commits: implementación completa + specs.
+
+  **NOTA DE NAMING**: "Feature 5" (F5, specs/005) = interfaz web de prefactibilidad. "Fase 5"
+  (sin spec, implementación directa post-F8) = caché LRU+TTL por CHIP + higiene de utilidades.
+  Son cosas distintas.
 - **F6 — `specs/006-enriquecimiento-fuentes-arcgis/`**: COMPLETA e implementada (feature activa,
   `.specify/feature.json` → `specs/006-enriquecimiento-fuentes-arcgis`). spec.md, plan.md, research.md,
   data-model.md, contracts/, quickstart.md y checklists/ (requirements.md 20/20). tasks.md con
@@ -289,7 +306,8 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   (F4: ingesta de actos modificatorios del 555)) y `actos.py` (NUEVO, F4: detección de formato por
   extensión + magic bytes, extracción genérica PDF/DOCX/MD/TXT, validación FR-014 y registro del
   corpus consolidado).
-- `tests/`: `smoke/test_main.py` (arranque y registro de las 7 tools) y `tests/contract/`
+- `tests/`: `smoke/test_main.py` (arranque y registro de las 7 tools) + `smoke/test_web.py`
+  (sanity de la interfaz web F5) y `tests/contract/`
   (14 archivos F1/F2 + 6 archivos F3: get_feasibility_report, validación, errores, normativa,
   scoring y trazabilidad + `_f3_shared.py` con constantes compartidas + 3 archivos F4:
   test_ingesta_actos, test_corpus_consolidado, test_precedencia + extensiones aditivas de
@@ -297,8 +315,8 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   test_bloques_tematicos_fase3.py (Fase 3: espacio público, malla vial, equipamientos,
   llm_ready_summary).
   Fixtures con `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
-- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/006-*`, `specs/007-*`,
-  `specs/008-*`: features Spec Kit (ver "Estado actual").
+- `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/005-*`, `specs/006-*`,
+  `specs/007-*`, `specs/008-*`: features Spec Kit (ver "Estado actual").
 - `.specify/`: feature.json (feature activa), integration.json (opencode, separador `.`),
   memory/constitution.md, scripts/, templates/, workflows/.
 - `.opencode/`: commands/ (comandos `speckit.*`), opencode.json, package.json (plugin).
@@ -333,3 +351,6 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   automáticamente (lee del entorno; ver `.env.example`).
 - `.gitignore`: `data/` NO se ignora (el corpus JSONL es fuente de verdad); `.data/` SÍ se ignora
   (índice derivado).
+
+**NOTA TÉCNICA**: `.env.example` menciona `qwen3.5:9b` como `OLLAMA_CHAT_MODEL` pero el default
+en código (`app/providers/normativa.py`) es `qwen3:8b`. Ambos funcionan; el código tiene precedencia.

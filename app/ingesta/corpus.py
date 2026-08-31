@@ -1314,8 +1314,13 @@ DEFAULT_INDICE = os.getenv("VECTOR_DB_PATH", ".data/chroma")
 def _crear_embedding_function() -> OllamaEmbeddingFunction:
     """Crea la embedding function por defecto usando variables de entorno."""
     base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    # Timeout configurable (segundos): en CPU, embeber un lote del corpus puede
+    # superar los 60 s por defecto de OllamaEmbeddingFunction.
+    timeout_segundos = int(os.getenv("OLLAMA_TIMEOUT", "60"))
     return OllamaEmbeddingFunction(
-        model_name=_modelo_embedding_env(), url=f"{base_url}/api/embeddings"
+        model_name=_modelo_embedding_env(),
+        url=f"{base_url}/api/embeddings",
+        timeout=timeout_segundos,
     )
 
 
