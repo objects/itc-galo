@@ -16,6 +16,8 @@ consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
 - **Feature 7**: contexto catastral adicional (`catastro_data`, 5 capas en paralelo; sin tools MCP nuevas).
 - **Feature 8**: parámetros urbanísticos del lote (`urbanistic_parameters`: tratamiento SINUPOT/SDP layer 2, edificabilidad capa 14 con precedencia sobre el RAG, retiros y estacionamientos vía parsing regex determinista del texto RAG; sin tools MCP nuevas).
 - **Fase 3**: cobertura temática faltante del informe (`public_space_context` espacio público EPT m²/hab por UPL, `road_network_context` frente vial con jerarquía derivada, `nearby_facilities` equipamientos de salud/educación/cultura con distancias) + campo `llm_ready_summary` (resumen determinista en español para LLM evaluadores; sin tools MCP nuevas).
+- **Fase 2**: motor financiero (`financial_analysis`: área vendible, ingresos, costos, VPN, TIR, viabilidad) — funciones puras deterministas con `shapely>=2.0` en CORE.
+- **Fase 3 (técnica)**: motor técnico (`technical_feasibility`: área bruta/neta vía Shapely, cabida arquitectónica) — funciones puras deterministas, integración con `planning_constraints` y `urbanistic_parameters`.
 
 ## Requisitos
 
@@ -182,7 +184,7 @@ mcp-bogota-factibilidad
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo del lote por CHIP (identidad + contexto por fuente). |
 | `get_upl` | Resuelve la UPL del lote por CHIP, dirección o coordenadas (join espacial punto-en-polígono contra la capa UPL; localidad derivada por mapeo nombre → localidad). |
 | `consultar_normativa` | Consulta en lenguaje natural sobre el POT con citas literales de artículos (RAG local); filtro territorial estricto opcional por UPL (parte aplicable según vocación o mención explícita de la UPL). |
-| `get_feasibility_report` | Informe de factibilidad orquestado en 20 bloques (identidad, contexto administrativo, restricciones, mercado, entorno, contexto económico, geotecnia, socioeconomía, regulatorio, patrimonio cultural, movilidad, catastro, espacio público, malla vial del frente, equipamientos cercanos, parámetros urbanísticos SINUPOT/SDP + RAG, evidencia normativa, score heurístico determinístico, warnings, `llm_ready_summary` y timestamp) con trazabilidad por fuente. |
+| `get_feasibility_report` | Informe de factibilidad orquestado en 22 bloques (identidad, contexto administrativo, restricciones, mercado, entorno, contexto económico, geotecnia, socioeconomía, regulatorio, patrimonio cultural, movilidad, catastro, espacio público, malla vial del frente, equipamientos cercanos, parámetros urbanísticos SINUPOT/SDP + RAG, `financial_analysis`, `technical_feasibility`, evidencia normativa, score heurístico determinístico, warnings, `llm_ready_summary` y timestamp) con trazabilidad por fuente. |
 
 > **Nota**: el bloque `economic_context` de `get_feasibility_report` consulta la
 > capa tabular Predio de ArcGIS (`catastro/lote/MapServer/3`) y no requiere

@@ -6,6 +6,7 @@
   <title>{% block titulo %}Prefactibilidad Bogotá{% endblock %}</title>
   <link rel="stylesheet" href="/static/fonts.css">
   <link rel="stylesheet" href="/static/estilos.css">
+  {% block estilos_extra %}{% endblock %}
   <script src="/static/htmx.min.js" defer></script>
 </head>
 <body hx-boost="true">
@@ -35,5 +36,6 @@
       <span>Score heurístico determinístico — no constituye concepto urbanístico (FR-014).</span>
     </div>
   </footer>
+  {% block scripts_extra %}{% endblock %}
 </body>
 </html>

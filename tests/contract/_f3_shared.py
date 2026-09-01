@@ -13,7 +13,7 @@ CAMPOS_TRAZA = {
     "query_timestamp",
 }
 
-# Los 20 bloques raiz del reporte (FR-001, F3 + F5 + F7 + F8 + Fase 3).
+# Los 22 bloques raiz del reporte (FR-001, F3 + F5 + F7 + F8 + Fase 3 + Fase 2 + Fase 3 técnica).
 BLOQUES_RAIZ = {
     "lot_identity",
     "administrative_context",
@@ -31,6 +31,8 @@ BLOQUES_RAIZ = {
     "road_network_context",
     "nearby_facilities",
     "urbanistic_parameters",
+    "financial_analysis",
+    "technical_feasibility",
     "normative_evidence",
     "feasibility_score",
     "warnings",
@@ -54,6 +56,8 @@ BLOQUES_CON_ESTADO = {
     "road_network_context",
     "nearby_facilities",
     "urbanistic_parameters",
+    "financial_analysis",
+    "technical_feasibility",
 }
 
 # Bloques multifuente que ademas publican `source_traces` (procedencia por

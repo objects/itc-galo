@@ -23,6 +23,7 @@ de formulario SI fallan rapido con HTTPException(400) (FR-012).
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -298,6 +299,10 @@ def crear_app_web(
     - Rutas US1/US2 registradas y manejadores de error (HTML vs /json).
     """
     plantillas = Jinja2Templates(directory=str(RUTA_TEMPLATES))
+    # Filtro para volcar JSON legible en <pre> (tojson escapa <>&' y queda feo).
+    plantillas.env.filters["json_pretty"] = lambda v: json.dumps(
+        v, ensure_ascii=False, indent=2
+    )
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):

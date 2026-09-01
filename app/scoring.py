@@ -38,12 +38,14 @@ from app.models import (
     BloqueEntornoRegulatorio,
     BloqueEquipamientosCercanos,
     BloqueEspacioPublico,
+    BloqueFinancialAnalysis,
     BloqueObrasPublicas,
     BloqueParametrosUrbanisticos,
     BloquePatrimonioCultural,
     BloqueRedVial,
     BloqueReservaVial,
     BloqueRiesgosGeotecnicos,
+    BloqueTechnicalFeasibility,
     BloqueValorReferencia,
     ContextoAdministrativo,
     EvidenciaNormativa,
@@ -71,6 +73,7 @@ PUNTOS_ESPACIO_PUBLICO_SUFICIENTE = 5
 UMBRAL_ESPACIO_PUBLICO_M2_HAB = 15.0  # estandar distrital de espacio publico (m2/hab)
 PUNTOS_FRENTE_VIAL_AVENIDA = 5
 PUNTOS_EQUIPAMIENTOS_CERCANOS = 5
+PUNTOS_FINANCIERO_VIABLE = 10  # Fase 2: analisis financiero disponible y viable
 PENALIZACION_RESERVA_VIAL = 15
 PENALIZACION_UPL_AUSENTE = 5
 PENALIZACION_BLOQUE_NO_ENCONTRADO = 5
@@ -100,6 +103,8 @@ BLOQUES_EVALUABLES = (
     "nearby_facilities",
     "normative_evidence",
     "urbanistic_parameters",
+    "financial_analysis",
+    "technical_feasibility",
 )
 
 
@@ -127,6 +132,8 @@ class BloquesEvaluables(BaseModel):
     nearby_facilities: BloqueEquipamientosCercanos | None = None
     normative_evidence: EvidenciaNormativa
     urbanistic_parameters: BloqueParametrosUrbanisticos | None = None
+    financial_analysis: BloqueFinancialAnalysis | None = None
+    technical_feasibility: BloqueTechnicalFeasibility | None = None
 
 
 def calcular_score(bloques: BloquesEvaluables) -> FeasibilityScore:
@@ -330,6 +337,23 @@ def _reglas_positivas(
             "Equipamientos cercanos: salud o educación disponibles en el radio consultado."
         )
 
+    # --- Fase 2: Motor Financiero ---
+    # Regla r_financiero_viable: analisis financiero disponible y viable.
+    # `viable` es un hecho calculado deterministicamente (VPN >= 0 y TIR >=
+    # tasa de descuento) sobre datos reales de las fuentes (FR-014); nunca se
+    # inventa un resultado financiero ausente.
+    if (
+        bloques.financial_analysis is not None
+        and bloques.financial_analysis.estado == "disponible"
+        and bloques.financial_analysis.dato is not None
+        and bloques.financial_analysis.dato.viable is True
+    ):
+        puntos += PUNTOS_FINANCIERO_VIABLE
+        reglas.append("r_financiero_viable")
+        razones.append(
+            "Análisis financiero viable: VPN positivo y TIR ≥ tasa de descuento."
+        )
+
     return puntos, reglas, razones
 
 
@@ -445,6 +469,13 @@ def _bloques_con_estado(
     # se inyecta); solo se incluye cuando está presente.
     if bloques.urbanistic_parameters is not None:
         items.append(("urbanistic_parameters", bloques.urbanistic_parameters))
+    # Fase 2: financial_analysis es opcional (None = no evaluado); solo se
+    # incluye cuando está presente, mismo tratamiento de F8.
+    if bloques.financial_analysis is not None:
+        items.append(("financial_analysis", bloques.financial_analysis))
+    # Fase 3: technical_feasibility es opcional (None = no evaluado)
+    if bloques.technical_feasibility is not None:
+        items.append(("technical_feasibility", bloques.technical_feasibility))
     # Fase 3: los 3 bloques nuevos son opcionales (None = no evaluado); solo
     # se incluyen cuando están presentes, mismo tratamiento de F8.
     for nombre_fase3 in ("public_space_context", "road_network_context", "nearby_facilities"):
@@ -494,6 +525,14 @@ def _disponibilidad_bloques(bloques: BloquesEvaluables) -> dict[str, bool]:
         "urbanistic_parameters": (
             bloques.urbanistic_parameters is not None
             and bloques.urbanistic_parameters.estado == "disponible"
+        ),
+        "financial_analysis": (
+            bloques.financial_analysis is not None
+            and bloques.financial_analysis.estado == "disponible"
+        ),
+        "technical_feasibility": (
+            bloques.technical_feasibility is not None
+            and bloques.technical_feasibility.estado == "disponible"
         ),
     }
 

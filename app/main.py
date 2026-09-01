@@ -49,6 +49,8 @@ from app.errores import (
 )
 from app.models import (
     AccesoMovilidad,
+    AnalisisFinanciero,
+    AnalisisTecnico,
     BloqueAccesoMovilidad,
     BloqueCatastroData,
     BloqueContextoSocioeconomico,
@@ -56,12 +58,14 @@ from app.models import (
     BloqueEntornoRegulatorio,
     BloqueEquipamientosCercanos,
     BloqueEspacioPublico,
+    BloqueFinancialAnalysis,
     BloqueObrasPublicas,
     BloqueParametrosUrbanisticos,
     BloquePatrimonioCultural,
     BloqueRedVial,
     BloqueReservaVial,
     BloqueRiesgosGeotecnicos,
+    BloqueTechnicalFeasibility,
     BloqueValorReferencia,
     Centroide,
     ContextoAdministrativo,
@@ -98,6 +102,9 @@ from app.providers.normativa import (
 from app.providers.sdp import SDPProvider
 from app.providers.upl import UPLProvider, VIGENCIA_UPL_DEFAULT
 from app.scoring import BloquesEvaluables, calcular_score
+# Motor financiero (Fase 2) y técnico (Fase 3): funciones puras y deterministas (SC-003).
+from app.financiero import analisis_financiero as _analisis_financiero
+from app.tecnico import analisis_tecnico as _analisis_tecnico
 # Helpers compartidos (hallazgo m7): unica definicion en app/utilidades.py,
 # importados con alias privado para no tocar los call sites de este modulo.
 from app.utilidades import (
@@ -958,6 +965,42 @@ class ServidorLotes:
             warnings=warnings,
         )
 
+        # --- Fase 2: Motor Financiero (bloque derivado, calculo puro) ---
+        # Combina datos ya consultados de otros bloques (economic_context,
+        # market_context, urbanistic_parameters) como entradas puras del
+        # calculo financiero. No consulta fuentes externas adicionales.
+        # Degradacion: si falta area_terreno, precio_m2 o COS -> no_encontrado
+        # + warning BLOQUE_SIN_DATO (nunca se inventa un resultado ausente).
+        area_terreno_fin = destino.area_terreno if destino.estado == "disponible" else None
+        precio_m2_fin = valor.valor_m2 if valor.estado == "disponible" else None
+        cos_fin = None
+        if (
+            bloque_urbanistic.estado == "disponible"
+            and bloque_urbanistic.dato is not None
+            and bloque_urbanistic.dato.edificabilidad is not None
+        ):
+            cos_fin = bloque_urbanistic.dato.edificabilidad.cos
+        # Traza primaria: market_context (valor de referencia), el insumo
+        # economico clave del calculo; documenta la procedencia de los datos.
+        trace_financiero = valor.source_trace if valor.estado == "disponible" else trace_upl
+        bloque_financiero = _bloque_financial_analysis(
+            area_terreno=area_terreno_fin,
+            precio_m2_terreno=precio_m2_fin,
+            cos=cos_fin,
+            source_trace=trace_financiero,
+            warnings=warnings,
+        )
+
+        # --- Fase 3: Motor Técnico (bloque derivado, cálculo puro con shapely) ---
+        bloque_tecnico = _bloque_technical_feasibility(
+            geometry=lote.geometry,
+            afecta_reserva=reserva.afecta_lote if reserva.estado == "disponible" and reserva else None,
+            cos=cos_fin,
+            area_terreno_catastral=area_terreno_fin,
+            source_trace=trace_financiero,
+            warnings=warnings,
+        )
+
         # --- Evidencia normativa (consulta explicita o automatica; degradacion por bloque) ---
         consulta_automatica = consulta is None
         consulta_efectiva = (
@@ -1051,6 +1094,8 @@ class ServidorLotes:
             nearby_facilities=bloque_facilidades,
             normative_evidence=evidencia,
             urbanistic_parameters=bloque_urbanistic,
+            financial_analysis=bloque_financiero,
+            technical_feasibility=bloque_tecnico,
         )
         score = calcular_score(bloques_evaluables)
 
@@ -1073,6 +1118,8 @@ class ServidorLotes:
             "road_network_context": _bloque_a_contrato(bloque_vial),
             "nearby_facilities": _bloque_a_contrato(bloque_facilidades),
             "urbanistic_parameters": _bloque_a_contrato(bloque_urbanistic),
+            "financial_analysis": _bloque_a_contrato(bloque_financiero),
+            "technical_feasibility": _bloque_a_contrato(bloque_tecnico),
             "normative_evidence": evidencia.model_dump(),
             "feasibility_score": score.model_dump(),
             "warnings": warnings,
@@ -2190,6 +2237,124 @@ async def _bloque_parametros_urbanisticos(
         dato=dato,
         interpretation=interpretation,
         source_trace=trace_sdp,
+    )
+
+
+def _interpretar_financiero(dato: AnalisisFinanciero) -> str:
+    """Interpretacion determinista del analisis financiero (FR-014).
+
+    Solo describe los valores calculados; nunca inventa reglas ni resultados
+    ausentes. Los indicadores son ESTIMACIONES heuristicas claramente
+    etiquetadas.
+    """
+    partes = ["Análisis financiero estimado del lote (valores heurísticos):"]
+    if dato.area_vendible_m2 is not None:
+        partes.append(f"área vendible estimada {_formatear_numero(dato.area_vendible_m2)} m²")
+    if dato.ingresos_totales is not None:
+        partes.append(f"ingresos estimados {_formatear_numero(dato.ingresos_totales)} COP")
+    if dato.costos_totales is not None:
+        partes.append(f"costos estimados {_formatear_numero(dato.costos_totales)} COP")
+    if dato.margen_porcentual is not None:
+        partes.append(f"margen estimado {_formatear_numero(dato.margen_porcentual)}%")
+    if dato.vpn is not None:
+        partes.append(f"VPN {_formatear_numero(dato.vpn)} COP")
+    if dato.tir is not None:
+        partes.append(f"TIR {_formatear_numero(dato.tir * 100)}%")
+    if dato.viable is not None:
+        partes.append("proyecto viable" if dato.viable else "proyecto no viable")
+    return ". ".join(partes) + "."
+
+
+def _interpretar_tecnico(dato: AnalisisTecnico) -> str:
+    partes = ["Análisis técnico estimado del lote (valores heurísticos):"]
+    if dato.area_bruta_m2 is not None:
+        partes.append(f"área bruta {_formatear_numero(dato.area_bruta_m2)} m²")
+    if dato.area_neta_m2 is not None:
+        partes.append(f"área neta {_formatear_numero(dato.area_neta_m2)} m²")
+    if dato.cabida_arquitectonica is not None:
+        partes.append(f"cabida {_formatear_numero(dato.cabida_arquitectonica)} m²")
+    if dato.viable is not None:
+        partes.append("técnicamente viable" if dato.viable else "técnicamente no viable")
+    return ". ".join(partes) + "."
+
+
+def _bloque_financial_analysis(
+    area_terreno: float | None,
+    precio_m2_terreno: float | None,
+    cos: float | None,
+    source_trace: SourceTrace,
+    warnings: list[dict[str, str]],
+) -> BloqueFinancialAnalysis:
+    """Construye el bloque financial_analysis (Fase 2, motor financiero).
+
+    Calculo puro y determinista (SC-003) sobre datos reales de las fuentes
+    (FR-014): area_terreno (economic_context), precio_m2 (market_context) y
+    COS (urbanistic_parameters). No consulta fuentes externas adicionales.
+
+    Degradacion (mismo patron F8): si falta cualquiera de los tres datos de
+    entrada, el bloque queda en no_encontrado con warning BLOQUE_SIN_DATO;
+    nunca se inventa un resultado financiero ausente (FR-014).
+    """
+    if area_terreno is None or precio_m2_terreno is None or cos is None:
+        warnings.append({
+            "codigo": "BLOQUE_SIN_DATO",
+            "mensaje": (
+                "Bloque financial_analysis no encontrado: faltan datos de "
+                "entrada (área del terreno, valor de referencia o COS) para "
+                "calcular los indicadores financieros."
+            ),
+        })
+        return BloqueFinancialAnalysis(
+            estado="no_encontrado",
+            interpretation=(
+                "No se pudo calcular el análisis financiero: faltan datos de "
+                "entrada (área del terreno, valor de referencia o COS)."
+            ),
+            source_trace=source_trace,
+        )
+
+    resultado = _analisis_financiero(area_terreno, precio_m2_terreno, cos)
+    dato = AnalisisFinanciero(**resultado)
+    return BloqueFinancialAnalysis(
+        estado="disponible",
+        dato=dato,
+        interpretation=_interpretar_financiero(dato),
+        source_trace=source_trace,
+    )
+
+
+def _bloque_technical_feasibility(
+    geometry: dict[str, Any] | None,
+    afecta_reserva: bool | None,
+    cos: float | None,
+    area_terreno_catastral: float | None,
+    source_trace: SourceTrace,
+    warnings: list[dict[str, str]],
+) -> BloqueTechnicalFeasibility:
+    if cos is None or (geometry is None and area_terreno_catastral is None):
+        warnings.append({
+            "codigo": "BLOQUE_SIN_DATO",
+            "mensaje": "Bloque technical_feasibility no encontrado: faltan geometría o COS.",
+        })
+        return BloqueTechnicalFeasibility(
+            estado="no_encontrado",
+            interpretation="No se pudo calcular la factibilidad técnica: faltan datos de entrada.",
+            source_trace=source_trace,
+        )
+    resultado = _analisis_tecnico(geometry, afecta_reserva, cos, area_terreno_catastral)
+    dato = AnalisisTecnico(**resultado)
+    estado = "disponible" if dato.viable is not None else "no_encontrado"
+    if estado == "no_encontrado":
+        warnings.append({
+            "codigo": "BLOQUE_SIN_DATO",
+            "mensaje": "Bloque technical_feasibility no encontrado: cálculo sin datos suficientes.",
+        })
+        return BloqueTechnicalFeasibility(estado="no_encontrado", interpretation="No se pudo calcular la factibilidad técnica.", source_trace=source_trace)
+    return BloqueTechnicalFeasibility(
+        estado="disponible",
+        dato=dato,
+        interpretation=_interpretar_tecnico(dato),
+        source_trace=source_trace,
     )
 
 

@@ -1,82 +1,224 @@
 {% extends "base.html" %}
 {% block titulo %}{{ proyecto.nombre }} — Prefactibilidad Bogotá{% endblock %}
+{% block estilos_extra %}
+<link rel="stylesheet" href="/static/leaflet.css">
+{% endblock %}
 {% block contenido %}
-<p><a href="/">← Volver a proyectos</a></p>
+{% set informe = proyecto.informe %}
+<p class="enlace-volver"><a href="/">← Volver a proyectos</a></p>
+
+{% if proyecto.estado == "fallido" %}
+<div class="error-caja">
+  <p class="error-codigo">{{ (proyecto.error or {}).get("code", "ERROR") }}</p>
+  <p>{{ (proyecto.error or {}).get("message", "Error desconocido de evaluación.") }}</p>
+  <p><a href="/proyectos/{{ proyecto.id }}/json">Ver error JSON</a></p>
+</div>
+{% else %}
 
 <div class="reticula">
-  <section class="tarjeta">
-    <h2 class="tarjeta__titulo">{{ proyecto.nombre }}</h2>
-    <div class="detalle-meta">
-      <span><strong>Criterio:</strong> {{ proyecto.criterio_tipo }} — {{ proyecto.criterio_valor }}</span>
-      {% if proyecto.consulta %}<span><strong>Consulta:</strong> “{{ proyecto.consulta }}”</span>{% endif %}
-      <span><strong>top_k:</strong> {{ proyecto.top_k }}</span>
-      <span><strong>Creado:</strong> {{ proyecto.creado_en }}</span>
-      <span><strong>Actualizado:</strong> {{ proyecto.actualizado_en }}</span>
-    </div>
+  <div class="columna-informe">
 
-    {% if proyecto.estado == "fallido" %}
-    <div class="error-caja">
-      <p class="error-codigo">{{ (proyecto.error or {}).get("code", "ERROR") }}</p>
-      <p>{{ (proyecto.error or {}).get("message", "Error desconocido de evaluación.") }}</p>
-      <p>
-        <a href="/proyectos/{{ proyecto.id }}/json">Ver error JSON</a>
-      </p>
-    </div>
-    {% else %}
-    {% set score = proyecto.informe.feasibility_score.score %}
-    {% set confianza = proyecto.informe.feasibility_score.confidence %}
-    {% set destino = (345.58 * (1 - score / 100))|round(2) %}
-    <div class="anillo-score" style="--anillo-destino: {{ destino }}">
-      <svg viewBox="0 0 132 132" role="img" aria-label="Score {{ score }} de 100">
-        <circle class="fondo" cx="66" cy="66" r="55"></circle>
-        <circle class="progreso" cx="66" cy="66" r="55"></circle>
-      </svg>
-      <div>
-        <div class="valor">{{ score }}<small>/100</small></div>
-        <div class="etiqueta">Confianza {{ confianza }}</div>
+    <section class="tarjeta cabecera-proyecto">
+      <h2 class="tarjeta__titulo">{{ proyecto.nombre }}</h2>
+      <div class="detalle-meta">
+        <span><strong>Criterio:</strong> {{ proyecto.criterio_tipo }} — {{ proyecto.criterio_valor }}</span>
+        {% if proyecto.consulta %}<span><strong>Consulta:</strong> “{{ proyecto.consulta }}”</span>{% endif %}
+        <span><strong>top_k:</strong> {{ proyecto.top_k }}</span>
+        <span><strong>Actualizado:</strong> {{ proyecto.actualizado_en }}</span>
       </div>
-    </div>
+    </section>
 
-    <div class="bloque">
-      <h4>UPL</h4>
-      {% set administrativo = proyecto.informe.administrative_context %}
+    <section class="resumen-ejecutivo">
+      {% set score = informe.feasibility_score.score %}
+      {% set confianza = informe.feasibility_score.confidence %}
+      {% set destino = (345.58 * (1 - score / 100))|round(2) %}
+      <div class="anillo-score" style="--anillo-destino: {{ destino }}">
+        <svg viewBox="0 0 132 132" role="img" aria-label="Score {{ score }} de 100">
+          <circle class="fondo" cx="66" cy="66" r="55"></circle>
+          <circle class="progreso" cx="66" cy="66" r="55"></circle>
+        </svg>
+        <div>
+          <div class="valor">{{ score }}<small>/100</small></div>
+          <div class="etiqueta">Confianza {{ confianza }}</div>
+        </div>
+      </div>
+      {% if informe.llm_ready_summary %}
+      <div class="callout">
+        <p>{{ informe.llm_ready_summary }}</p>
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="tarjeta">
+      <h3 class="seccion-titulo">Identidad del lote</h3>
+      {% set identidad = informe.lot_identity %}
+      <dl class="definiciones">
+        <div><dt>CHIP</dt><dd>{{ identidad.chip or "—" }}</dd></div>
+        <div><dt>Código catastral</dt><dd>{{ identidad.codigo_catastral }}</dd></div>
+        <div><dt>Manzana</dt><dd>{{ identidad.manzana }}</dd></div>
+        <div><dt>Dirección</dt><dd>{{ identidad.direccion_normalizada or "—" }}</dd></div>
+        <div><dt>Barrio</dt><dd>{{ identidad.barrio or "—" }}</dd></div>
+      </dl>
+      {% set administrativo = informe.administrative_context %}
       {% if administrativo and administrativo.upl %}
-      <p>{{ administrativo.upl.codigo }} — {{ administrativo.upl.nombre }} ({{ administrativo.localidad.nombre if administrativo.localidad else "localidad no disponible" }})</p>
+      <dl class="definiciones">
+        <div><dt>UPL</dt><dd>{{ administrativo.upl.codigo }} — {{ administrativo.upl.nombre }}</dd></div>
+        <div><dt>Localidad</dt><dd>{{ administrativo.localidad.nombre if administrativo.localidad else "no disponible" }}</dd></div>
+        <div><dt>Clasificación de suelo</dt><dd>{{ administrativo.clasificacion_suelo or "—" }}</dd></div>
+      </dl>
       {% else %}
       <p class="ayuda">UPL no disponible (bloque degradado).</p>
       {% endif %}
-    </div>
+    </section>
 
-    {% if proyecto.informe.warnings %}
-    <div class="bloque">
-      <h4>Advertencias</h4>
-      <ul>
-        {% for warning in proyecto.informe.warnings %}
-        <li>{{ warning }}</li>
+    {% if identidad.geometry and identidad.centroid %}
+    <section class="tarjeta">
+      <h3 class="seccion-titulo">Ubicación</h3>
+      <div id="contenedor-mapa" class="contenedor-mapa"
+           data-geometry='{{ identidad.geometry | tojson }}'
+           data-centroid='{{ identidad.centroid | tojson }}'></div>
+    </section>
+    {% endif %}
+
+    {% set bloques = [
+      {"clave": "planning_constraints", "titulo": "Restricciones de planeación"},
+      {"clave": "market_context", "titulo": "Contexto de mercado"},
+      {"clave": "environment_context", "titulo": "Contexto ambiental"},
+      {"clave": "economic_context", "titulo": "Destino económico"},
+      {"clave": "geotechnical_risks", "titulo": "Riesgos geotécnicos"},
+      {"clave": "socioeconomic_context", "titulo": "Contexto socioeconómico"},
+      {"clave": "regulatory_environment", "titulo": "Entorno regulatorio"},
+      {"clave": "cultural_heritage", "titulo": "Patrimonio cultural"},
+      {"clave": "transit_access", "titulo": "Acceso a movilidad"},
+      {"clave": "catastro_data", "titulo": "Datos catastrales"},
+      {"clave": "public_space_context", "titulo": "Espacio público"},
+      {"clave": "road_network_context", "titulo": "Red vial"},
+      {"clave": "nearby_facilities", "titulo": "Equipamientos cercanos"},
+      {"clave": "urbanistic_parameters", "titulo": "Parámetros urbanísticos"},
+      {"clave": "financial_analysis", "titulo": "Análisis financiero"},
+      {"clave": "technical_feasibility", "titulo": "Factibilidad técnica"}
+    ] %}
+    {% for bloque in bloques %}
+      {% set b = informe[bloque.clave] %}
+      {% if b %}
+      <section class="bloque-informe">
+        <div class="bloque-informe__cabecera">
+          <h3 class="bloque-informe__titulo">{{ bloque.titulo }}</h3>
+          {% if b.estado == "disponible" %}
+          <span class="badge badge--disponible">Disponible</span>
+          {% else %}
+          <span class="badge badge--no_encontrado">Sin dato</span>
+          {% endif %}
+        </div>
+        {% if b.interpretation %}
+        <p class="bloque-informe__interpretacion">{{ b.interpretation }}</p>
+        {% endif %}
+        {% if b.dato %}
+        <pre class="bloque-informe__dato">{{ b.dato | json_pretty }}</pre>
+        {% endif %}
+        {% if b.source_traces %}
+        {# Trazabilidad por sub-fuente (M4): solo capas EXITOSAS; las capas
+           caídas viajan en FalloCapa -> warning BLOQUE_DEGRADADO, nunca como
+           traza fabricada. Si el bloque no publica source_traces (monofuente),
+           se cae al source_trace principal. #}
+        <div class="fuentes">
+          {% for traza in b.source_traces %}
+          <span class="fuente">{{ traza.source_name }} · capa {{ traza.layer_id }}</span>
+          {% endfor %}
+        </div>
+        {% elif b.source_trace %}
+        <div class="fuentes">
+          <span class="fuente">{{ b.source_trace.source_name }} · capa {{ b.source_trace.layer_id }}</span>
+        </div>
+        {% endif %}
+      </section>
+      {% endif %}
+    {% endfor %}
+
+    <section class="tarjeta">
+      <h3 class="seccion-titulo">Evidencia normativa</h3>
+      {% set evidencia = informe.normative_evidence %}
+      {% if evidencia["items"] %}
+        {% for item in evidencia["items"] %}
+        <article class="evidencia">
+          <div class="evidencia__meta">
+            <span class="badge badge--disponible">Artículo {{ item.articulo }}</span>
+            <span class="evidencia__titulo">{{ item.titulo }}</span>
+            {% if item.norma %}<span class="fuente">{{ item.norma }}</span>{% endif %}
+          </div>
+          <blockquote class="evidencia__cita">{{ item.texto_cita }}</blockquote>
+        </article>
+        {% endfor %}
+      {% else %}
+        <p class="ayuda">Sin evidencia normativa{% if evidencia.causa %} ({{ evidencia.causa }}){% endif %}.</p>
+      {% endif %}
+    </section>
+
+    <section class="tarjeta">
+      <h3 class="seccion-titulo">Detalle del score</h3>
+      {% set fs = informe.feasibility_score %}
+      <div class="score-detalle">
+        <p><strong>Score:</strong> {{ fs.score }} / 100 · <strong>Confianza:</strong> {{ fs.confidence }}</p>
+        {% if fs.reasons %}
+        <ul>
+          {% for razon in fs.reasons %}<li>{{ razon }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if fs.rules_applied %}
+        <p class="ayuda">Reglas aplicadas: {{ fs.rules_applied | join(", ") }}</p>
+        {% endif %}
+      </div>
+    </section>
+
+    {% if informe.warnings %}
+    <section class="tarjeta">
+      <h3 class="seccion-titulo">Advertencias</h3>
+      <ul class="advertencias">
+        {% for warning in informe.warnings %}
+        <li class="advertencia"><strong>{{ warning.codigo }}</strong> — {{ warning.mensaje }}</li>
         {% endfor %}
       </ul>
-    </div>
+    </section>
     {% endif %}
-    {% endif %}
-  </section>
+  </div>
 
-  <section class="tarjeta">
-    <h2 class="tarjeta__titulo">Acciones</h2>
-    <form method="post" action="/proyectos/{{ proyecto.id }}/reevaluar"
-          hx-post="/proyectos/{{ proyecto.id }}/reevaluar" hx-target="body" hx-swap="outerHTML"
-          hx-indicator="#indicador-reevaluar">
-      <button class="boton" type="submit">
-        Reevaluar
-        <span id="indicador-reevaluar" class="htmx-indicator">…</span>
-      </button>
-    </form>
-    <p>
-      <a href="/proyectos/{{ proyecto.id }}/json">Ver informe JSON</a>
-    </p>
-    <div class="bloque">
-      <h4>Consulta original</h4>
-      <pre>{{ proyecto.consulta or "—" }}</pre>
-    </div>
-  </section>
+  <aside class="columna-acciones">
+    <section class="tarjeta">
+      <h2 class="tarjeta__titulo">Acciones</h2>
+      <form method="post" action="/proyectos/{{ proyecto.id }}/reevaluar"
+            hx-post="/proyectos/{{ proyecto.id }}/reevaluar" hx-target="body" hx-swap="outerHTML"
+            hx-indicator="#indicador-reevaluar">
+        <button class="boton" type="submit">
+          Reevaluar
+          <span id="indicador-reevaluar" class="htmx-indicator">…</span>
+        </button>
+      </form>
+      <p><a href="/proyectos/{{ proyecto.id }}/json">Ver informe JSON</a></p>
+      <div class="bloque">
+        <h4>Consulta original</h4>
+        <pre>{{ proyecto.consulta or "—" }}</pre>
+      </div>
+    </section>
+  </aside>
 </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts_extra %}
+<script src="/static/leaflet.js"></script>
+<script>
+(function () {
+  var contenedor = document.getElementById("contenedor-mapa");
+  if (!contenedor) return;
+  var geometry = JSON.parse(contenedor.dataset.geometry || "null");
+  var centroid = JSON.parse(contenedor.dataset.centroid || "null");
+  if (!geometry || !centroid) return;
+  var mapa = L.map(contenedor).setView([centroid.lat, centroid.lng], 16);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(mapa);
+  L.geoJSON(geometry).addTo(mapa);
+  L.marker([centroid.lat, centroid.lng]).addTo(mapa);
+})();
+</script>
 {% endblock %}

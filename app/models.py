@@ -842,6 +842,72 @@ class BloqueParametrosUrbanisticos(BaseModel):
     source_trace: SourceTrace
 
 
+# --- Fase 3: Motor Técnico (analisis de factibilidad técnica) ---
+
+
+class AnalisisTecnico(BaseModel):
+    """Indicadores técnicos del lote: estimaciones heurísticas (FR-014).
+
+    Todos los campos son None cuando faltan datos de entrada (degradación
+    transparente). Los valores son ESTIMACIONES no evaluaciones profesionales.
+    Requiere shapely para área neta.
+    """
+
+    area_bruta_m2: float | None = None
+    area_neta_m2: float | None = None
+    cabida_arquitectonica: float | None = None
+    afectacion_reserva_vial: bool | None = None
+    viable: bool | None = None
+
+
+class BloqueTechnicalFeasibility(BaseModel):
+    """Bloque technical_feasibility con el patrón {estado, dato, interpretation, source_trace}.
+
+    El bloque combina datos de lot_identity (geometría), planning_constraints
+    (afectación) y urbanistic_parameters (COS) como entradas puras del cálculo técnico.
+    No consulta fuentes externas adicionales.
+    """
+
+    estado: EstadoDato
+    dato: AnalisisTecnico | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
+# --- Fase 2: Motor Financiero (analisis de factibilidad economica) ---
+
+
+class AnalisisFinanciero(BaseModel):
+    """Indicadores financieros del lote: estimaciones heuristicas (FR-014).
+
+    Todos los campos son None cuando faltan datos de entrada (degradacion
+    transparente). Los valores son ESTIMACIONES no evaluaciones profesionales.
+    """
+
+    area_vendible_m2: float | None = None
+    ingresos_totales: float | None = None
+    costos_totales: float | None = None
+    margen_porcentual: float | None = None
+    vpn: float | None = None
+    tir: float | None = None
+    punto_equilibrio_unidades: float | None = None
+    viable: bool | None = None
+
+
+class BloqueFinancialAnalysis(BaseModel):
+    """Bloque financial_analysis con el patron {estado, dato, interpretation, source_trace}.
+
+    El bloque combina datos de urbanistic_parameters (COS, area_terreno) y
+    market_context (precio_m2) como entradas puras del calculo financiero.
+    No consulta fuentes externas adicionales.
+    """
+
+    estado: EstadoDato
+    dato: AnalisisFinanciero | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
 class ItemEvidenciaNormativa(BaseModel):
     """Articulo del POT citado literalmente en normative_evidence (shape del contrato).
 
@@ -920,6 +986,8 @@ class InformeFactibilidad(BaseModel):
     road_network_context: BloqueRedVial | None = None
     nearby_facilities: BloqueEquipamientosCercanos | None = None
     urbanistic_parameters: BloqueParametrosUrbanisticos | None = None
+    financial_analysis: BloqueFinancialAnalysis | None = None
+    technical_feasibility: BloqueTechnicalFeasibility | None = None
     normative_evidence: EvidenciaNormativa
     feasibility_score: FeasibilityScore
     warnings: list[Warning]

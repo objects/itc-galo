@@ -439,3 +439,264 @@ a:hover {
     stroke-dashoffset: var(--anillo-destino, 0);
   }
 }
+
+/* ---------------- Informe completo (Feature 9) ------------------------------ */
+
+.enlace-volver {
+  margin: 0 0 1.2rem;
+  font-size: 0.9rem;
+}
+
+/* Columnas asimétricas del informe: informe (7fr) + acciones (5fr). */
+.columna-informe {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+  min-width: 0;
+}
+
+.columna-acciones {
+  position: sticky;
+  top: 1.4rem;
+}
+
+@media (max-width: 860px) {
+  .columna-acciones {
+    position: static;
+  }
+}
+
+/* Resumen ejecutivo: anillo + resumen determinístico (llm_ready_summary). */
+.resumen-ejecutivo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.4rem;
+  background: var(--verde-profundo);
+  color: var(--crema);
+  border-radius: var(--radio);
+  padding: 1.5rem 1.7rem;
+  box-shadow: var(--sombra);
+}
+
+.resumen-ejecutivo .anillo-score .fondo {
+  stroke: rgba(247, 242, 231, 0.22);
+}
+
+.resumen-ejecutivo .anillo-score .progreso {
+  stroke: var(--dorado);
+}
+
+.resumen-ejecutivo .anillo-score .valor {
+  color: var(--crema);
+}
+
+.resumen-ejecutivo .anillo-score .etiqueta {
+  color: var(--crema-oscura);
+}
+
+.callout {
+  flex: 1 1 300px;
+  border-left: 3px solid var(--dorado);
+  padding-left: 1.1rem;
+}
+
+.callout p {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.6;
+}
+
+.seccion-titulo {
+  margin: 0 0 0.9rem;
+  font-weight: 600;
+  font-size: 1.1rem;
+  letter-spacing: -0.01em;
+  color: var(--verde-profundo);
+  border-bottom: 2px solid var(--dorado);
+  padding-bottom: 0.45rem;
+}
+
+/* Lista de definiciones (identidad del lote). */
+.definiciones {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.7rem 1.2rem;
+  margin: 0 0 1rem;
+}
+
+.definiciones div {
+  border-left: 3px solid var(--crema-oscura);
+  padding-left: 0.7rem;
+}
+
+.definiciones dt {
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tinta-suave);
+}
+
+.definiciones dd {
+  margin: 0.1rem 0 0;
+  font-weight: 600;
+  color: var(--tinta);
+}
+
+/* Mapa Leaflet. */
+.contenedor-mapa {
+  height: 340px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: var(--borde);
+}
+
+/* Bloques de contexto del informe. */
+.bloque-informe {
+  background: var(--blanco);
+  border: var(--borde);
+  border-radius: var(--radio);
+  padding: 1.3rem 1.5rem;
+  box-shadow: var(--sombra);
+}
+
+.bloque-informe__cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.bloque-informe__titulo {
+  margin: 0;
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--verde-profundo);
+}
+
+.bloque-informe__interpretacion {
+  margin: 0 0 0.7rem;
+  font-size: 0.95rem;
+  color: var(--tinta);
+}
+
+.bloque-informe__dato {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 0.84rem;
+  background: var(--crema);
+  border: var(--borde);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0 0 0.7rem;
+}
+
+/* Badges de estado de bloque. */
+.badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge--disponible {
+  background: rgba(62, 122, 90, 0.16);
+  color: var(--verde-bosque);
+}
+
+.badge--no_encontrado {
+  background: rgba(85, 102, 93, 0.14);
+  color: var(--tinta-suave);
+}
+
+/* Procedencia por fuente. */
+.fuentes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+}
+
+.fuente {
+  font-size: 0.76rem;
+  color: var(--tinta-suave);
+  background: var(--crema);
+  border: 1px solid rgba(11, 61, 46, 0.12);
+  border-radius: 999px;
+  padding: 0.14rem 0.6rem;
+}
+
+/* Evidencia normativa. */
+.evidencia {
+  border-left: 3px solid var(--ambar);
+  padding: 0.4rem 0 0.4rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.evidencia:last-child {
+  margin-bottom: 0;
+}
+
+.evidencia__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  margin-bottom: 0.4rem;
+}
+
+.evidencia__titulo {
+  font-weight: 600;
+  color: var(--verde-bosque);
+}
+
+.evidencia__cita {
+  margin: 0;
+  font-size: 0.92rem;
+  font-style: italic;
+  color: var(--tinta);
+  border: none;
+  padding: 0;
+}
+
+/* Detalle del score. */
+.score-detalle ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.score-detalle li {
+  margin-bottom: 0.3rem;
+  font-size: 0.92rem;
+}
+
+/* Advertencias. */
+.advertencias {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.advertencia {
+  border-left: 3px solid var(--ambar);
+  background: rgba(201, 162, 39, 0.08);
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.advertencia:last-child {
+  margin-bottom: 0;
+}
+
+.advertencia strong {
+  color: var(--verde-profundo);
+}
