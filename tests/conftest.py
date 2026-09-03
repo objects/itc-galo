@@ -12,6 +12,7 @@ import httpx
 from app.main import ServidorLotes
 from app.providers.arcgis import ArcGISProvider
 from app.providers.mapas_bogota import MapasBogotaProvider
+from app.providers.mercado import MercadoProvider
 from app.providers.normativa import NormativaProvider
 from app.providers.sdp import SDPProvider
 from app.providers.upl import UPLProvider
@@ -228,6 +229,16 @@ def provider_arcgis_estandar(
     return ArcGISProvider(transport=httpx.MockTransport(handler))
 
 
+def provider_mercado_vacio():
+    """MercadoProvider sin corpus (apunta a una ruta inexistente).
+
+    Inyectado por defecto en los servidores de prueba para que NINGUN test
+    dependa del corpus de mercado real del repo (hermeticidad): el bloque
+    `market_dynamics` se degrada a `no_encontrado` de forma determinista.
+    """
+    return MercadoProvider(ruta_corpus="data/corpus/mercado/_inexistente.jsonl")
+
+
 def construir_servidor(mapas=None, arcgis=None):
     """ServidorLotes con providers simulados (por defecto el flujo feliz estandar).
 
@@ -240,6 +251,7 @@ def construir_servidor(mapas=None, arcgis=None):
         UPLProvider(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"type": "FeatureCollection", "features": []}))),
         NormativaProvider(),
         provider_sdp_f3(),
+        provider_mercado=provider_mercado_vacio(),
     )
 
 
@@ -425,6 +437,7 @@ def server_lotes_f3(mapas=None, arcgis=None, upl=None, normativa=None, sdp=None)
         upl if upl is not None else provider_upl_estandar(),
         normativa if normativa is not None else NormativaProvider(),
         sdp if sdp is not None else provider_sdp_f3(),
+        provider_mercado=provider_mercado_vacio(),
     )
 
 

@@ -2121,8 +2121,44 @@ def cmd_acto(args) -> None:
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 
+def cmd_mercado(args) -> None:
+    """Ingesta el corpus de mercado (F10, US3).
+
+    Pipeline (contracts/market-dynamics.md:2): scraping best-effort + fallback a
+    seeds segun los flags, validacion/dedup y escritura JSONL + huella. Reporta
+    registros totales, por fuente, descartes y la huella SHA-256. Exit 0 en
+    exito; error de escritura o corpus irrecuperable -> exception tipificada que
+    `main` traduce a exit != 0.
+
+    Importa `app.ingesta.mercado` de forma perezosa (evita carga pesada al
+    importar el modulo); el modulo de ingesta no importa este.
+    """
+    from app.ingesta.mercado import ErrorIngestaMercado, ingerir_mercado
+
+    try:
+        import asyncio
+
+        reporte = asyncio.run(
+            ingerir_mercado(
+                solo_semillas=args.solo_semillas,
+                solo_scrape=args.solo_scrape,
+            )
+        )
+    except ErrorIngestaMercado as e:
+        print(f"Error de ingesta de mercado [{e.codigo}]: {e.mensaje}", file=sys.stderr)
+        sys.exit(3)
+
+    print(
+        f"Corpus de mercado: {reporte['registros']} registros | "
+        f"por fuente: {json.dumps(reporte['por_fuente'], ensure_ascii=False)} | "
+        f"descartes: {reporte['descartes']} | huella: {reporte['huella_sha256']} | "
+        f"archivo: {reporte['ruta_corpus']}"
+    )
+    for motivo in reporte["motivos_descarte"]:
+        print(f"  descarte: {motivo}")
+
+
 def _smoke() -> None:
-    """Smoke test inline original (comentado, para uso manual)."""
     import hashlib
 
     class FakeEmbeddingFunction:
@@ -2304,6 +2340,23 @@ def main() -> None:
         help="Ruta al índice ChromaDB (default: .data/chroma)",
     )
 
+    # --mercado (F10: ingesta del corpus de mercado)
+    p_mercado = subparsers.add_parser(
+        "mercado",
+        help="Ingesta el corpus de mercado inmobiliario (scraping + seeds deterministas)",
+    )
+    grupo_mercado = p_mercado.add_mutually_exclusive_group()
+    grupo_mercado.add_argument(
+        "--solo-semillas",
+        action="store_true",
+        help="Genera el corpus SOLO con seeds deterministas (sin red; reproduccion exacta)",
+    )
+    grupo_mercado.add_argument(
+        "--solo-scrape",
+        action="store_true",
+        help="Solo scraping, sin fallback a seeds (diagnostico)",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -2319,6 +2372,8 @@ def main() -> None:
             cmd_enriquecer_upls(args.archivo)
         elif args.comando == "acto":
             cmd_acto(args)
+        elif args.comando == "mercado":
+            cmd_mercado(args)
     except ErrorIngesta as e:
         print(f"Error de ingesta [{e.codigo}]: {e.mensaje}", file=sys.stderr)
         sys.exit(1)

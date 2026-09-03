@@ -908,6 +908,107 @@ class BloqueFinancialAnalysis(BaseModel):
     source_trace: SourceTrace
 
 
+# --- F10 (Motor de Mercado): entidades del corpus y del bloque `market_dynamics` ---
+# El corpus de mercado vive en data/corpus/mercado/ (JSONL + huella SHA-256,
+# FR-020) y se puebla por scraping de portales inmobiliarios con seeds
+# deterministas de respaldo (D1). Las entidades modelan una oferta individual
+# (RegistroOfertaInmobiliaria), su agrupacion determinista (OfertaCompetidora),
+# la velocidad de venta (RitmoAbsorcion) y el bloque del informe
+# (ContextoMercado + BloqueMarketDynamics).
+#
+# NOTA DE NAMING (D0): el spec F10 usa `market_context` para el bloque nuevo,
+# pero ese campo YA existe en InformeFactibilidad (BloqueValorReferencia = valor
+# de referencia CATASTRAL, capa catastro/valorreferencia, FR-013 de F3). El
+# bloque nuevo se llama `market_dynamics` (dinamica de mercado inmobiliario) y no
+# modifica `market_context`.
+
+
+# Fonte canonicas de una oferta inmobiliaria (data-model.md:24-40). "seed" es el
+# respaldo determinista versionado (FR-004/FR-005).
+FuenteOferta = Literal["finca_raiz", "metrocuadrado", "constructora", "seed"]
+
+
+class RegistroOfertaInmobiliaria(BaseModel):
+    """Oferta individual de un portal inmobiliario o una seed (data-model.md:19-40).
+
+    Unidad de almacenamiento del corpus JSONL y entrada de la validacion/dedup
+    (FR-006). `precio_m2` es derivado (`precio / area_m2`) y se calcula en la
+    ingesta. `fecha_captura` es ISO 8601 congelada en la huella (sin reloj en
+    runtime, SC-001/FR-005).
+    """
+
+    id: str
+    fuente: FuenteOferta
+    url: str | None = None
+    precio: float
+    area_m2: float
+    precio_m2: float
+    estrato: int | None = None
+    amenidades: list[str] = []
+    localidad: str | None = None
+    upl: str | None = None
+    barrio: str | None = None
+    fecha_captura: str
+
+    @field_validator("estrato")
+    @classmethod
+    def _estrato_en_rango(cls, valor: int | None) -> int | None:
+        """Defensa en profundidad FR-006: estrato 1-6 (la ingesta ya valida antes)."""
+        if valor is not None and not 1 <= valor <= 6:
+            raise ValueError(f"estrato debe ser 1-6 (recibido: {valor})")
+        return valor
+
+
+class OfertaCompetidora(BaseModel):
+    """Cluster determinista de ofertas comparables por (estrato, zona) (data-model.md:42-51).
+
+    Agrupacion por llaves discretas (D2), no un algoritmo no supervisado.
+    """
+
+    zona: str
+    conteo: int
+    precio_m2_promedio: float | None = None
+    estrato: int | None = None
+
+
+class RitmoAbsorcion(BaseModel):
+    """Velocidad de venta de la zona (unidades/mes + criterio) (data-model.md:53-60).
+
+    Estimacion heuristica determinista (D3); `criterio` documenta la formula.
+    """
+
+    unidades_mes: float | None = None
+    criterio: str | None = None
+
+
+class ContextoMercado(BaseModel):
+    """`dato` del bloque market_dynamics (data-model.md:62-72).
+
+    Todos los campos son None cuando faltan datos (degradacion por campo, FR-015):
+    nunca se infiere un dato ausente del corpus.
+    """
+
+    precio_m2_referencia: float | None = None
+    estrato: int | None = None
+    oferta_competidora: list[OfertaCompetidora] | None = None
+    ritmo_absorcion: RitmoAbsorcion | None = None
+
+
+class BloqueMarketDynamics(BaseModel):
+    """Bloque market_dynamics con el patron {estado, dato, interpretation, source_trace}.
+
+    Fuente primaria UNICA (el corpus de mercado local): NO publica `source_traces`
+    (a diferencia de F6/F7) porque la procedencia por registro (portal origen)
+    viaja dentro de `dato.oferta_competidora` / `interpretation`, no como trazas
+    fabricadas (FR-010, data-model.md:74-88).
+    """
+
+    estado: EstadoDato
+    dato: ContextoMercado | None = None
+    interpretation: str
+    source_trace: SourceTrace
+
+
 class ItemEvidenciaNormativa(BaseModel):
     """Articulo del POT citado literalmente en normative_evidence (shape del contrato).
 
@@ -988,6 +1089,7 @@ class InformeFactibilidad(BaseModel):
     urbanistic_parameters: BloqueParametrosUrbanisticos | None = None
     financial_analysis: BloqueFinancialAnalysis | None = None
     technical_feasibility: BloqueTechnicalFeasibility | None = None
+    market_dynamics: BloqueMarketDynamics | None = None
     normative_evidence: EvidenciaNormativa
     feasibility_score: FeasibilityScore
     warnings: list[Warning]

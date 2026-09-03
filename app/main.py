@@ -59,6 +59,7 @@ from app.models import (
     BloqueEquipamientosCercanos,
     BloqueEspacioPublico,
     BloqueFinancialAnalysis,
+    BloqueMarketDynamics,
     BloqueObrasPublicas,
     BloqueParametrosUrbanisticos,
     BloquePatrimonioCultural,
@@ -69,6 +70,7 @@ from app.models import (
     BloqueValorReferencia,
     Centroide,
     ContextoAdministrativo,
+    ContextoMercado,
     ContextoSocioeconomico,
     EntornoRegulatorio,
     EvidenciaNormativa,
@@ -90,6 +92,7 @@ from app.providers.arcgis import ArcGISProvider, FalloCapa
 from app.providers.arcgis_utils import RAIZ_ARCGIS
 from app.providers.geom import centroide_interior_de_geometria
 from app.providers.mapas_bogota import CandidatoDireccion, MapasBogotaProvider
+from app.providers.mercado import MercadoProvider
 from app.providers.normativa import (
     CONSULTA_MAX_CHARS,
     CORPUS_LAYER_ID,
@@ -187,12 +190,14 @@ class ServidorLotes:
         provider_normativa: NormativaProvider,
         provider_sdp: SDPProvider | None = None,
         cache_lotes: CacheLRUConTTL | None = None,
+        provider_mercado: MercadoProvider | None = None,
     ) -> None:
         self._mapas = provider_mapas
         self._arcgis = provider_arcgis
         self._upl = provider_upl
         self._normativa = provider_normativa
         self._sdp = provider_sdp or SDPProvider()
+        self._mercado = provider_mercado or MercadoProvider()
         # Cache LRU+TTL de resolucion de lote (Fase 5): por defecto se lee de
         # CACHE_TTL_SEGUNDOS (0 = desactivada); los tests inyectan la suya.
         # Chequeo explicito de None (no `or`): una cache vacia tiene __len__ 0
@@ -207,6 +212,7 @@ class ServidorLotes:
         await self._upl.aclose()
         await self._normativa.aclose()
         await self._sdp.aclose()
+        await self._mercado.aclose()
 
     async def resolve_lot_by_chip(self, chip: str) -> dict[str, Any]:
         """Resuelve un lote por CHIP y devuelve su identidad, geometria, centroide y contexto tematico con trazabilidad por fuente."""
@@ -301,6 +307,25 @@ class ServidorLotes:
             warnings=summary_warnings,
         )
 
+        # Consulta de mercado (F10, degradación independiente): filtra el corpus
+        # por localidad/UPL del centroide del lote.
+        localidad_summary: str | None = None
+        upl_codigo_summary: str | None = None
+        try:
+            upl_summary = await self._upl.consultar_upl_por_punto(
+                lote.centroid.lng, lote.centroid.lat
+            )
+            localidad_summary = upl_summary.localidad_derivada
+            upl_codigo_summary = upl_summary.codigo_upl
+        except Exception:
+            upl_summary = None
+        bloque_mercado_summary = await _bloque_market_dynamics(
+            provider_mercado=self._mercado,
+            localidad=localidad_summary,
+            upl_codigo=upl_codigo_summary,
+            warnings=summary_warnings,
+        )
+
         return {
             "identidad": _identidad_a_contrato(lote),
             "contexto_por_fuente": contexto.a_lista_por_fuente(),
@@ -317,6 +342,7 @@ class ServidorLotes:
                 "source_traces": [traza.model_dump() for traza in trazas_catastro],
             },
             "urbanistic_parameters": _bloque_a_contrato(bloque_urbanistic_summary),
+            "market_dynamics": _bloque_a_contrato(bloque_mercado_summary),
             "warnings": summary_warnings,
         }
 
@@ -1001,6 +1027,14 @@ class ServidorLotes:
             warnings=warnings,
         )
 
+        # --- F10: Motor de Mercado (lectura local del corpus, degradacion independiente) ---
+        bloque_mercado = await _bloque_market_dynamics(
+            provider_mercado=self._mercado,
+            localidad=localidad.nombre if localidad is not None else None,
+            upl_codigo=upl.codigo_upl if upl is not None else None,
+            warnings=warnings,
+        )
+
         # --- Evidencia normativa (consulta explicita o automatica; degradacion por bloque) ---
         consulta_automatica = consulta is None
         consulta_efectiva = (
@@ -1096,6 +1130,7 @@ class ServidorLotes:
             urbanistic_parameters=bloque_urbanistic,
             financial_analysis=bloque_financiero,
             technical_feasibility=bloque_tecnico,
+            market_dynamics=bloque_mercado,
         )
         score = calcular_score(bloques_evaluables)
 
@@ -1120,6 +1155,7 @@ class ServidorLotes:
             "urbanistic_parameters": _bloque_a_contrato(bloque_urbanistic),
             "financial_analysis": _bloque_a_contrato(bloque_financiero),
             "technical_feasibility": _bloque_a_contrato(bloque_tecnico),
+            "market_dynamics": _bloque_a_contrato(bloque_mercado),
             "normative_evidence": evidencia.model_dump(),
             "feasibility_score": score.model_dump(),
             "warnings": warnings,
@@ -2380,6 +2416,75 @@ def _construir_consulta_automatica(
     return ", ".join(partes)
 
 
+def _interpretar_market_dynamics(dato: ContextoMercado | None) -> str:
+    """Interpretacion determinista del bloque market_dynamics (FR-014, sin LLM).
+
+    Solo describe los datos reales del corpus (precio de referencia, estrato,
+    oferta competidora, absorcion); nunca inventa un dato ausente (FR-015).
+    """
+    if dato is None:
+        return (
+            "No se encontraron datos de mercado para la zona del lote en el "
+            "corpus de mercado consultado."
+        )
+    partes: list[str] = []
+    if dato.precio_m2_referencia is not None:
+        partes.append(
+            f"precio de referencia {_formatear_numero(dato.precio_m2_referencia)} COP/m²"
+        )
+    if dato.estrato is not None:
+        partes.append(f"estrato {dato.estrato}")
+    oferta = dato.oferta_competidora
+    if oferta:
+        total = sum(cluster.conteo for cluster in oferta)
+        zonas = ", ".join(sorted({c.zona for c in oferta}))
+        partes.append(f"{total} oferta(s) comparable(s) en {zonas}")
+    if dato.ritmo_absorcion is not None and dato.ritmo_absorcion.unidades_mes is not None:
+        partes.append(
+            f"ritmo de absorción {dato.ritmo_absorcion.unidades_mes} unidades/mes"
+        )
+    if not partes:
+        return (
+            "No se encontraron datos de mercado para la zona del lote en el "
+            "corpus de mercado consultado."
+        )
+    return f"Contexto de mercado de la zona: {', '.join(partes)}."
+
+
+async def _bloque_market_dynamics(
+    provider_mercado: MercadoProvider,
+    localidad: str | None,
+    upl_codigo: str | None,
+    warnings: list[dict[str, str]],
+) -> BloqueMarketDynamics:
+    """Construye el bloque market_dynamics con degradacion independiente (FR-003).
+
+    Consulta local al corpus de mercado (sin red, SC-006) y degrada a
+    `no_encontrado` + warning `BLOQUE_SIN_DATO` cuando el corpus esta vacio,
+    ilegible o sin registros para la zona. Nunca es fatal (FR-003, SC-003).
+    """
+    contexto, trace = await provider_mercado.consultar_market_dynamics(localidad, upl_codigo)
+    if contexto is None:
+        warnings.append({
+            "codigo": "BLOQUE_SIN_DATO",
+            "mensaje": (
+                "Bloque market_dynamics no encontrado: el corpus de mercado no "
+                "tiene registros para la zona del lote."
+            ),
+        })
+        return BloqueMarketDynamics(
+            estado="no_encontrado",
+            interpretation=_interpretar_market_dynamics(None),
+            source_trace=trace,
+        )
+    return BloqueMarketDynamics(
+        estado="disponible",
+        dato=contexto,
+        interpretation=_interpretar_market_dynamics(contexto),
+        source_trace=trace,
+    )
+
+
 def _bloque_a_contrato(
     bloque: Any,
     *,
@@ -2426,7 +2531,6 @@ def _construir_servidor_lotes() -> ServidorLotes:
         NormativaProvider(),
         SDPProvider(),
     )
-
 
 def crear_servidor_mcp(servidor_lotes: ServidorLotes | None = None) -> _ClaseServidorMCP:
     """Construye el servidor MCP registrando EXACTAMENTE las 7 tools del contrato (4 F1 + 2 F2 + 1 F3).

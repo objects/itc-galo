@@ -33,6 +33,7 @@ BLOQUES_RAIZ = {
     "urbanistic_parameters",
     "financial_analysis",
     "technical_feasibility",
+    "market_dynamics",
     "normative_evidence",
     "feasibility_score",
     "warnings",
@@ -58,6 +59,7 @@ BLOQUES_CON_ESTADO = {
     "urbanistic_parameters",
     "financial_analysis",
     "technical_feasibility",
+    "market_dynamics",
 }
 
 # Bloques multifuente que ademas publican `source_traces` (procedencia por

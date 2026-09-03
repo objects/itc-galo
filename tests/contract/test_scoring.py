@@ -13,23 +13,34 @@ from app.models import (
     BloqueContextoSocioeconomico,
     BloqueDestinoEconomico,
     BloqueEntornoRegulatorio,
+    BloqueMarketDynamics,
     BloqueObrasPublicas,
     BloquePatrimonioCultural,
     BloqueReservaVial,
     BloqueRiesgosGeotecnicos,
     BloqueValorReferencia,
     ContextoAdministrativo,
+    ContextoMercado,
     DestinoEconomico,
     EvidenciaNormativa,
     ItemEvidenciaNormativa,
     Localidad,
     ObraPublica,
+    OfertaCompetidora,
     ReservaVial,
+    RitmoAbsorcion,
     SourceTrace,
     UPL,
     ValorReferencia,
 )
-from app.scoring import PUNTOS_BASE, BloquesEvaluables, calcular_score
+from app.scoring import (
+    PUNTOS_ABSORCION_MERCADO,
+    PUNTOS_BASE,
+    PUNTOS_CONTEXTO_MERCADO,
+    PUNTOS_OFERTA_COMPETIDORA,
+    BloquesEvaluables,
+    calcular_score,
+)
 
 # Terminos de reglas urbanisticas que las reasons NUNCA deben citar (FR-014):
 # el scoring solo opera sobre datos reales de las fuentes.
@@ -370,7 +381,7 @@ def test_confidence_low_con_2_o_menos_bloques_y_reasons_de_datos_faltantes():
 
     assert resultado.confidence == "low"
     faltantes = [r for r in resultado.reasons if r.startswith("Dato faltante:")]
-    assert len(faltantes) == 17  # 18 evaluables - 1 disponible (economic_context)
+    assert len(faltantes) == 18  # 19 evaluables - 1 disponible (economic_context)
     nombres_faltantes = {f.replace("Dato faltante: ", "").rstrip(".") for f in faltantes}
     assert nombres_faltantes == {
         "administrative_context",
@@ -390,6 +401,7 @@ def test_confidence_low_con_2_o_menos_bloques_y_reasons_de_datos_faltantes():
         "urbanistic_parameters",
         "financial_analysis",
         "technical_feasibility",
+        "market_dynamics",
     }
 
 
@@ -412,3 +424,84 @@ def test_reasons_no_citan_reglas_urbanisticas_inventadas():
             assert razon, "las reasons no pueden estar vacías"
             for termino in TERMINOS_NORMATIVOS_INVENTADOS:
                 assert termino not in razon.lower(), f"'{termino}' aparece en: {razon}"
+
+
+# --- F10: reglas del mercado (T024, FR-011/FR-012, SC-001) ---
+
+
+def _bloque_mercado_completo() -> BloqueMarketDynamics:
+    """Bloque market_dynamics disponible con precio+estrato, oferta y absorcion."""
+    return BloqueMarketDynamics(
+        estado="disponible",
+        dato=ContextoMercado(
+            precio_m2_referencia=6450000.0,
+            estrato=4,
+            oferta_competidora=[
+                OfertaCompetidora(zona="Chapinero", conteo=12, precio_m2_promedio=6400000.0, estrato=4)
+            ],
+            ritmo_absorcion=RitmoAbsorcion(unidades_mes=8.5, criterio="antigüedad media"),
+        ),
+        interpretation="Contexto de mercado disponible.",
+        source_trace=_trace("corpus-mercado"),
+    )
+
+
+def _bloque_mercado_vacio() -> BloqueMarketDynamics:
+    return BloqueMarketDynamics(
+        estado="no_encontrado",
+        dato=None,
+        interpretation="sin datos de mercado.",
+        source_trace=_trace("corpus-mercado"),
+    )
+
+
+def _bloques_con_mercado(mercado: BloqueMarketDynamics) -> BloquesEvaluables:
+    base = _bloques_felices()
+    return base.model_copy(update={"market_dynamics": mercado})
+
+
+def test_constantes_puntos_mercado():
+    """Las 3 constantes nuevas tienen los valores del contrato (FR-011)."""
+    assert PUNTOS_CONTEXTO_MERCADO == 10
+    assert PUNTOS_OFERTA_COMPETIDORA == 5
+    assert PUNTOS_ABSORCION_MERCADO == 5
+
+
+def test_r_contexto_mercado_aplica_10_si_precio_y_estrato():
+    resultado = calcular_score(_bloques_con_mercado(_bloque_mercado_completo()))
+    assert "r_contexto_mercado" in resultado.rules_applied
+    assert "r_oferta_competidora" in resultado.rules_applied
+    assert "r_absorcion_mercado" in resultado.rules_applied
+
+
+def test_reglas_mercado_sumadas_al_score():
+    """market_dynamics completo suma +20 (= +10 +5 +5) sobre el flujo feliz base."""
+    resultado_sin = calcular_score(_bloques_felices())
+    resultado_con = calcular_score(_bloques_con_mercado(_bloque_mercado_completo()))
+    assert resultado_con.score - resultado_sin.score == 20
+
+
+def test_market_dynamics_none_no_es_evaluado():
+    """market_dynamics ausente (None) no penaliza ni suma (patron F8/Fase 3)."""
+    resultado = calcular_score(_bloques_felices())
+    assert "r_contexto_mercado" not in resultado.rules_applied
+    assert "r_oferta_competidora" not in resultado.rules_applied
+    assert "r_absorcion_mercado" not in resultado.rules_applied
+    # market_dynamics=None no cuenta como bloque no_encontrado
+    assert not any("market_dynamics no encontrado" in r for r in resultado.reasons)
+
+
+def test_market_dynamics_no_encontrado_cuenta_como_bloque():
+    """market_dynamics con estado no_encontrado penaliza en r_no_encontrado."""
+    resultado = calcular_score(_bloques_con_mercado(_bloque_mercado_vacio()))
+    assert "r_no_encontrado" in resultado.rules_applied
+    assert any("market_dynamics no encontrado" in r for r in resultado.reasons)
+
+
+def test_score_market_dynamics_es_determinista():
+    """SC-001: mismo input -> mismo score con el bloque adicional."""
+    b1 = _bloques_con_mercado(_bloque_mercado_completo())
+    r1 = calcular_score(b1)
+    r2 = calcular_score(_bloques_con_mercado(_bloque_mercado_completo()))
+    assert r1.score == r2.score
+    assert r1.rules_applied == r2.rules_applied

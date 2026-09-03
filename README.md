@@ -18,6 +18,7 @@ consultar la **normativa del POT** (Decreto 555 de 2021) con RAG 100 % local
 - **Fase 3**: cobertura temática faltante del informe (`public_space_context` espacio público EPT m²/hab por UPL, `road_network_context` frente vial con jerarquía derivada, `nearby_facilities` equipamientos de salud/educación/cultura con distancias) + campo `llm_ready_summary` (resumen determinista en español para LLM evaluadores; sin tools MCP nuevas).
 - **Fase 2**: motor financiero (`financial_analysis`: área vendible, ingresos, costos, VPN, TIR, viabilidad) — funciones puras deterministas con `shapely>=2.0` en CORE.
 - **Fase 3 (técnica)**: motor técnico (`technical_feasibility`: área bruta/neta vía Shapely, cabida arquitectónica) — funciones puras deterministas, integración con `planning_constraints` y `urbanistic_parameters`.
+- **Feature 10** (Motor de Mercado): bloque `market_dynamics` (precio por m² de referencia, estrato, oferta competidora y ritmo de absorción) desde un corpus local versionado poblado por scraping de portales inmobiliarios con seeds deterministas de respaldo; subcomando CLI `mercado` de ingesta; sin tools MCP nuevas.
 
 ## Requisitos
 
@@ -160,6 +161,37 @@ python -m app.ingesta.corpus acto --archivo <ruta> [--output <dir>] [--indexar]
   taxonomía de los **10 códigos de errores MCP** de `app/errores.py` no cambia
   (FR-011).
 
+## Ingesta del corpus de mercado (Feature 10)
+
+El bloque `market_dynamics` del informe se nutre de un **corpus de mercado local
+versionado** en `data/corpus/mercado/` (`seeds.jsonl` deterministas + `mercado.jsonl`
+consolidado + `mercado.sha256`), poblado por scraping best-effort de portales
+inmobiliarios (Finca Raíz, Metrocuadrado, constructoras) con **seeds deterministas
+de respaldo** ante fallo de red o restricción ToS. La ingesta es explícita por CLI
+(no automática), como el resto del pipeline:
+
+```bash
+# Corpus determinista (sin red): reproduce exactamente las seeds
+python -m app.ingesta.corpus mercado --solo-semillas
+
+# Corpus híbrido (scraping + fallback a seeds) — opción por defecto
+python -m app.ingesta.corpus mercado
+
+# Solo scraping, sin fallback a seeds (diagnóstico)
+python -m app.ingesta.corpus mercado --solo-scrape
+```
+
+- **Validación** (FR-006): `estrato` 1-6, `area_m2` ≥ 36 (mínimo POT 555),
+  `precio`/`area_m2` positivos; registros inválidos se descartan con warning
+  deduplicado.
+- **Deduplicación** por `id` estable = SHA-256 de `fuente + url` (o clave
+  normalizada `fuente|localidad|barrio|precio|area` sin URL).
+- **Huella de integridad**: `mercado.sha256` (SHA-256 del JSONL), análogo a
+  `descargar`/`acto`. El bloque `market_dynamics` se incluye tanto en
+  `get_feasibility_report` como en `get_lot_summary_by_chip`; se degrada a
+  `no_encontrado` + warning `BLOQUE_SIN_DATO` si el corpus está vacío o sin
+  registros para la zona, sin afectar el resto del informe.
+
 ## Ejecución del servidor MCP
 
 El servidor se comunica por **stdio** (transporte por defecto de FastMCP):
@@ -184,7 +216,7 @@ mcp-bogota-factibilidad
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo del lote por CHIP (identidad + contexto por fuente). |
 | `get_upl` | Resuelve la UPL del lote por CHIP, dirección o coordenadas (join espacial punto-en-polígono contra la capa UPL; localidad derivada por mapeo nombre → localidad). |
 | `consultar_normativa` | Consulta en lenguaje natural sobre el POT con citas literales de artículos (RAG local); filtro territorial estricto opcional por UPL (parte aplicable según vocación o mención explícita de la UPL). |
-| `get_feasibility_report` | Informe de factibilidad orquestado en 22 bloques (identidad, contexto administrativo, restricciones, mercado, entorno, contexto económico, geotecnia, socioeconomía, regulatorio, patrimonio cultural, movilidad, catastro, espacio público, malla vial del frente, equipamientos cercanos, parámetros urbanísticos SINUPOT/SDP + RAG, `financial_analysis`, `technical_feasibility`, evidencia normativa, score heurístico determinístico, warnings, `llm_ready_summary` y timestamp) con trazabilidad por fuente. |
+| `get_feasibility_report` | Informe de factibilidad orquestado en 23 bloques (identidad, contexto administrativo, restricciones, mercado, entorno, contexto económico, geotecnia, socioeconomía, regulatorio, patrimonio cultural, movilidad, catastro, espacio público, malla vial del frente, equipamientos cercanos, parámetros urbanísticos SINUPOT/SDP + RAG, `financial_analysis`, `technical_feasibility`, `market_dynamics`, evidencia normativa, score heurístico determinístico, warnings, `llm_ready_summary` y timestamp) con trazabilidad por fuente. |
 
 > **Nota**: el bloque `economic_context` de `get_feasibility_report` consulta la
 > capa tabular Predio de ArcGIS (`catastro/lote/MapServer/3`) y no requiere

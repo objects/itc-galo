@@ -39,6 +39,7 @@ from app.models import (
     BloqueEquipamientosCercanos,
     BloqueEspacioPublico,
     BloqueFinancialAnalysis,
+    BloqueMarketDynamics,
     BloqueObrasPublicas,
     BloqueParametrosUrbanisticos,
     BloquePatrimonioCultural,
@@ -74,6 +75,10 @@ UMBRAL_ESPACIO_PUBLICO_M2_HAB = 15.0  # estandar distrital de espacio publico (m
 PUNTOS_FRENTE_VIAL_AVENIDA = 5
 PUNTOS_EQUIPAMIENTOS_CERCANOS = 5
 PUNTOS_FINANCIERO_VIABLE = 10  # Fase 2: analisis financiero disponible y viable
+# F10: motor de mercado — reglas aditivas sobre el bloque market_dynamics.
+PUNTOS_CONTEXTO_MERCADO = 10  # precio de referencia + estrato disponibles
+PUNTOS_OFERTA_COMPETIDORA = 5  # oferta competidora no vacia
+PUNTOS_ABSORCION_MERCADO = 5  # ritmo de absorcion presente
 PENALIZACION_RESERVA_VIAL = 15
 PENALIZACION_UPL_AUSENTE = 5
 PENALIZACION_BLOQUE_NO_ENCONTRADO = 5
@@ -105,6 +110,7 @@ BLOQUES_EVALUABLES = (
     "urbanistic_parameters",
     "financial_analysis",
     "technical_feasibility",
+    "market_dynamics",
 )
 
 
@@ -134,6 +140,7 @@ class BloquesEvaluables(BaseModel):
     urbanistic_parameters: BloqueParametrosUrbanisticos | None = None
     financial_analysis: BloqueFinancialAnalysis | None = None
     technical_feasibility: BloqueTechnicalFeasibility | None = None
+    market_dynamics: BloqueMarketDynamics | None = None
 
 
 def calcular_score(bloques: BloquesEvaluables) -> FeasibilityScore:
@@ -337,6 +344,51 @@ def _reglas_positivas(
             "Equipamientos cercanos: salud o educación disponibles en el radio consultado."
         )
 
+    # --- F10: Motor de Mercado ---
+    # Regla r_contexto_mercado: precio_m2_referencia y estrato disponibles.
+    if (
+        bloques.market_dynamics is not None
+        and bloques.market_dynamics.estado == "disponible"
+        and bloques.market_dynamics.dato is not None
+        and bloques.market_dynamics.dato.precio_m2_referencia is not None
+        and bloques.market_dynamics.dato.estrato is not None
+    ):
+        puntos += PUNTOS_CONTEXTO_MERCADO
+        reglas.append("r_contexto_mercado")
+        referencia = bloques.market_dynamics.dato.precio_m2_referencia
+        estrato = bloques.market_dynamics.dato.estrato
+        razones.append(
+            f"Contexto de mercado disponible: precio de referencia "
+            f"{_formatear_numero(referencia)} COP/m² (estrato {estrato}) "
+            f"({bloques.market_dynamics.source_trace.source_name})."
+        )
+
+    # Regla r_oferta_competidora: oferta_competidora no vacia.
+    if (
+        bloques.market_dynamics is not None
+        and bloques.market_dynamics.estado == "disponible"
+        and bloques.market_dynamics.dato is not None
+        and bloques.market_dynamics.dato.oferta_competidora
+    ):
+        puntos += PUNTOS_OFERTA_COMPETIDORA
+        reglas.append("r_oferta_competidora")
+        razones.append(
+            "Oferta competidora disponible: clústeres de oferta comparables en la zona."
+        )
+
+    # Regla r_absorcion_mercado: ritmo_absorcion presente.
+    if (
+        bloques.market_dynamics is not None
+        and bloques.market_dynamics.estado == "disponible"
+        and bloques.market_dynamics.dato is not None
+        and bloques.market_dynamics.dato.ritmo_absorcion is not None
+    ):
+        puntos += PUNTOS_ABSORCION_MERCADO
+        reglas.append("r_absorcion_mercado")
+        razones.append(
+            "Ritmo de absorción disponible: estimación de unidades vendidas por mes."
+        )
+
     # --- Fase 2: Motor Financiero ---
     # Regla r_financiero_viable: analisis financiero disponible y viable.
     # `viable` es un hecho calculado deterministicamente (VPN >= 0 y TIR >=
@@ -482,6 +534,10 @@ def _bloques_con_estado(
         bloque_fase3 = getattr(bloques, nombre_fase3)
         if bloque_fase3 is not None:
             items.append((nombre_fase3, bloque_fase3))
+    # F10: market_dynamics es opcional (None = no evaluado); solo se incluye
+    # cuando está presente, mismo tratamiento de F8/Fase 3.
+    if bloques.market_dynamics is not None:
+        items.append(("market_dynamics", bloques.market_dynamics))
     return items
 
 
@@ -533,6 +589,10 @@ def _disponibilidad_bloques(bloques: BloquesEvaluables) -> dict[str, bool]:
         "technical_feasibility": (
             bloques.technical_feasibility is not None
             and bloques.technical_feasibility.estado == "disponible"
+        ),
+        "market_dynamics": (
+            bloques.market_dynamics is not None
+            and bloques.market_dynamics.estado == "disponible"
         ),
     }
 
