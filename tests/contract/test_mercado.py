@@ -113,6 +113,63 @@ async def test_provider_sin_registros_para_la_zona_devuelve_none(tmp_path):
     assert contexto is None
 
 
+async def test_provider_linea_corrupta_no_crashea_y_conserva_las_validas(tmp_path):
+    """Una linea corrupta (JSON roto o estrato fuera de rango) se omite; la lectura no lanza (M1)."""
+    valida = json.dumps(_registro_chapinero(), ensure_ascii=False)
+    corrupta_json = '{"id": "roto", "precio": 1'
+    corrupto_estrato = json.dumps(
+        {"id": "x", "fuente": "seed", "precio": 1000, "area_m2": 60, "precio_m2": 16.67, "estrato": 9, "localidad": "Chapinero", "upl": "UPL24", "barrio": "B", "fecha_captura": "2026-01-01"},
+        ensure_ascii=False,
+    )
+    ruta = tmp_path / "mercado.jsonl"
+    ruta.write_text("\n".join([valida, corrupta_json, corrupto_estrato]) + "\n", encoding="utf-8")
+
+    provider = MercadoProvider(ruta_corpus=str(ruta))
+    try:
+        contexto, trace = await provider.consultar_market_dynamics("Chapinero", "UPL24")
+    finally:
+        await provider.aclose()
+
+    # La linea valida sobrevive: el bloque queda disponible (no se lanza excepcion).
+    assert contexto is not None
+    assert contexto.precio_m2_referencia is not None
+
+
+async def test_provider_corpus_ilegible_binario_degrada_a_none_sin_lanzar(tmp_path):
+    """Un corpus binario/ilegible degrada a (None, trace) con vigencia 'corpus-ilegible' (M1)."""
+    ruta = tmp_path / "mercado.jsonl"
+    ruta.write_bytes(b"\xff\xfe\x00\x01garbage")
+
+    provider = MercadoProvider(ruta_corpus=str(ruta))
+    try:
+        contexto, trace = await provider.consultar_market_dynamics("Chapinero", "UPL24")
+    finally:
+        await provider.aclose()
+
+    assert contexto is None
+    assert trace.data_vigencia == "corpus-ilegible"
+
+
+async def test_provider_filtro_upl_prioriza_sobre_localidad(tmp_path):
+    """Con UPL + localidad, el filtro matchea SOLO por UPL (m1): no arrastra otra UPL de la misma localidad."""
+    chapinero_upl24 = _registro_chapinero(barrio="Chico Norte")
+    otra_upl_chapinero = _registro_chapinero(precio=500000000, area=80, estrato=3, barrio="Otro Barrio")
+    otra_upl_chapinero["upl"] = "UPL99"  # misma localidad, otra UPL
+    otra_upl_chapinero["id"] = "seed-999"
+    ruta = _escribir_corpus(tmp_path, [chapinero_upl24, otra_upl_chapinero])
+
+    provider = MercadoProvider(ruta_corpus=str(ruta))
+    try:
+        contexto, _ = await provider.consultar_market_dynamics("Chapinero", "UPL24")
+    finally:
+        await provider.aclose()
+
+    assert contexto is not None
+    # Solo el registro con UPL24 (1 oferta), no el de UPL99.
+    total = sum(c.conteo for c in contexto.oferta_competidora)
+    assert total == 1
+
+
 # --- Bloque market_dynamics en el informe ---
 
 

@@ -2138,10 +2138,16 @@ def cmd_mercado(args) -> None:
     try:
         import asyncio
 
+        kwargs = {}
+        if args.output is not None:
+            directorio = Path(args.output)
+            kwargs["ruta_corpus"] = str(directorio / "mercado.jsonl")
+            kwargs["ruta_hash"] = str(directorio / "mercado.sha256")
         reporte = asyncio.run(
             ingerir_mercado(
                 solo_semillas=args.solo_semillas,
                 solo_scrape=args.solo_scrape,
+                **kwargs,
             )
         )
     except ErrorIngestaMercado as e:
@@ -2355,6 +2361,11 @@ def main() -> None:
         "--solo-scrape",
         action="store_true",
         help="Solo scraping, sin fallback a seeds (diagnostico)",
+    )
+    p_mercado.add_argument(
+        "--output",
+        default=None,
+        help="Directorio de salida del JSONL + huella (default: data/corpus/mercado/)",
     )
 
     args = parser.parse_args()

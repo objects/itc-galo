@@ -205,20 +205,15 @@ def _invocar_cli(*args: str) -> "subprocess.CompletedProcess":
     )
 
 
-def test_cli_mercado_solo_semillas_exit_0():
-    """El subcomando `mercado --solo-semillas` persiste el corpus y sale 0 (FR-008)."""
-    import subprocess
-
-    resultado = _invocar_cli("--solo-semillas")
+def test_cli_mercado_solo_semillas_exit_0(tmp_path):
+    """El subcomando `mercado --solo-semillas --output <dir>` persiste el corpus en <dir> y sale 0."""
+    resultado = _invocar_cli("--solo-semillas", "--output", str(tmp_path))
     assert resultado.returncode == 0, resultado.stderr
-    salida = resultado.stdout
-    assert "Corpus de mercado" in salida
-    # El corpus versionado se regenera de forma determinista.
-    ruta_corpus = RUTA_RAIZ / "data/corpus/mercado/mercado.jsonl"
-    ruta_hash = RUTA_RAIZ / "data/corpus/mercado/mercado.sha256"
-    assert ruta_corpus.exists()
-    assert ruta_hash.exists()
-    lines = ruta_corpus.read_text(encoding="utf-8").splitlines()
+    assert "Corpus de mercado" in resultado.stdout
+    # El corpus se escribe en el directorio de salida, NO en los versionados.
+    assert (tmp_path / "mercado.jsonl").exists()
+    assert (tmp_path / "mercado.sha256").exists()
+    lines = (tmp_path / "mercado.jsonl").read_text(encoding="utf-8").splitlines()
     assert lines
 
 
@@ -228,15 +223,15 @@ def test_cli_mercado_flags_mutuamente_excluyentes():
     assert resultado.returncode != 0
 
 
-def test_cli_mercado_es_determinista_al_reejecutar():
+def test_cli_mercado_es_determinista_al_reejecutar(tmp_path):
     """Re-ejecutar la ingesta reproduce el mismo corpus (dedup, SC-005)."""
-    resultado_1 = _invocar_cli("--solo-semillas")
+    resultado_1 = _invocar_cli("--solo-semillas", "--output", str(tmp_path))
     assert resultado_1.returncode == 0
-    huella_1 = RUTA_RAIZ.joinpath("data/corpus/mercado/mercado.sha256").read_text().strip()
+    huella_1 = (tmp_path / "mercado.sha256").read_text().strip()
 
-    resultado_2 = _invocar_cli("--solo-semillas")
+    resultado_2 = _invocar_cli("--solo-semillas", "--output", str(tmp_path))
     assert resultado_2.returncode == 0
-    huella_2 = RUTA_RAIZ.joinpath("data/corpus/mercado/mercado.sha256").read_text().strip()
+    huella_2 = (tmp_path / "mercado.sha256").read_text().strip()
 
     assert huella_1 == huella_2
 

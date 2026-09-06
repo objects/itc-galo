@@ -90,8 +90,14 @@ def validar_registro(registro: dict[str, Any]) -> str | None:
 
     Devuelve el motivo en lugar de lanzar: la ingesta DESCARTE el registro
     invalido con warning deduplicado y sigue con el resto (un registro malo no
-    contamina el precio de referencia, FR-006/FR-016).
+    contamina el precio de referencia, FR-006/FR-016). Los campos obligatorios
+    `fuente` y `fecha_captura` se validan aqui (parseo defensivo): su ausencia
+    descarta el registro antes de que `_registro_a_modelo` acceda con `[]`.
     """
+    if not registro.get("fuente"):
+        return "sin fuente (obligatoria)"
+    if not registro.get("fecha_captura"):
+        return "sin fecha de captura (obligatoria)"
     precio = registro.get("precio")
     area = registro.get("area_m2")
     if precio is None or area is None:

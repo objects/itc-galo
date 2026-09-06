@@ -21,7 +21,9 @@ fuente (la lectura es local, D7).
 from __future__ import annotations
 
 import hashlib
+import json
 import statistics
+import unicodedata
 from pathlib import Path
 
 import httpx
@@ -57,8 +59,10 @@ def _huella_corpus(ruta_corpus: str) -> str | None:
 def _leer_registros(ruta_corpus: str) -> list[RegistroOfertaInmobiliaria]:
     """Lee el corpus y valida cada linea como RegistroOfertaInmobiliaria.
 
-    Un corpus ilegible (linea corrupta o JSON invalido) aborta con ValueError:
-    el llamador lo degrada a `no_encontrado` (fail-fast local, FR-003).
+    Cada linea se parsea de forma DEFENSIVA: una linea con JSON corrupto o con
+    campos fuera de rango se descarta (no lanza), para que un corpus medio roto
+    degrade a registros validos en vez de romper la lectura completa. Un archivo
+    inexistente devuelve lista vacia.
     """
     archivo = Path(ruta_corpus)
     if not archivo.is_file():
@@ -67,7 +71,12 @@ def _leer_registros(ruta_corpus: str) -> list[RegistroOfertaInmobiliaria]:
     for linea in archivo.read_text(encoding="utf-8").splitlines():
         if not linea.strip():
             continue
-        registros.append(RegistroOfertaInmobiliaria.model_validate_json(linea))
+        try:
+            registros.append(RegistroOfertaInmobiliaria.model_validate_json(linea))
+        except (json.JSONDecodeError, ValueError):
+            # Linea corrupta o con campos invalidos: se omite (degradacion por
+            # linea, FR-015); las lineas validas siguen sirviendo.
+            continue
     return registros
 
 
@@ -83,29 +92,27 @@ def _filtro_por_zona(
 ) -> list[RegistroOfertaInmobiliaria]:
     """Registros comparables para la zona del lote (D8).
 
-    La comparacion es insensible a tildes/caso por localidad; por UPL se exige
-    coincidencia exacta del codigo. Sin zona de entrada no hay filtro utilizable
-    -> lista vacia (nunca se inventa un precio de otra zona, FR-015).
+    Jerarquia del filtro: si llega UPL, se matchea SOLO por UPL (coincidencia
+    exacta del codigo); el fallback a localidad (insensible a tildes/caso) solo
+    aplica cuando no hay UPL. Asi, un lote con UPL no arrastra registros de otra
+    UPL de la misma localidad (D8: relevancia comercial estricta). Sin zona de
+    entrada no hay filtro utilizable -> lista vacia (FR-015).
     """
     if localidad is None and upl is None:
         return []
+    if upl is not None:
+        return [registro for registro in registros if registro.upl == upl]
+    clave_localidad = _clave_sin_tildes_local(localidad)
     resultado: list[RegistroOfertaInmobiliaria] = []
     for registro in registros:
         zona = _clave_zona(registro)
-        if zona is None:
-            continue
-        if upl is not None and registro.upl == upl:
-            resultado.append(registro)
-            continue
-        if localidad is not None and _clave_sin_tildes_local(zona) == _clave_sin_tildes_local(localidad):
+        if zona is not None and _clave_sin_tildes_local(zona) == clave_localidad:
             resultado.append(registro)
     return resultado
 
 
 def _clave_sin_tildes_local(texto: str) -> str:
     """Normaliza a minusculas sin tildes (comparacion de localidad determinista)."""
-    import unicodedata
-
     normalizado = unicodedata.normalize("NFD", texto)
     return "".join(c for c in normalizado if unicodedata.category(c) != "Mn").lower()
 
@@ -221,7 +228,15 @@ class MercadoProvider:
             query_timestamp=_ahora_iso(),
         )
 
-        registros = _leer_registros(self._ruta_corpus)
+        try:
+            registros = _leer_registros(self._ruta_corpus)
+        except (UnicodeDecodeError, OSError, json.JSONDecodeError, ValueError):
+            # Corpus ilegible (binario/contenido roto): degradacion no-fatal a
+            # (None, trace) con vigencia explicativa; nunca aborta el informe
+            # (FR-003, SC-003).
+            trace = trace.model_copy(update={"data_vigencia": "corpus-ilegible"})
+            return None, trace
+
         comparables = _filtro_por_zona(registros, localidad, upl)
         if not comparables:
             return None, trace

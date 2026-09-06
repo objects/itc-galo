@@ -317,8 +317,28 @@ class ServidorLotes:
             )
             localidad_summary = upl_summary.localidad_derivada
             upl_codigo_summary = upl_summary.codigo_upl
-        except Exception:
-            upl_summary = None
+        except UplNoEncontradaError:
+            # "Sin UPL" es ausencia normal (no un fallo de fuente): el bloque de
+            # mercado filtra con zona vacia y se degrada a no_encontrado, sin
+            # warning de degradacion (consistente con el informe principal).
+            pass
+        except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError) as exc:
+            summary_warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": (
+                    "Bloque market_dynamics degradado: error al resolver la UPL "
+                    f"para filtrar el corpus de mercado ({exc.source_name})."
+                ),
+            })
+        except Exception as exc:
+            summary_warnings.append({
+                "codigo": "BLOQUE_DEGRADADO",
+                "mensaje": (
+                    "Bloque market_dynamics degradado: error inesperado al "
+                    f"resolver la UPL para filtrar el corpus de mercado "
+                    f"({exc.__class__.__name__})."
+                ),
+            })
         bloque_mercado_summary = await _bloque_market_dynamics(
             provider_mercado=self._mercado,
             localidad=localidad_summary,

@@ -13,7 +13,7 @@ CAMPOS_TRAZA = {
     "query_timestamp",
 }
 
-# Los 22 bloques raiz del reporte (FR-001, F3 + F5 + F7 + F8 + Fase 3 + Fase 2 + Fase 3 técnica).
+# Los 23 bloques raiz del reporte (FR-001, F3 + F5 + F7 + F8 + Fase 3 + Fase 2 + Fase 3 técnica + F10).
 BLOQUES_RAIZ = {
     "lot_identity",
     "administrative_context",
