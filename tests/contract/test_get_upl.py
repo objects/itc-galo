@@ -134,25 +134,38 @@ async def test_get_upl_por_direccion_devuelve_upl():
 
 @pytest.mark.asyncio
 async def test_get_upl_direccion_sin_api_key_devuelve_credencial_faltante():
-    """Dirección sin MAPAS_BOGOTA_APIKEY -> CREDENCIAL_FALTANTE."""
+    """Sin MAPAS_BOGOTA_APIKEY la UPL por direccion usa fallback World sin 503."""
     from app.providers.upl import UPLProvider
     from app.providers.mapas_bogota import MapasBogotaProvider
     from app.main import ServidorLotes
-    from app.providers.arcgis import ArcGISProvider
+
+    def handler_world(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "geocode.arcgis.com" in url:
+            return httpx.Response(
+                200,
+                json={"candidates": [{"address": "Calle 26 # 69-76", "location": {"x": -74.102, "y": 4.665}, "score": 100}]},
+            )
+        if "Mapa_Referencia" in url:
+            from tests.conftest import feature_lote, geojson
+
+            return httpx.Response(200, json=geojson([feature_lote()]))
+        return httpx.Response(404, json={"error": "no mock"})
 
     servidor = ServidorLotes(
-        MapasBogotaProvider(api_key=None),  # Sin API key
-        ArcGISProvider(),
+        MapasBogotaProvider(transport=httpx.MockTransport(handler_world), api_key=None),
+        __import__('tests.conftest', fromlist=['provider_arcgis_estandar']).provider_arcgis_estandar(),
         UPLProvider(transport=httpx.MockTransport(handler_upl_ok)),
         __import__('app.providers.normativa', fromlist=['NormativaProvider']).NormativaProvider(),
-        provider_sdp_f3(),  # SDP mockeado: get_upl no lo consulta (hallazgo M5)
+        provider_sdp_f3(),
     )
     try:
         resp = await servidor.get_upl(direccion="Calle 26 # 69-76")
     finally:
         await servidor.aclose()
 
-    assert resp["error"]["code"] == "CREDENCIAL_FALTANTE"
+    assert "error" not in resp
+    assert resp["upl"]["codigo"] == "UPL17"
 
 
 @pytest.mark.asyncio

@@ -56,6 +56,14 @@ RUTA_API = "/api"
 NOMBRE_FUENTE = "mapas_bogota"
 VIGENCIA_API = "2025"  # vigencia declarada de la API de busqueda en vivo
 
+# Fallback sin API (script del usuario): World GeocodeServer de ArcGIS.
+# Tu script usaba params SingleLine/f/maxLocations/outSR — ese es el patron de
+# ArcGIS GeocodeServer, no de bogota.gov.co (que devuelve HTML). La URL correcta
+# es geocode.arcgis.com; funciona SIN apiKey y replica tu script.
+URL_WORLD_GEOCODER = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
+NOMBRE_FUENTE_WORLD = "arcgis_world_geocoder"
+VIGENCIA_WORLD = "2025"
+
 
 class PredioBuscado(BaseModel):
     """Predio devuelto por cmd=direccion_chip, con centroide en WGS84 (lng, lat).
@@ -145,25 +153,61 @@ class MapasBogotaProvider:
         return self._parsear_predio(resultados[0])
 
     async def geocodificar(self, direccion: str) -> list[CandidatoDireccion]:
-        """Geocodifica una direccion (cmd=geocodificar) y devuelve candidatos.
+        """Geocodifica una direccion y devuelve candidatos.
 
-        Defensa en profundidad (FR-010): si falta la clave se falla rapido aqui
-        tambien, aunque el limite de la tool ya valida antes de llamar al provider.
-        Si la fuente rechaza la clave ("API Key no valida", HTTP 200 status:false),
-        se reporta como CredencialFaltanteError (problema de credencial, no un
-        dato ausente ni un 5xx).
+        Intenta primero Mapas Bogota (catalogopmb, requiere MAPAS_BOGOTA_APIKEY) y,
+        si no hay clave, la clave es rechazada o no hay candidatos, cae al fallback
+        sin API: ArcGIS World Geocoder (geocode.arcgis.com) que replica el patron
+        SingleLine/f/maxLocations de tu script. Asi la tool funciona sin credencial.
         """
-        if not self.tiene_api_key():
-            raise CredencialFaltanteError(NOMBRE_FUENTE)
-        params = {"cmd": "geocodificar", "query": direccion, "apikey": self._api_key}
-        data = await self._consultar(RUTA_API, params)
-        if data.get("status") is False:
-            mensaje = _texto_o_none(data.get("message") or data.get("mensaje"))
-            if mensaje and "API Key" in mensaje:
-                raise CredencialFaltanteError(NOMBRE_FUENTE)
-            # Sin candidatos: la direccion no se localizo (dato no encontrado)
+        if self.tiene_api_key():
+            try:
+                params = {"cmd": "geocodificar", "query": direccion, "apikey": self._api_key}
+                data = await self._consultar(RUTA_API, params)
+                if data.get("status") is False:
+                    mensaje = _texto_o_none(data.get("message") or data.get("mensaje"))
+                    if mensaje and "API Key" in mensaje:
+                        # Clave rechazada -> fallback World en vez de CREDENCIAL_FALTANTE
+                        return await self._geocodificar_world(direccion)
+                    # Sin candidatos en Mapas Bogotá -> probar World
+                    world = await self._geocodificar_world(direccion)
+                    if world:
+                        return world
+                    return []
+                candidatos = self._parsear_candidatos(data)
+                if candidatos:
+                    return candidatos
+                # Mapas Bogotá vacio -> fallback
+                world = await self._geocodificar_world(direccion)
+                if world:
+                    return world
+                return candidatos
+            except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError):
+                # Fallo de catalogopmb -> degradar a World si puede resolver
+                try:
+                    world = await self._geocodificar_world(direccion)
+                    if world:
+                        return world
+                except Exception:
+                    pass
+                raise
+        # Sin api_key: directo a World (sin CREDENCIAL_FALTANTE)
+        return await self._geocodificar_world(direccion)
+
+    async def _geocodificar_world(self, direccion: str) -> list[CandidatoDireccion]:
+        """Fallback sin API via ArcGIS World GeocodeServer (patron de tu script)."""
+        params = {
+            "SingleLine": direccion,
+            "f": "json",
+            "maxLocations": 6,
+            "outSR": 4326,
+            "outFields": "Addr_type,Score",
+        }
+        try:
+            data = await self._consultar_url(URL_WORLD_GEOCODER, params, fuente=NOMBRE_FUENTE_WORLD)
+        except Fuente4xxError:
             return []
-        return self._parsear_candidatos(data)
+        return self._parsear_candidatos_world(data)
 
     async def _consultar(self, ruta: str, params: dict[str, Any]) -> dict[str, Any]:
         """GET a la API con reintentos ante fallos transitorios y clasificacion tipada.
@@ -220,6 +264,52 @@ class MapasBogotaProvider:
                 NOMBRE_FUENTE, "la respuesta no es JSON válido"
             ) from exc
         return verificar_body_sin_error(data, NOMBRE_FUENTE)
+
+    async def _consultar_url(self, url: str, params: dict[str, Any], fuente: str) -> dict[str, Any]:
+        ultima_causa: Exception | None = None
+        ultimo_status = 503
+        for intento in range(1, self._intentos + 1):
+            try:
+                respuesta = await self._client.get(url, params=params)
+            except httpx.TransportError as exc:
+                ultima_causa = exc
+                ultimo_status = 503
+            else:
+                if respuesta.status_code < 500:
+                    if respuesta.status_code >= 400:
+                        raise Fuente4xxError(fuente, respuesta.status_code)
+                    try:
+                        data = respuesta.json()
+                    except json.JSONDecodeError as exc:
+                        raise FuenteDatosInvalidosError(fuente, "la respuesta no es JSON válido") from exc
+                    return verificar_body_sin_error(data, fuente)
+                ultimo_status = respuesta.status_code
+            if intento < self._intentos:
+                await self._dormir(self._backoff_segundos * 2 ** (intento - 1))
+        if ultima_causa is not None:
+            raise Fuente5xxError(fuente, 503, detalle=f"sin respuesta tras {self._intentos} intentos ({_causa_transporte(ultima_causa)}).") from ultima_causa
+        raise Fuente5xxError(fuente, ultimo_status, detalle=f"error persistente tras {self._intentos} intentos.")
+
+    def _parsear_candidatos_world(self, data: dict[str, Any]) -> list[CandidatoDireccion]:
+        items = data.get("candidates") or data.get("resultados") or data.get("candidatos") or []
+        if isinstance(items, dict):
+            items = [items]
+        candidatos: list[CandidatoDireccion] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            loc = item.get("location") or {}
+            x = loc.get("x")
+            y = loc.get("y")
+            lat = _a_float(y)
+            lng = _a_float(x)
+            if lat is None or lng is None:
+                lat2, lng2 = _extraer_coordenadas(item)
+                lat, lng = (lat2, lng2) if lat2 is not None else (lat, lng), (lng2 if lng2 is not None else lng)
+                if lat is None or lng is None:
+                    continue
+            candidatos.append(CandidatoDireccion(direccion_normalizada=_texto_o_none(item.get("address")) or "", lat=lat, lng=lng))
+        return candidatos
 
     def _parsear_predio(self, resultado: dict[str, Any]) -> PredioBuscado | None:
         geometria = resultado.get("GEOMETRY") or {}

@@ -7,8 +7,9 @@ de 5 campos por dato (Principio III, FR-006).
 
 Taxonomia de errores (Principio IV): un 5xx de la fuente es FUENTE_5XX (nunca
 "no encontrado"); un 4xx de la fuente es PARAMETROS_INVALIDOS con mensaje que
-identifica la fuente; la falta de MAPAS_BOGOTA_APIKEY en geocodificacion es
-CREDENCIAL_FALTANTE sin llamar a las fuentes (FR-010). Toda clasificacion ocurre
+identifica la fuente; la geocodificacion por direccion usa fallback sin API
+(ArcGIS World Geocoder) cuando MAPAS_BOGOTA_APIKEY no esta configurada, replica
+tu script con SingleLine/f/maxLocations. Toda clasificacion ocurre
 en _error_de_fuente (decision A2, puntos 4 y 9).
 
 Jerarquia de fuentes del Lote (decision A1 punto 1, opcion b): la fuente primaria
@@ -1354,14 +1355,14 @@ class ServidorLotes:
     async def _resolver_por_direccion(
         self, direccion: str, *, incluir_contexto: bool = True
     ) -> tuple[Lote | None, dict | None]:
-        """Resuelve un lote por dirección geocodificada.
+        """Resuelve un lote por dirección geocodificada (con fallback sin API).
 
+        Usa Mapas Bogota si hay MAPAS_BOGOTA_APIKEY, si no cae a ArcGIS World
+        Geocoder (tu script SingleLine/f/maxLocations sin credencial).
         Returns (lote, error_dict). error_dict is None on success.
         When multiple candidates exist, returns (None, multiples_dict) with the
         candidates response from _respuesta_multiples_candidatos.
         """
-        if not self._mapas.tiene_api_key():
-            return None, construir_error(CodigoError.CREDENCIAL_FALTANTE)
         try:
             candidatos = await self._mapas.geocodificar(direccion.strip())
         except (Fuente5xxError, Fuente4xxError, FuenteDatosInvalidosError, CredencialFaltanteError) as exc:

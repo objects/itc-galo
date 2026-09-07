@@ -70,9 +70,30 @@ async def test_escenario_4_coordenadas_fuera_de_bogota_devuelve_error_claro():
     assert respuesta["error"]["code"] == "FUERA_DE_COBERTURA"
 
 
-async def test_escenario_5_direccion_sin_credencial_falla_rapido():
+async def test_escenario_5_direccion_sin_credencial_usa_fallback_world():
+    """Sin MAPAS_BOGOTA_APIKEY usa fallback geocode.arcgis.com/World (tu script SingleLine),
+    no CREDENCIAL_FALTANTE. Y CHIP/coordenadas siguen funcionando sin credencial (FR-010)."""
+
     def handler(request: httpx.Request) -> httpx.Response:
-        # Si se llamara a la fuente, esta prueba fallaria por si sola
+        url = str(request.url)
+        host = request.url.host or ""
+        if "geocode.arcgis.com" in host and "World/GeocodeServer" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "address": "Cl. 26 #69-76, Bogota",
+                            "location": {"x": -74.08, "y": 4.6},
+                            "score": 100,
+                            "attributes": {"Score": 100},
+                        }
+                    ]
+                },
+            )
+        if "geocodificar" in url:
+            # No debe llamarse a Mapas si no hay api_key (fallback directo a World).
+            raise AssertionError("Mapas geocodificar no debe llamarse sin api_key con fallback World")
         return httpx.Response(200, json=geocodificar_unica())
 
     mapas = MapasBogotaProvider(transport=httpx.MockTransport(handler), api_key=None)
@@ -84,5 +105,6 @@ async def test_escenario_5_direccion_sin_credencial_falla_rapido():
     finally:
         await servidor.aclose()
 
-    assert respuesta["error"]["code"] == "CREDENCIAL_FALTANTE"
+    assert "error" not in respuesta
+    assert respuesta["lote"]["chip"] == CHIP_VALIDO
     assert "error" not in resumen

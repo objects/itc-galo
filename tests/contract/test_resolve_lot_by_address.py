@@ -98,19 +98,43 @@ async def test_multiples_candidatos_no_elige_arbitrariamente():
 
 
 async def test_credencial_faltante_falla_rapido_sin_llamar_fuentes():
-    llamadas = []
+    """Sin MAPAS_BOGOTA_APIKEY la resolucion usa fallback World sin 503 (fix direccion)."""
+    llamadas: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        llamadas.append(request.url)
-        return httpx.Response(200, json=geocodificar_unica())
+        url = str(request.url)
+        llamadas.append(url)
+        if "geocode.arcgis.com" in url:
+            return httpx.Response(
+                200,
+                json={"candidates": [{"address": DIRECCION, "location": {"x": -74.102, "y": 4.665}, "score": 100}]},
+            )
+        if "Mapa_Referencia/Mapa_Referencia/MapServer/38/query" in url:
+            from tests.conftest import feature_lote, geojson
+
+            return httpx.Response(200, json=geojson([feature_lote()]))
+        if "valorreferencia" in url or "reservavial" in url or "obraspublicas" in url or "catastro/lote" in url:
+            from tests.conftest import feature_reserva, feature_valor, feature_obra, geojson, PAYLOAD_PREDIO
+
+            if "valorreferencia" in url:
+                return httpx.Response(200, json=geojson([feature_valor()]))
+            if "reservavial" in url:
+                return httpx.Response(200, json=geojson([feature_reserva()]))
+            if "obraspublicas" in url:
+                return httpx.Response(200, json=geojson([feature_obra("Parque")]))
+            if "catastro/lote" in url:
+                return httpx.Response(200, json=PAYLOAD_PREDIO)
+        return httpx.Response(404, json={"error": "sin respuesta"})
 
     mapas = MapasBogotaProvider(transport=httpx.MockTransport(handler), api_key=None)
-    servidor = construir_servidor(mapas=mapas)
+    from tests.conftest import provider_arcgis_estandar
+
+    servidor = construir_servidor(mapas=mapas, arcgis=provider_arcgis_estandar())
     try:
         respuesta = await servidor.resolve_lot_by_address(DIRECCION)
     finally:
         await servidor.aclose()
 
-    assert respuesta["error"]["code"] == "CREDENCIAL_FALTANTE"
-    assert "MAPAS_BOGOTA_APIKEY" in respuesta["error"]["message"]
-    assert llamadas == []  # fail-fast: nunca se consulto la fuente
+    assert "error" not in respuesta
+    assert respuesta["lote"]["chip"] == CHIP_VALIDO
+    assert any("geocode.arcgis.com" in u for u in llamadas)

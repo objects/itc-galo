@@ -55,6 +55,8 @@ async def test_direccion_no_localizada_devuelve_direccion_no_localizada():
     def _handler_geo_vacia(request: httpx.Request) -> httpx.Response:
         if request.url.params.get("cmd") == "geocodificar":
             return httpx.Response(200, json=geocodificar_vacia())
+        if "geocode.arcgis.com" in str(request.url):
+            return httpx.Response(200, json={"candidates": []})
         return httpx.Response(500, json={"error": "cmd no simulado"})
 
     mapas = MapasBogotaProvider(transport=httpx.MockTransport(_handler_geo_vacia), api_key="clave")
@@ -68,15 +70,25 @@ async def test_direccion_no_localizada_devuelve_direccion_no_localizada():
 
 
 async def test_direccion_sin_api_key_devuelve_credencial_faltante():
-    """Direccion sin MAPAS_BOGOTA_APIKEY -> CREDENCIAL_FALTANTE sin llamar fuentes."""
-    mapas = MapasBogotaProvider(api_key=None)
+    """Sin MAPAS_BOGOTA_APIKEY la factibilidad por direccion usa fallback World."""
+    def handler_world(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "geocode.arcgis.com" in url:
+            return httpx.Response(
+                200,
+                json={"candidates": [{"address": "Calle 26 # 69-76", "location": {"x": -74.102, "y": 4.665}, "score": 100}]},
+            )
+        return httpx.Response(404, json={"error": "no mock"})
+
+    mapas = MapasBogotaProvider(transport=httpx.MockTransport(handler_world), api_key=None)
     servidor = server_lotes_f3(mapas=mapas, normativa=NormativaProviderStub())
     try:
         respuesta = await servidor.get_feasibility_report(direccion="Calle 26 # 69-76")
     finally:
         await servidor.aclose()
 
-    assert respuesta["error"]["code"] == "CREDENCIAL_FALTANTE"
+    assert "error" not in respuesta
+    assert respuesta["lot_identity"]["chip"] == CHIP_VALIDO
 
 
 async def test_5xx_de_capa_lote_devuelve_fuente_5xx_y_no_no_encontrado():

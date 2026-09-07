@@ -103,11 +103,26 @@ async def test_chip_desconocido_con_body_status_false_no_es_5xx():
     assert respuesta["error"]["code"] == "LOTE_NO_ENCONTRADO"
 
 
-async def test_clave_invalida_de_geocodificacion_es_credencial_faltante():
-    """La API viva rechaza una clave invalida con HTTP 200
-    {"message": "API Key no valida", "status": false}: se reporta como
-    CREDENCIAL_FALTANTE (problema de credencial), no como direccion no localizada."""
+async def test_clave_invalida_de_geocodificacion_hace_fallback_world():
+    """Clave invalida (API Key no valida) ya no es CREDENCIAL_FALTANTE fatal:
+    el provider hace fallback a geocode.arcgis.com/World y resuelve via lote."""
     def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        host = request.url.host or ""
+        if "geocode.arcgis.com" in host and "World/GeocodeServer" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "address": "Cl. 26 #69-76, Bogota",
+                            "location": {"x": -74.08, "y": 4.6},
+                            "score": 100,
+                            "attributes": {"Score": 100},
+                        }
+                    ]
+                },
+            )
         if request.url.params.get("cmd") == "geocodificar":
             return httpx.Response(
                 200, json={"message": "API Key no valida", "status": False}
@@ -121,7 +136,8 @@ async def test_clave_invalida_de_geocodificacion_es_credencial_faltante():
     finally:
         await servidor.aclose()
 
-    assert respuesta["error"]["code"] == "CREDENCIAL_FALTANTE"
+    assert "error" not in respuesta
+    assert respuesta["lote"]["chip"] == CHIP_VALIDO
 
 
 async def test_5xx_de_geocodificacion_es_fuente_5xx_y_no_direccion_no_localizada():

@@ -60,7 +60,7 @@ cp .env.example .env
 
 | Variable | Obligatoria | Descripción |
 |----------|-------------|-------------|
-| `MAPAS_BOGOTA_APIKEY` | Solo consulta por dirección | API key de Mapas Bogotá para `geocodificar`. Sin ella, `resolve_lot_by_address` y `get_upl` por dirección fallan rápido con `CREDENCIAL_FALTANTE`; las consultas por CHIP y por coordenadas siguen funcionando. |
+| `MAPAS_BOGOTA_APIKEY` | Opcional (fallback sin clave) | API key de Mapas Bogotá para `geocodificar`. Si está configurada se usa primero Mapas Bogotá; si no, la geocodificación por dirección hace fallback automático al World GeocodeServer de ArcGIS (`geocode.arcgis.com`) sin clave (sin `CREDENCIAL_FALTANTE`). Las consultas por CHIP y por coordenadas no la usan. |
 | `OLLAMA_BASE_URL` | Solo F2 | Endpoint de Ollama (default en código `http://localhost:11434`; `.env.example` apunta al servidor remoto LAN `http://192.168.40.91:11434`; ChromaDB usa el legado `/api/embeddings`). |
 | `OLLAMA_EMBEDDING_MODEL` | Solo F2 | Modelo de embeddings (default `bge-m3`, 1024 dims). Al cambiar el modelo, la ingesta reconstruye el índice automáticamente (el modelo se persiste en la metadata de la colección; con clientes externos, borra `.data/` manualmente). |
 | `OLLAMA_CHAT_MODEL` | Solo F2 | Modelo de chat para la generación de respuesta (default en código `qwen3:8b`; `.env.example` recomienda `qwen3.5:9b`, disponible en el servidor remoto). |
@@ -211,7 +211,7 @@ mcp-bogota-factibilidad
 | Tool | Descripción |
 |------|-------------|
 | `resolve_lot_by_chip` | Resuelve un lote por CHIP y devuelve identidad, geometría/centroide y contexto temático. |
-| `resolve_lot_by_address` | Geocodifica una dirección y resuelve el lote asociado (requiere `MAPAS_BOGOTA_APIKEY`). |
+| `resolve_lot_by_address` | Geocodifica una dirección y resuelve el lote asociado (usa Mapas Bogotá si hay `MAPAS_BOGOTA_APIKEY`, si no hace fallback al World GeocodeServer). |
 | `resolve_lot_by_coordinates` | Resuelve el lote que contiene un punto (`latitud`, `longitud` en WGS84). |
 | `get_lot_summary_by_chip` | Resumen consolidado descriptivo del lote por CHIP (identidad + contexto por fuente). |
 | `get_upl` | Resuelve la UPL del lote por CHIP, dirección o coordenadas (join espacial punto-en-polígono contra la capa UPL; localidad derivada por mapeo nombre → localidad). |
