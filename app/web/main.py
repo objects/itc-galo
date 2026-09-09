@@ -199,6 +199,48 @@ def _validar_formulario(
         )
 
 
+def _inferir_cabida_desde_informe(resultado: dict[str, Any]) -> tuple[float | None, list[dict[str, Any]] | None]:
+    """Inferencia de m² construibles desde el informe: prioriza cabida normativa.
+
+    Extrae `technical_feasibility.dato.cabida_arquitectonica` (area_neta*COS,
+    donde area_neta ya descuenta reserva vial 15% y COS viene de
+    urbanistic_parameters.edificabilidad). Guarda las referencias que delimitaron
+    la cabida: technical_feasibility + planning_constraints (reserva vial) +
+    urbanistic_parameters (COS/altura/retiros). Retorna (None, None) si el informe
+    es error o sin dato.
+    """
+    if "error" in resultado:
+        return None, None
+    tec = resultado.get("technical_feasibility") or {}
+    dato = tec.get("dato") if isinstance(tec, dict) else None
+    cabida = None
+    if isinstance(dato, dict):
+        cabida = dato.get("cabida_arquitectonica")
+        try:
+            cabida = float(cabida) if cabida is not None else None
+        except (TypeError, ValueError):
+            cabida = None
+    if cabida is None:
+        return None, None
+    refs: list[dict[str, Any]] = []
+    for clave in ("technical_feasibility", "planning_constraints", "urbanistic_parameters"):
+        bloque = resultado.get(clave)
+        if isinstance(bloque, dict) and isinstance(bloque.get("source_trace"), dict):
+            refs.append(
+                {
+                    "bloque": clave,
+                    "interpretation": bloque.get("interpretation"),
+                    "source_trace": bloque.get("source_trace"),
+                }
+            )
+        # Añadir reserva vial específica si afecta
+        if clave == "planning_constraints" and isinstance(bloque, dict):
+            dato_pc = bloque.get("dato")
+            if isinstance(dato_pc, dict) and dato_pc.get("afecta_lote") is True:
+                refs[-1]["reserva_vial_afecta"] = True
+    return cabida, refs if refs else None
+
+
 def _proyecto_desde_resultado(
     nombre: str,
     criterio_tipo: str,
@@ -212,7 +254,11 @@ def _proyecto_desde_resultado(
     horizonte_meses: str | None = None,
     aversion_riesgo: str | None = None,
 ) -> Proyecto:
-    """Proyecto nuevo: estado e informe segun el resultado de la evaluacion."""
+    """Proyecto nuevo: estado e informe segun el resultado de la evaluacion.
+
+    Si `escala_m2` es None/vacío, infiere m² construibles desde
+    technical_feasibility.cabida_arquitectonica y guarda referencias.
+    """
     ahora = ahora_iso()
     es_error = "error" in resultado
 
@@ -231,6 +277,7 @@ def _proyecto_desde_resultado(
             horizonte_val = int(horizonte_meses.strip())
         except ValueError:
             horizonte_val = None
+    escala_inferida, refs_cabida = _inferir_cabida_desde_informe(resultado)
     return Proyecto(
         id=uuid.uuid4().hex,
         nombre=nombre.strip(),
@@ -243,6 +290,8 @@ def _proyecto_desde_resultado(
         presupuesto_rango=_norm(presupuesto_rango),
         horizonte_meses=horizonte_val,
         aversion_riesgo=_norm(aversion_riesgo),
+        escala_inferida_m2=escala_inferida,
+        referencias_cabida=refs_cabida,
         estado="fallido" if es_error else "completado",
         informe=None if es_error else resultado,
         error=resultado["error"] if es_error else None,
@@ -252,13 +301,19 @@ def _proyecto_desde_resultado(
 
 
 def _actualizar_proyecto(proyecto: Proyecto, resultado: dict[str, Any]) -> Proyecto:
-    """Copia del proyecto con el resultado de la re-evaluacion (mismo id)."""
+    """Copia del proyecto con el resultado de la re-evaluacion (mismo id).
+
+    Recalcula escala_inferida_m2/referencias_cabida desde el nuevo informe.
+    """
     es_error = "error" in resultado
+    escala_inferida, refs_cabida = _inferir_cabida_desde_informe(resultado)
     return proyecto.model_copy(
         update={
             "estado": "fallido" if es_error else "completado",
             "informe": None if es_error else resultado,
             "error": resultado["error"] if es_error else None,
+            "escala_inferida_m2": escala_inferida,
+            "referencias_cabida": refs_cabida,
             "actualizado_en": ahora_iso(),
         }
     )

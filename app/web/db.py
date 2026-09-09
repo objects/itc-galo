@@ -35,6 +35,8 @@ class Proyecto(BaseModel):
     presupuesto_rango: str | None = None
     horizonte_meses: int | None = None
     aversion_riesgo: str | None = None
+    escala_inferida_m2: float | None = None
+    referencias_cabida: list[dict[str, Any]] | None = None
     estado: EstadoProyecto
     informe: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
@@ -58,6 +60,17 @@ def _fila_a_proyecto(fila: sqlite3.Row) -> Proyecto:
         except (IndexError, KeyError):
             return None
 
+    def _json_col(nombre: str) -> Any | None:
+        raw = _col(nombre)
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except Exception:
+                return None
+        return raw
+
     return Proyecto(
         id=fila["id"],
         nombre=fila["nombre"],
@@ -70,6 +83,8 @@ def _fila_a_proyecto(fila: sqlite3.Row) -> Proyecto:
         presupuesto_rango=_col("presupuesto_rango"),
         horizonte_meses=_col("horizonte_meses"),
         aversion_riesgo=_col("aversion_riesgo"),
+        escala_inferida_m2=_col("escala_inferida_m2"),
+        referencias_cabida=_json_col("referencias_cabida"),
         estado=fila["estado"],
         informe=json.loads(fila["informe"]) if fila["informe"] is not None else None,
         error=json.loads(fila["error"]) if fila["error"] is not None else None,
@@ -129,6 +144,10 @@ class ProyectoRepositorio:
                 conexion.execute("ALTER TABLE proyectos ADD COLUMN horizonte_meses INTEGER")
             if "aversion_riesgo" not in columnas:
                 conexion.execute("ALTER TABLE proyectos ADD COLUMN aversion_riesgo TEXT")
+            if "escala_inferida_m2" not in columnas:
+                conexion.execute("ALTER TABLE proyectos ADD COLUMN escala_inferida_m2 REAL")
+            if "referencias_cabida" not in columnas:
+                conexion.execute("ALTER TABLE proyectos ADD COLUMN referencias_cabida TEXT")
 
     def crear(self, proyecto: Proyecto) -> Proyecto:
         """Persiste un proyecto nuevo y lo devuelve tal cual."""
@@ -137,8 +156,8 @@ class ProyectoRepositorio:
                 "INSERT INTO proyectos "
                 "(id, nombre, criterio_tipo, criterio_valor, consulta, top_k, "
                 "uso_previsto, escala_m2, presupuesto_rango, horizonte_meses, "
-                "aversion_riesgo, estado, informe, error, creado_en, actualizado_en) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "aversion_riesgo, escala_inferida_m2, referencias_cabida, estado, informe, error, creado_en, actualizado_en) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     proyecto.id,
                     proyecto.nombre,
@@ -151,6 +170,8 @@ class ProyectoRepositorio:
                     proyecto.presupuesto_rango,
                     proyecto.horizonte_meses,
                     proyecto.aversion_riesgo,
+                    proyecto.escala_inferida_m2,
+                    json.dumps(proyecto.referencias_cabida) if proyecto.referencias_cabida is not None else None,
                     proyecto.estado,
                     _a_json(proyecto.informe),
                     _a_json(proyecto.error),
@@ -183,7 +204,8 @@ class ProyectoRepositorio:
                 "UPDATE proyectos SET nombre = ?, criterio_tipo = ?, "
                 "criterio_valor = ?, consulta = ?, top_k = ?, estado = ?, "
                 "informe = ?, error = ?, actualizado_en = ?, uso_previsto = ?, "
-                "escala_m2 = ?, presupuesto_rango = ?, horizonte_meses = ?, aversion_riesgo = ? "
+                "escala_m2 = ?, presupuesto_rango = ?, horizonte_meses = ?, aversion_riesgo = ?, "
+                "escala_inferida_m2 = ?, referencias_cabida = ? "
                 "WHERE id = ?",
                 (
                     proyecto.nombre,
@@ -200,6 +222,8 @@ class ProyectoRepositorio:
                     proyecto.presupuesto_rango,
                     proyecto.horizonte_meses,
                     proyecto.aversion_riesgo,
+                    proyecto.escala_inferida_m2,
+                    json.dumps(proyecto.referencias_cabida) if proyecto.referencias_cabida is not None else None,
                     proyecto.id,
                 ),
             )

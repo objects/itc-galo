@@ -25,7 +25,24 @@
         {% if proyecto.consulta %}<span><strong>Consulta:</strong> “{{ proyecto.consulta }}”</span>{% endif %}
         <span><strong>top_k:</strong> {{ proyecto.top_k }}</span>
         <span><strong>Actualizado:</strong> {{ proyecto.actualizado_en }}</span>
+        {% if proyecto.escala_m2 is not none %}<span><strong>Escala ingresada:</strong> {{ proyecto.escala_m2 }} m²</span>{% endif %}
+        {% if proyecto.escala_inferida_m2 is not none %}
+        <span><strong>Escala inferida (cabida POT):</strong> {{ proyecto.escala_inferida_m2 | round(1) }} m²
+          {% if proyecto.escala_m2 is none %}(usada por defecto){% endif %}</span>
+        {% endif %}
       </div>
+      {% if proyecto.referencias_cabida %}
+      <details class="ayuda" style="margin-top:.75rem">
+        <summary>Normas que delimitaron la cabida ({{ proyecto.referencias_cabida | length }})</summary>
+        <ul>
+        {% for ref in proyecto.referencias_cabida %}
+          <li><strong>{{ ref.bloque }}</strong> — {{ ref.interpretation }}
+            {% if ref.source_trace %} <span class="fuente">{{ ref.source_trace.source_name }} · capa {{ ref.source_trace.layer_id }} · {{ ref.source_trace.data_vigencia }}</span>{% endif %}
+          </li>
+        {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
     </section>
 
     <section class="resumen-ejecutivo">
