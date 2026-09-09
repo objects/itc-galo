@@ -239,17 +239,18 @@ def provider_mercado_vacio():
     return MercadoProvider(ruta_corpus="data/corpus/mercado/_inexistente.jsonl")
 
 
-def construir_servidor(mapas=None, arcgis=None):
+def construir_servidor(mapas=None, arcgis=None, normativa=None):
     """ServidorLotes con providers simulados (por defecto el flujo feliz estandar).
 
     Inyecta tambien un SDPProvider mockeado (F8): las tools F1 no lo consultan,
     pero asi ningun servidor de prueba queda con provider real (hallazgo M5).
+    `normativa` inyecta un stub hermético por defecto (sin ChromaDB/Ollama).
     """
     return ServidorLotes(
         mapas if mapas is not None else provider_mapas_estandar(),
         arcgis if arcgis is not None else provider_arcgis_estandar(),
         UPLProvider(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"type": "FeatureCollection", "features": []}))),
-        NormativaProvider(),
+        normativa if normativa is not None else NormativaProviderStub(),
         provider_sdp_f3(),
         provider_mercado=provider_mercado_vacio(),
     )
@@ -429,13 +430,14 @@ def server_lotes_f3(mapas=None, arcgis=None, upl=None, normativa=None, sdp=None)
 
     `sdp` inyecta un SDPProvider mockeado por defecto (provider_sdp_f3): sin
     inyeccion explicita, ServidorLotes crearia un provider real con red
-    (hallazgo M5 del code review).
+    (hallazgo M5 del code review). `normativa` usa stub hermético por defecto
+    (sin ChromaDB/Ollama) para que ningún test toque disco/red sin inyección explícita.
     """
     return ServidorLotes(
         mapas if mapas is not None else provider_mapas_estandar(),
         arcgis if arcgis is not None else provider_arcgis_f3(),
         upl if upl is not None else provider_upl_estandar(),
-        normativa if normativa is not None else NormativaProvider(),
+        normativa if normativa is not None else NormativaProviderStub(),
         sdp if sdp is not None else provider_sdp_f3(),
         provider_mercado=provider_mercado_vacio(),
     )
