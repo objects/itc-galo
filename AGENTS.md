@@ -38,9 +38,9 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
   fallback downranked cuando los vigentes no llenan `top_k`, y jerarquía 555 > acto modificatorio en
   empates de score (desempates: fecha_vigencia más reciente, luego id). Tests:
   `tests/contract/test_rag_hibrido_vigencia.py`.
-- **Repositorio en `master`; HEAD `23f3015` (Fase 5: caché por lote con TTL e higiene general).**
+- **Repositorio en `master`; HEAD `f200bb9` (feat(geocoder): fallback sin API a ArcGIS World Geocoder).**
   La aplicación está implementada y probada: F1, F2, F3, F4, F5, F6, F7, F8 y Fase 3 completas,
-  **419 tests passing (smoke 6 + contract 413), 0 failed**, gate PASS, con las **7 tools**
+  **463 tests passing (smoke 6 + contract 457), 0 failed**, gate PASS, con las **7 tools**
   registradas (F4, F5, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
@@ -166,7 +166,7 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
   - Añade 3 bloques al informe de factibilidad: `public_space_context` (espacio público efectivo
     EPT m²/hab de la UPL del lote), `road_network_context` (ejes viales del frente, jerarquía
     DERIVADA del tipo de vía) y `nearby_facilities` (equipamientos de salud/educación/cultura con
-    distancias haversine). 20 bloques en informe, 16 evaluables.
+    distancias haversine). 23 bloques en informe, 19 evaluables.
   - Capas nuevas (verificadas en vivo): `espaciopublico/indicadorespaciopublico` [8] (Total por UPL:
     `CODIGO_UPL`, `NOMBRE`, `EPT`), `Mapa_Referencia/Mapa_Referencia` [13] (Malla Vial: `MVITIPO`,
     `MVINOMBRE`, `MVINUMC`, `MVIVELREG`; radio 100 m), `salud/serviciosips` [7] (IPS vacunación,
@@ -238,7 +238,7 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
 - Herramientas MCP: **7 implementadas** (`resolve_lot_by_chip`, `resolve_lot_by_address`,
   `resolve_lot_by_coordinates`, `get_lot_summary_by_chip`, `get_upl`, `consultar_normativa`,
   `get_feasibility_report`) registradas por `crear_servidor_mcp()` en `app/main.py`.
-  `get_feasibility_report` (F3) orquesta el informe en 20 bloques con scoring heurístico determinístico
+  `get_feasibility_report` (F3) orquesta el informe en 23 bloques con scoring heurístico determinístico
   (`calcular_score`) y degrada UPL/RAG con warnings en lugar de errores. FastMCP (mcp>=1.x) con fallback
   a MCPServer (mcp 2.x); transporte stdio;
   lifespan cierra providers (httpx.AsyncClient); validaciones fail-fast (FR-012/FR-013).
@@ -286,12 +286,12 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
 ## Estructura del proyecto
 
 - `app/`: código de aplicación. `main.py` (servidor MCP + lógica de dominio de las 7 tools, incluida
-  la orquestación de 20 bloques, `_construir_consulta_automatica` y `_construir_llm_ready_summary`
+  la orquestación de 23 bloques, `_construir_consulta_automatica` y `_construir_llm_ready_summary`
   de F3),
   `models.py` (pydantic v2: F1 SourceTrace/Lote/DatoTematico; F2 UPL/Localidad/ArticuloNormativo/
   Chunk; F3 InformeFactibilidad y bloques; F7 ContextoCatastro; F8 BloqueParametrosUrbanisticos;
   Fase 3 EspacioPublicoLote/RedVialLote/EquipamientosCercanos y sus bloques),
-  `errores.py` (taxonomía), `scoring.py` (F3+F7+F8+Fase 3, función
+  `errores.py` (taxonomía), `scoring.py` (F3+F6+F7+F8+Fase 3+F10, función
   pura `calcular_score`, determinista, sin LLM), `cache.py` (Fase 5: caché en
   memoria LRU+TTL para resolución de lote por CHIP, TTL via
   `CACHE_TTL_SEGUNDOS`) y `utilidades.py` (Fase 5: helpers compartidos —
@@ -300,10 +300,10 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
 - `app/providers/`: un provider por fuente (Principio II): `arcgis.py` (Lote, contexto temático,
   Predio F3, obras por radio, contexto catastral F7), `arcgis_utils.py` (`CapaConfig`, params/consulta compartidos),
   `mapas_bogota.py` (Mapas Bogotá), `upl.py` (capa UPL), `normativa.py` (RAG ChromaDB + Ollama),
-  `sdp.py` (F8: capas SINUPOT/SDP del POT — tratamiento layer 2 y edificabilidad layer 14).
+  `mercado.py` (F10: corpus mercado local), `financiero.py`/`tecnico.py`/`geom.py` (Fase2/3 util), `sdp.py` (F8: capas SINUPOT/SDP del POT — tratamiento layer 2 y edificabilidad layer 14).
 - `app/ingesta/`: `corpus.py` (CLI con subcomandos `descargar` (HTML sisjur → JSONL + `.sha256`, SIN
   Ollama), `indexar` (JSONL → ChromaDB), `full` (pipeline completo), `consultar` (debug) y `acto`
-  (F4: ingesta de actos modificatorios del 555)) y `actos.py` (NUEVO, F4: detección de formato por
+  (F4: ingesta de actos modificatorios del 555) y `mercado.py` (F10: ingesta mercado) y `actos.py` (NUEVO, F4: detección de formato por
   extensión + magic bytes, extracción genérica PDF/DOCX/MD/TXT, validación FR-014 y registro del
   corpus consolidado).
 - `tests/`: `smoke/test_main.py` (arranque y registro de las 7 tools) + `smoke/test_web.py`
@@ -313,10 +313,10 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   test_ingesta_actos, test_corpus_consolidado, test_precedencia + extensiones aditivas de
   test_consultar_normativa y test_get_feasibility_report + test_urbanistic_parameters.py F8 +
   test_bloques_tematicos_fase3.py (Fase 3: espacio público, malla vial, equipamientos,
-  llm_ready_summary).
+  llm_ready_summary) + test_web_informe.py (F9, 21 tareas) + test_mercado.py + test_ingesta_mercado.py (F10, 28 tareas).
   Fixtures con `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
 - `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/005-*`, `specs/006-*`,
-  `specs/007-*`, `specs/008-*`: features Spec Kit (ver "Estado actual").
+  `specs/007-*`, `specs/008-*`, `specs/009-ux-web-informe-completo` (F9, 21 tareas), `specs/010-motor-mercado` (F10, 28 tareas): features Spec Kit (ver "Estado actual").
 - `.specify/`: feature.json (feature activa), integration.json (opencode, separador `.`),
   memory/constitution.md, scripts/, templates/, workflows/.
 - `.opencode/`: commands/ (comandos `speckit.*`), opencode.json, package.json (plugin).
