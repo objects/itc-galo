@@ -18,7 +18,7 @@ Reglas (data-model.md:205-227, research D3):
   riesgo geotecncico alto -10; patrimonio cultural -10; tratamiento de
   conservacion -15.
 - `score = clamp(50 + Σ, 0, 100)` entero.
-- `confidence` por cobertura de los 16 bloques evaluables: high >= 10 disponibles,
+- `confidence` por cobertura de los 19 bloques evaluables: high >= 10 disponibles,
   medium 5-9, low <= 4. Con confidence low, las reasons enumeran los faltantes.
 - `reasons`: textos fijos por regla con el dato interpolado y el source_name.
 - `rules_applied`: codigos de regla aplicados (auditoria interna).
@@ -88,9 +88,9 @@ PENALIZACION_PATRIMONIO_CULTURAL = 10
 PENALIZACION_CONSERVACION = 15  # F8: tratamiento de conservación
 
 # Los bloques evaluables del confidence (6 originales F3 + 6 nuevos F6/F7 + 1 F8
-# + 3 nuevos Fase 3). Los umbrales de confidence (high >= 10, medium 5-9,
-# low <= 4) se mantienen absolutos: miden cobertura minima suficiente, no una
-# proporcion de la lista.
+# Los bloques evaluables del confidence (6 originales F3 + 6 nuevos F6/F7 + 1 F8
+# + 3 nuevos Fase 3 + 3 nuevos Fase 2/10: financial_analysis, technical_feasibility,
+# + market_dynamics = 19). Los umbrales...
 BLOQUES_EVALUABLES = (
     "administrative_context",
     "planning_constraints",
@@ -146,7 +146,7 @@ class BloquesEvaluables(BaseModel):
 def calcular_score(bloques: BloquesEvaluables) -> FeasibilityScore:
     """Calcula el score heuristico 0-100 con reglas puras (research D3).
 
-    `bloques` es una estructura tipada de los 16 bloques evaluables; el score es
+    `bloques` es una estructura tipada de los 19 bloques evaluables; el score es
     deterministico: misma entrada -> mismo score/confidence/reasons (SC-003).
     """
     puntos_positivos, reglas_positivas, razones_positivas = _reglas_positivas(bloques)
@@ -542,7 +542,7 @@ def _bloques_con_estado(
 
 
 def _confidence_por_cobertura(bloques: BloquesEvaluables) -> Literal["high", "medium", "low"]:
-    """Confidence por cobertura de los 16 bloques evaluables (data-model.md:102-108).
+    """Confidence por cobertura de los 19 bloques evaluables (data-model.md:102-108).
 
     Disponible = bloque con dato (upl o localidad, estado == "disponible",
     items no vacios). high >= 10, medium 5-9, low <= 4.
