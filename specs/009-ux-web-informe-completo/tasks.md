@@ -30,7 +30,7 @@
 - [x] T003 Reescribir `proyecto.html`: sección de resumen ejecutivo con `llm_ready_summary` como callout destacado — spec.md:FR-005
 - [x] T004 Reescribir `proyecto.html`: sección de identidad del lote (CHIP, dirección, coordenadas, manzana, localidad, UPL) — spec.md:FR-001
 - [x] T005 Reescribir `proyecto.html`: contenedor del mapa Leaflet con script de inicialización para geometría del lote + centroide — spec.md:FR-003, FR-004
-- [x] T006 Reescribir `proyecto.html`: loop sobre los 16 bloques evaluable con título, badge de estado, dato, interpretación y source_trace/source_traces — spec.md:FR-001, FR-002
+- [x] T006 Reescribir `proyecto.html`: loop sobre los 19 bloques evaluable con título, badge de estado, dato, interpretación y source_trace/source_traces — spec.md:FR-001, FR-002
 - [x] T007 Reescribir `proyecto.html`: sección de evidencia normativa con cada ítem (artículo, título, libro, parte, norma, cita literal) — spec.md:FR-006
 - [x] T008 Reescribir `proyecto.html`: sección de feasibility_score con score, confidence, reasons, rules_applied — spec.md:FR-007
 - [x] T009 Reescribir `proyecto.html`: sección de advertencias con código y mensaje — spec.md:FR-008
@@ -50,7 +50,7 @@
 
 ## Fase 4: Tests
 
-- [x] T012 Crear `tests/contract/test_web_informe.py` con tests que verifiquen que el detalle renderiza: score ring, llm_ready_summary, identidad del lote, mapa, los 16 bloques, evidencia normativa, score detallado, advertencias — spec.md:SC-001, SC-002
+- [x] T012 Crear `tests/contract/test_web_informe.py` con tests que verifiquen que el detalle renderiza: score ring, llm_ready_summary, identidad del lote, mapa, los 19 bloques, evidencia normativa, score detallado, advertencias — spec.md:SC-001, SC-002
 - [x] T013 Añadir test de caso ausente: geometría None -> mapa omitido gracefully — spec.md:FR-004
 
 **Checkpoint**: Tests pasan, spec validada.

@@ -6,7 +6,7 @@
 
 **Estado**: Draft
 
-**Entrada**: Descripción del usuario: "Feature 9 de mcp-bogota-factibilidad: completar la interfaz web de prefactibilidad para que la página de detalle del proyecto (`proyecto.html`) renderice el informe completo de factibilidad con los 16 bloques evaluable, la evidencia normativa, el score, las advertencias, el resumen ejecutivo, un mapa Leaflet con la geometría del lote, y la identidad contextual (CHIP, dirección, coordenadas, localidad, UPL, manzana). Actualmente solo muestra el anillo de score, la UPL y las advertencias."
+**Entrada**: Descripción del usuario: "Feature 9 de mcp-bogota-factibilidad: completar la interfaz web de prefactibilidad para que la página de detalle del proyecto (`proyecto.html`) renderice el informe completo de factibilidad con los 19 bloques evaluables, la evidencia normativa, el score, las advertencias, el resumen ejecutivo, un mapa Leaflet con la geometría del lote, y la identidad contextual (CHIP, dirección, coordenadas, localidad, UPL, manzana). Actualmente solo muestra el anillo de score, la UPL y las advertencias."
 
 ---
 
@@ -18,14 +18,14 @@ Como usuario de la interfaz web de prefactibilidad, quiero que al crear o consul
 
 **Por qué esta prioridad**: la página de detalle es el producto principal del usuario; sin ella, el informe generado es inaccesible salvo vía JSON.
 
-**Prueba independiente**: crear un proyecto vía POST y verificar que el detalle (GET) contiene: score ring, llm_ready_summary, identidad del lote, contexto administrativo, mapa Leaflet, los 16 bloques evaluable, evidencia normativa, score con razones y advertencias.
+**Prueba independiente**: crear un proyecto vía POST y verificar que el detalle (GET) contiene: score ring, llm_ready_summary, identidad del lote, contexto administrativo, mapa Leaflet, los 19 bloques evaluables, evidencia normativa, score con razones y advertencias.
 
 **Escenarios de aceptación**:
 1. Dado un proyecto completado con informe, cuando se visita la página de detalle, entonces se muestra el score con el anillo SVG y la confianza.
 2. Dado un proyecto completado con informe, cuando se visita la página de detalle, entonces se muestra el `llm_ready_summary` como párrafo destacado.
 3. Dado un proyecto completado con informe, cuando se visita la página de detalle, entonces se muestra la identidad del lote (CHIP, dirección, coordenadas, manzana, localidad, UPL).
 4. Dado un proyecto completado con informe, cuando se visita la página de detalle, entonces se muestra un mapa Leaflet con la geometría del lote y su centroide.
-5. Dado un proyecto completado con informe, cuando se visita la página de detalle, entonces se renderizan los 16 bloques evaluable con título, estado badge, dato, interpretación y proveniencia.
+5. Dado un proyecto completado con informe, cuando se visita la página de detalle, entonces se renderizan los 19 bloques evaluables con título, estado badge, dato, interpretación y proveniencia.
 6. Dado un proyecto completado con informe, cuando se visita la página de detalle, entonces se muestra la evidencia normativa con artículos, títulos, libros, partes y citas literales.
 7. Dado un proyecto completado con informe, cuando se visita la página de detalle, entonces se muestra el score con razones, reglas aplicadas y bloques evaluados/disponibles/no encontrados.
 8. Dado un proyecto completado con informe con advertencias, cuando se visita la página de detalle, entonces se muestran las advertencias con código y mensaje.
@@ -50,7 +50,7 @@ Como diseñadora de la interfaz, quiero que las nuevas secciones del informe sig
 
 ### Functional Requirements
 
-- **FR-001**: La página de detalle (`proyecto.html`) DEBE renderizar los 16 bloques evaluable del informe cuando `proyecto.estado == "completado"`.
+- **FR-001**: La página de detalle (`proyecto.html`) DEBE renderizar los 19 bloques evaluables del informe cuando `proyecto.estado == "completado"`.
 - **FR-002**: Cada bloque DEBE mostrar: título en español, badge de estado (`disponible`/`no_encontrado`), dato (serializado), interpretación, y source_trace/source_traces.
 - **FR-003**: La página DEBE incluir un mapa Leaflet con la geometría del lote (GeoJSON de `identidad_lote.geometry`) y un marcador en el centroide.
 - **FR-004**: El mapa DEBE ser absent-friendly: si `geometry` no está disponible, se omite el mapa sin errores.
@@ -75,6 +75,6 @@ Como diseñadora de la interfaz, quiero que las nuevas secciones del informe sig
 ## Success Criteria
 
 - **SC-001**: `uv run pytest -q` pasa con todos los tests existentes + nuevos.
-- **SC-002**: La página de detalle renderiza los 16 bloques del informe.
+- **SC-002**: La página de detalle renderiza los 19 bloques del informe.
 - **SC-003**: El mapa Leaflet carga y muestra la geometría del lote.
 - **SC-004**: `bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks` exit 0.

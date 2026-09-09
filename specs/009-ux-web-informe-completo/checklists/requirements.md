@@ -9,7 +9,7 @@ Estado: **Validado** contra la spec el 2026-08-31.
 
 ## Requirements
 - [x] CHK-004: Los Functional Requirements están numerados (FR-001 a FR-013) y redactados en español con DEBE/NO DEBE.
-- [x] CHK-005: FR-001: renderiza los 16 bloques evaluable.
+- [x] CHK-005: FR-001: renderiza los 19 bloques evaluables.
 - [x] CHK-006: FR-002: cada bloque muestra título, badge, dato, interpretación, source_trace.
 - [x] CHK-007: FR-003/FR-004: mapa Leaflet con geometría, absent-friendly.
 - [x] CHK-008: FR-005: llm_ready_summary como callout.
@@ -23,7 +23,7 @@ Estado: **Validado** contra la spec el 2026-08-31.
 
 ## Success Criteria
 - [x] CHK-016: SC-001: pytest pasa con tests existentes + nuevos.
-- [x] CHK-017: SC-002: página renderiza los 16 bloques.
+- [x] CHK-017: SC-002: página renderiza los 19 bloques.
 - [x] CHK-018: SC-003: mapa Leaflet muestra geometría.
 - [x] CHK-019: SC-004: check-prerequisites.sh exit 0.
 
