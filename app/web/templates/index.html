@@ -33,12 +33,96 @@
         <label for="top_k">Resultados normativos (top_k)</label>
         <input type="number" id="top_k" name="top_k" value="3" min="1" max="6">
       </div>
+      <details class="campo campo--plegable" open>
+        <summary class="campo__resumen">Interrogación de inversión (opcional)</summary>
+        <p class="ayuda" style="margin: 0.5rem 0;">Flujo interrogativo IA: uso previsto, escala, presupuesto, horizonte y aversión al riesgo. Alimentan el contexto de la decisión; no alteran el scoring.</p>
+        <div class="campo">
+          <label for="uso_previsto">Uso previsto</label>
+          <select id="uso_previsto" name="uso_previsto">
+            <option value="" selected>-- Sin especificar --</option>
+            <option value="residencial">Residencial</option>
+            <option value="comercial">Comercial</option>
+            <option value="mixto">Mixto</option>
+            <option value="dotacional">Dotacional</option>
+            <option value="industrial">Industrial</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label for="escala_m2">Escala (m² construidos)</label>
+          <input type="number" id="escala_m2" name="escala_m2" min="36" step="0.01" placeholder="Ej. 1200">
+          <p class="ayuda">Mínimo 36 m² (POT).</p>
+        </div>
+        <div class="campo">
+          <label for="presupuesto_rango">Presupuesto</label>
+          <select id="presupuesto_rango" name="presupuesto_rango">
+            <option value="" selected>-- Sin especificar --</option>
+            <option value="bajo">Bajo (&lt; 500M)</option>
+            <option value="medio">Medio (500M – 2.000M)</option>
+            <option value="alto">Alto (&gt; 2.000M)</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label for="horizonte_meses">Horizonte (meses)</label>
+          <input type="number" id="horizonte_meses" name="horizonte_meses" min="6" max="120" placeholder="Ej. 24">
+        </div>
+        <div class="campo">
+          <label for="aversion_riesgo">Aversión al riesgo</label>
+          <select id="aversion_riesgo" name="aversion_riesgo">
+            <option value="" selected>-- Sin especificar --</option>
+            <option value="baja">Baja</option>
+            <option value="media">Media</option>
+            <option value="alta">Alta</option>
+          </select>
+        </div>
+      </details>
       <button class="boton boton--ambar" type="submit">
         Evaluar lote
         <span id="indicador-evaluar" class="htmx-indicator">…</span>
       </button>
+      <div id="preview-lote" class="ayuda" style="margin-top:0.5rem;min-height:1.2em;"></div>
     </form>
   </section>
+  <section class="tarjeta" id="seccion-mapa">
+    <h2 class="tarjeta__titulo">Selección en mapa (opcional)</h2>
+    <p class="ayuda">Haz clic en el mapa para seleccionar por coordenadas. Se autocompleta el criterio y valida preview sin generar informe.</p>
+    <div id="mapa-seleccion" style="height: 320px; border-radius: 8px; border: 1px solid var(--borde);"></div>
+    <p class="ayuda" id="mapa-ayuda">Centro inicial: Bogotá (4.65, -74.10).</p>
+  </section>
+  <script>
+  (function(){
+    var elMapa = document.getElementById('mapa-seleccion');
+    if (!elMapa || typeof L === 'undefined') return;
+    var mapa = L.map('mapa-seleccion').setView([4.65, -74.10], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'}).addTo(mapa);
+    var marcador = null;
+    var previewEl = document.getElementById('preview-lote');
+    var tipoEl = document.getElementById('criterio_tipo');
+    var valorEl = document.getElementById('criterio_valor');
+    var ayudaEl = document.getElementById('mapa-ayuda');
+    function setPreview(data){
+      if (!previewEl) return;
+      if (!data) { previewEl.textContent = ''; return; }
+      if (data.lote) {
+        var l = data.lote;
+        previewEl.textContent = 'Preview: ' + (l.chip || '') + ' · ' + (l.direccion_normalizada || l.barrio || '') + (data.upl ? ' · UPL ' + data.upl.nombre : '');
+      } else if (data.mensaje) { previewEl.textContent = data.mensaje; }
+    }
+    mapa.on('click', function(e){
+      var lat = e.latlng.lat.toFixed(6), lng = e.latlng.lng.toFixed(6);
+      if (tipoEl) tipoEl.value = 'coordenadas';
+      if (valorEl) valorEl.value = lat + ',' + lng;
+      if (marcador) mapa.removeLayer(marcador);
+      marcador = L.marker([lat, lng]).addTo(mapa);
+      if (ayudaEl) ayudaEl.textContent = 'Seleccionado: ' + lat + ', ' + lng + ' — validando preview…';
+      fetch('/proyectos/preview', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({criterio_tipo:'coordenadas', criterio_valor: lat + ',' + lng})})
+        .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, status:r.status, body:j}; }); })
+        .then(function(res){
+          if (res.ok) { setPreview(res.body); if (ayudaEl) ayudaEl.textContent = 'Preview OK — listo para Evaluar lote.'; }
+          else { setPreview({mensaje: (res.body && res.body.mensaje) || 'Preview no disponible ('+res.status+')'}); if (ayudaEl) ayudaEl.textContent = 'Preview: ' + ((res.body && res.body.codigo) || res.status); }
+        }).catch(function(){ if (ayudaEl) ayudaEl.textContent = 'Preview no disponible (red).'; });
+    });
+  })();
+  </script>
 
   <section class="tarjeta">
     <h2 class="tarjeta__titulo">Proyectos recientes</h2>

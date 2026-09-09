@@ -124,12 +124,22 @@ def _kwargs_evaluacion(
     return kwargs
 
 
+USOS_VALIDOS = {"residencial", "comercial", "mixto", "dotacional", "industrial"}
+PRESUPUESTO_VALIDOS = {"menos_1000M", "1000_5000M", "5000_10000M", "mas_10000M"}
+AVERSION_VALIDOS = {"baja", "media", "alta"}
+
+
 def _validar_formulario(
     nombre: str,
     criterio_tipo: str,
     criterio_valor: str,
     consulta: str | None,
     top_k: int,
+    uso_previsto: str | None = None,
+    escala_m2: str | None = None,
+    presupuesto_rango: str | None = None,
+    horizonte_meses: str | None = None,
+    aversion_riesgo: str | None = None,
 ) -> None:
     """Fail-fast (FR-012): cualquier campo invalido es HTTPException(400)."""
     if not nombre or not nombre.strip():
@@ -147,7 +157,46 @@ def _validar_formulario(
             detail=f"La consulta no puede superar {CONSULTA_MAX_CHARS} caracteres.",
         )
     if not 1 <= top_k <= TOP_K_MAX:
-        raise HTTPException(status_code=400, detail=f"top_k debe estar entre 1 y {TOP_K_MAX}.")
+        raise HTTPException(
+            status_code=400, detail=f"top_k debe estar entre 1 y {TOP_K_MAX}."
+        )
+    if uso_previsto and uso_previsto.strip() and uso_previsto.strip() not in USOS_VALIDOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"uso_previsto debe ser uno de {sorted(USOS_VALIDOS)}.",
+        )
+    if escala_m2 and escala_m2.strip():
+        try:
+            v = float(escala_m2.strip())
+            if v <= 0 or v < 36:
+                raise HTTPException(status_code=400, detail="escala_m2 debe ser >= 36.")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="escala_m2 debe ser numérico.")
+    pr = presupuesto_rango.strip() if presupuesto_rango else ""
+    if pr and pr not in PRESUPUESTO_VALIDOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"presupuesto_rango debe ser uno de {sorted(PRESUPUESTO_VALIDOS)}.",
+        )
+    if horizonte_meses and horizonte_meses.strip():
+        try:
+            v = int(horizonte_meses.strip())
+            if not 6 <= v <= 120:
+                raise HTTPException(
+                    status_code=400,
+                    detail="horizonte_meses debe estar entre 6 y 120.",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="horizonte_meses debe ser entero.",
+            )
+    av = aversion_riesgo.strip() if aversion_riesgo else ""
+    if av and av not in AVERSION_VALIDOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"aversion_riesgo debe ser uno de {sorted(AVERSION_VALIDOS)}.",
+        )
 
 
 def _proyecto_desde_resultado(
@@ -157,10 +206,31 @@ def _proyecto_desde_resultado(
     consulta: str | None,
     top_k: int,
     resultado: dict[str, Any],
+    uso_previsto: str | None = None,
+    escala_m2: str | None = None,
+    presupuesto_rango: str | None = None,
+    horizonte_meses: str | None = None,
+    aversion_riesgo: str | None = None,
 ) -> Proyecto:
     """Proyecto nuevo: estado e informe segun el resultado de la evaluacion."""
     ahora = ahora_iso()
     es_error = "error" in resultado
+
+    def _norm(v: str | None) -> str | None:
+        return v.strip() if v and v.strip() else None
+
+    escala_val = None
+    if escala_m2 and escala_m2.strip():
+        try:
+            escala_val = float(escala_m2.strip())
+        except ValueError:
+            escala_val = None
+    horizonte_val = None
+    if horizonte_meses and horizonte_meses.strip():
+        try:
+            horizonte_val = int(horizonte_meses.strip())
+        except ValueError:
+            horizonte_val = None
     return Proyecto(
         id=uuid.uuid4().hex,
         nombre=nombre.strip(),
@@ -168,6 +238,11 @@ def _proyecto_desde_resultado(
         criterio_valor=criterio_valor.strip(),
         consulta=consulta.strip() if consulta else None,
         top_k=top_k,
+        uso_previsto=_norm(uso_previsto),
+        escala_m2=escala_val,
+        presupuesto_rango=_norm(presupuesto_rango),
+        horizonte_meses=horizonte_val,
+        aversion_riesgo=_norm(aversion_riesgo),
         estado="fallido" if es_error else "completado",
         informe=None if es_error else resultado,
         error=resultado["error"] if es_error else None,
@@ -209,15 +284,94 @@ def _registrar_rutas(app: FastAPI) -> None:
         criterio_valor: str = Form(""),
         consulta: str | None = Form(None),
         top_k: int = Form(3),
+        uso_previsto: str | None = Form(None),
+        escala_m2: str | None = Form(None),
+        presupuesto_rango: str | None = Form(None),
+        horizonte_meses: str | None = Form(None),
+        aversion_riesgo: str | None = Form(None),
     ):
-        _validar_formulario(nombre, criterio_tipo, criterio_valor, consulta, top_k)
+        _validar_formulario(
+            nombre, criterio_tipo, criterio_valor, consulta, top_k,
+            uso_previsto, escala_m2, presupuesto_rango, horizonte_meses, aversion_riesgo,
+        )
         kwargs = _kwargs_evaluacion(criterio_tipo, criterio_valor, consulta, top_k)
         resultado = await request.app.state.servidor_lotes.get_feasibility_report(**kwargs)
         proyecto = _proyecto_desde_resultado(
-            nombre, criterio_tipo, criterio_valor, consulta, top_k, resultado
+            nombre, criterio_tipo, criterio_valor, consulta, top_k, resultado,
+            uso_previsto, escala_m2, presupuesto_rango, horizonte_meses, aversion_riesgo,
         )
         request.app.state.repositorio.crear(proyecto)
         return RedirectResponse(url=f"/proyectos/{proyecto.id}", status_code=303)
+
+    @app.post("/proyectos/preview")
+    async def preview_lote(
+        request: Request,
+        criterio_tipo: str = Form(""),
+        criterio_valor: str = Form(""),
+    ):
+        """Preview ligero del lote para el wizard paso 1: identidad + geometría + UPL.
+
+        Usa los resolvers de F1 (chip/dirección/coordenadas) sin orquestar el informe
+        completo de 23 bloques. Extrae el lote y consulta la UPL por el centroide;
+        la ausencia de UPL se reporta sin fallar (BLOQUE_SIN_DATO). Falla rápido
+        400 si el criterio es inválido; 404/502 si el lote no existe o la fuente
+        falla. Respuesta JSON estática para HTMX/Leaflet sin depender de Ollama.
+        """
+        if criterio_tipo not in CRITERIOS_VALIDOS:
+            raise HTTPException(
+                status_code=400,
+                detail="El criterio debe ser 'chip', 'direccion' o 'coordenadas'.",
+            )
+        if not criterio_valor or not criterio_valor.strip():
+            raise HTTPException(status_code=400, detail="El valor del criterio es obligatorio.")
+        lote = None
+        error = None
+        servidor: ServidorLotes = request.app.state.servidor_lotes
+        if criterio_tipo == "chip":
+            from app.utilidades import PATRON_CHIP
+
+            if not PATRON_CHIP.match(criterio_valor.strip().upper()):
+                raise HTTPException(status_code=400, detail="CHIP inválido: debe tener 11 caracteres alfanuméricos.")
+            lote, error = await servidor._resolver_lote_por_chip(criterio_valor.strip().upper())
+        elif criterio_tipo == "direccion":
+            valor = criterio_valor.strip()
+            if len(valor) > 500:
+                raise HTTPException(status_code=400, detail="Dirección demasiado larga.")
+            lote, error = await servidor._resolver_por_direccion(valor)
+        else:
+            coords = _coordenadas_desde_texto(criterio_valor)
+            lote, error = await servidor._resolver_lote_por_punto(coords["lon"], coords["lat"])
+            if error is None and lote is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": {"code": "FUERA_DE_COBERTURA", "message": "Punto fuera de cobertura."}},
+                )
+        if error:
+            codigo = (error.get("error") or {}).get("code") or "ERROR"
+            return JSONResponse(status_code=_error_a_http(codigo), content=error)
+        if lote is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"code": "LOTE_NO_ENCONTRADO", "message": "Lote no encontrado."}},
+            )
+        upl_payload = None
+        try:
+            upl = await servidor._upl.consultar_upl_por_punto(lote.centroid.lng, lote.centroid.lat)
+            upl_payload = {"codigo": upl.codigo_upl, "nombre": upl.nombre, "localidad": upl.localidad_derivada}
+        except Exception:
+            upl_payload = None
+        return JSONResponse(
+            content={
+                "lote": {
+                    "chip": lote.chip,
+                    "direccion_normalizada": lote.direccion_normalizada,
+                    "barrio": lote.barrio,
+                    "centroid": {"lat": lote.centroid.lat, "lng": lote.centroid.lng},
+                    "geometry": lote.geometry,
+                },
+                "upl": upl_payload,
+            }
+        )
 
     @app.get("/proyectos/{proyecto_id}")
     async def ver_proyecto(request: Request, proyecto_id: str):

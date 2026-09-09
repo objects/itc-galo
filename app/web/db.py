@@ -30,6 +30,11 @@ class Proyecto(BaseModel):
     criterio_valor: str
     consulta: str | None = None
     top_k: int = 3
+    uso_previsto: str | None = None
+    escala_m2: float | None = None
+    presupuesto_rango: str | None = None
+    horizonte_meses: int | None = None
+    aversion_riesgo: str | None = None
     estado: EstadoProyecto
     informe: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
@@ -46,6 +51,13 @@ def _a_json(valor: dict[str, Any] | None) -> str | None:
 
 
 def _fila_a_proyecto(fila: sqlite3.Row) -> Proyecto:
+    # Compatibilidad: proyectos viejos sin columnas wizard leen None sin error.
+    def _col(nombre: str) -> Any | None:
+        try:
+            return fila[nombre]
+        except (IndexError, KeyError):
+            return None
+
     return Proyecto(
         id=fila["id"],
         nombre=fila["nombre"],
@@ -53,6 +65,11 @@ def _fila_a_proyecto(fila: sqlite3.Row) -> Proyecto:
         criterio_valor=fila["criterio_valor"],
         consulta=fila["consulta"],
         top_k=fila["top_k"],
+        uso_previsto=_col("uso_previsto"),
+        escala_m2=_col("escala_m2"),
+        presupuesto_rango=_col("presupuesto_rango"),
+        horizonte_meses=_col("horizonte_meses"),
+        aversion_riesgo=_col("aversion_riesgo"),
         estado=fila["estado"],
         informe=json.loads(fila["informe"]) if fila["informe"] is not None else None,
         error=json.loads(fila["error"]) if fila["error"] is not None else None,
@@ -98,14 +115,30 @@ class ProyectoRepositorio:
                 )
                 """
             )
+            columnas = {
+                fila[1]
+                for fila in conexion.execute("PRAGMA table_info(proyectos)").fetchall()
+            }
+            if "uso_previsto" not in columnas:
+                conexion.execute("ALTER TABLE proyectos ADD COLUMN uso_previsto TEXT")
+            if "escala_m2" not in columnas:
+                conexion.execute("ALTER TABLE proyectos ADD COLUMN escala_m2 REAL")
+            if "presupuesto_rango" not in columnas:
+                conexion.execute("ALTER TABLE proyectos ADD COLUMN presupuesto_rango TEXT")
+            if "horizonte_meses" not in columnas:
+                conexion.execute("ALTER TABLE proyectos ADD COLUMN horizonte_meses INTEGER")
+            if "aversion_riesgo" not in columnas:
+                conexion.execute("ALTER TABLE proyectos ADD COLUMN aversion_riesgo TEXT")
 
     def crear(self, proyecto: Proyecto) -> Proyecto:
         """Persiste un proyecto nuevo y lo devuelve tal cual."""
         with self._conexion() as conexion:
             conexion.execute(
-                "INSERT INTO proyectos (id, nombre, criterio_tipo, criterio_valor, "
-                "consulta, top_k, estado, informe, error, creado_en, actualizado_en) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO proyectos "
+                "(id, nombre, criterio_tipo, criterio_valor, consulta, top_k, "
+                "uso_previsto, escala_m2, presupuesto_rango, horizonte_meses, "
+                "aversion_riesgo, estado, informe, error, creado_en, actualizado_en) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     proyecto.id,
                     proyecto.nombre,
@@ -113,6 +146,11 @@ class ProyectoRepositorio:
                     proyecto.criterio_valor,
                     proyecto.consulta,
                     proyecto.top_k,
+                    proyecto.uso_previsto,
+                    proyecto.escala_m2,
+                    proyecto.presupuesto_rango,
+                    proyecto.horizonte_meses,
+                    proyecto.aversion_riesgo,
                     proyecto.estado,
                     _a_json(proyecto.informe),
                     _a_json(proyecto.error),
@@ -144,7 +182,9 @@ class ProyectoRepositorio:
             cursor = conexion.execute(
                 "UPDATE proyectos SET nombre = ?, criterio_tipo = ?, "
                 "criterio_valor = ?, consulta = ?, top_k = ?, estado = ?, "
-                "informe = ?, error = ?, actualizado_en = ? WHERE id = ?",
+                "informe = ?, error = ?, actualizado_en = ?, uso_previsto = ?, "
+                "escala_m2 = ?, presupuesto_rango = ?, horizonte_meses = ?, aversion_riesgo = ? "
+                "WHERE id = ?",
                 (
                     proyecto.nombre,
                     proyecto.criterio_tipo,
@@ -155,6 +195,11 @@ class ProyectoRepositorio:
                     _a_json(proyecto.informe),
                     _a_json(proyecto.error),
                     proyecto.actualizado_en,
+                    proyecto.uso_previsto,
+                    proyecto.escala_m2,
+                    proyecto.presupuesto_rango,
+                    proyecto.horizonte_meses,
+                    proyecto.aversion_riesgo,
                     proyecto.id,
                 ),
             )
