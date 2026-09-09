@@ -6,7 +6,7 @@
 
 **Estado**: Draft
 
-**Entrada**: Descripción del usuario: "Motor de Mercado para prefactibilidad inmobiliaria en Bogotá (F10): añade el bloque `market_context` al informe de factibilidad con precio por m² de referencia, estrato, oferta competidora (clustering) y ritmos de absorción. Los datos se obtienen por scraping de portales inmobiliarios (Finca Raíz, Metrocuadrado, constructoras) con un corpus local de seeds deterministas como respaldo ante fallos de red o restricciones ToS. Incluye un subcomando CLI `python -m app.ingesta.corpus mercado` para actualizar el corpus de mercado. Las 7 tools MCP permanecen sin cambios."
+**Entrada**: Descripción del usuario: "Motor de Mercado para prefactibilidad inmobiliaria en Bogotá (F10): añade el bloque `market_dynamics` al informe de factibilidad con precio por m² de referencia, estrato, oferta competidora (clustering) y ritmos de absorción. Los datos se obtienen por scraping de portales inmobiliarios (Finca Raíz, Metrocuadrado, constructoras) con un corpus local de seeds deterministas como respaldo ante fallos de red o restricciones ToS. Incluye un subcomando CLI `python -m app.ingesta.corpus mercado` para actualizar el corpus de mercado. Las 7 tools MCP permanecen sin cambios."
 
 ---
 
@@ -18,19 +18,19 @@ Como usuario del servidor MCP, quiero que al consultar la factibilidad de un lot
 
 **Por qué esta prioridad**: el mercado es uno de los 4 pilares de prefactibilidad (Legal/Normativo, Mercado, Técnico/Diseño, Financiero). Sin datos de mercado, el análisis financiero carece de sustento: el precio por m² y el ritmo de absorción determinan los ingresos y la velocidad de venta del proyecto. Es el único de los 4 motores del MVP aún no implementado.
 
-**Prueba independiente**: invocar `get_feasibility_report` con un CHIP válido y verificar que `market_context` tiene el patrón `{estado, dato, interpretation, source_trace}` con los campos `precio_m2_referencia`, `estrato`, `oferta_competidora` y `ritmo_absorcion`.
+**Prueba independiente**: invocar `get_feasibility_report` con un CHIP válido y verificar que `market_dynamics` tiene el patrón `{estado, dato, interpretation, source_trace}` con los campos `precio_m2_referencia`, `estrato`, `oferta_competidora` y `ritmo_absorcion`.
 
 **Escenarios de aceptación**:
-1. Dado un lote con datos de mercado disponibles en el corpus, cuando se genera el reporte, entonces `market_context.dato.precio_m2_referencia` contiene el precio por m² de referencia de la zona.
-2. Dado un lote con estrato identificable, cuando se genera el reporte, entonces `market_context.dato.estrato` contiene el estrato (1 a 6) de la zona.
-3. Dado un lote con ofertas comparables en el corpus, cuando se genera el reporte, entonces `market_context.dato.oferta_competidora` contiene los clústeres de oferta con conteo y precio promedio.
-4. Dado un lote con datos de absorción disponibles, cuando se genera el reporte, entonces `market_context.dato.ritmo_absorcion` contiene unidades/mes y el criterio de cálculo.
-5. Dado un lote sin datos de mercado, cuando se genera el reporte, entonces `market_context.estado == "no_encontrado"` con `interpretation` que indica la ausencia.
-6. Dado que el corpus de mercado está vacío o corrupto, cuando se genera el reporte, entonces `market_context` se degrada con warning sin afectar otros bloques.
+1. Dado un lote con datos de mercado disponibles en el corpus, cuando se genera el reporte, entonces `market_dynamics.dato.precio_m2_referencia` contiene el precio por m² de referencia de la zona.
+2. Dado un lote con estrato identificable, cuando se genera el reporte, entonces `market_dynamics.dato.estrato` contiene el estrato (1 a 6) de la zona.
+3. Dado un lote con ofertas comparables en el corpus, cuando se genera el reporte, entonces `market_dynamics.dato.oferta_competidora` contiene los clústeres de oferta con conteo y precio promedio.
+4. Dado un lote con datos de absorción disponibles, cuando se genera el reporte, entonces `market_dynamics.dato.ritmo_absorcion` contiene unidades/mes y el criterio de cálculo.
+5. Dado un lote sin datos de mercado, cuando se genera el reporte, entonces `market_dynamics.estado == "no_encontrado"` con `interpretation` que indica la ausencia.
+6. Dado que el corpus de mercado está vacío o corrupto, cuando se genera el reporte, entonces `market_dynamics` se degrada con warning sin afectar otros bloques.
 
 ### User Story 2 (P2) — Ingesta de mercado (scraping + seeds deterministas)
 
-Como operador del sistema, quiero poblar el corpus de mercado con datos de portales inmobiliarios (Finca Raíz, Metrocuadrado, constructoras) y con un conjunto de seeds deterministas de respaldo, para que el bloque `market_context` tenga datos reales y reproducibles.
+Como operador del sistema, quiero poblar el corpus de mercado con datos de portales inmobiliarios (Finca Raíz, Metrocuadrado, constructoras) y con un conjunto de seeds deterministas de respaldo, para que el bloque `market_dynamics` tenga datos reales y reproducibles.
 
 **Por qué esta prioridad**: sin un corpus poblado, el bloque de mercado (US1) siempre se degrada. La ingesta híbrida (scraping real + seeds deterministas) garantiza que el bloque funcione tanto con red como sin ella.
 
@@ -59,7 +59,7 @@ Como operador del sistema, quiero un subcomando CLI `python -m app.ingesta.corpu
 
 - **Scraping falla (red/5xx)**: la ingesta cae a seeds deterministas; el corpus queda poblado y el bloque no se degrada por ello.
 - **Restricción ToS del portal**: el scraping respeta robots.txt y límites; ante bloqueo, usa seeds.
-- **Corpus vacío**: el bloque `market_context` se reporta como `no_encontrado` con warning `BLOQUE_SIN_DATO`.
+- **Corpus vacío**: el bloque `market_dynamics` se reporta como `no_encontrado` con warning `BLOQUE_SIN_DATO`.
 - **Corpus corrupto o con esquema legado**: la ingesta detecta el esquema y reconstruye; el bloque degrada con warning si el esquema no es legible.
 - **Lote sin estrato derivable**: el bloque reporta `estrato: null` con interpretation que indica que no pudo derivarse.
 - **Ofertas con precio/área inconsistentes**: se validan rangos (estrato 1-6, área mínima 36 m²) y se descartan con warning deduplicado.
@@ -72,8 +72,8 @@ Como operador del sistema, quiero un subcomando CLI `python -m app.ingesta.corpu
 
 ### Functional Requirements
 
-- FR-001: El reporte DEBE incluir un bloque `market_context` con los campos: `precio_m2_referencia` (float o null), `estrato` (int 1-6 o null), `oferta_competidora` (lista de clústeres con `zona`, `conteo`, `precio_m2_promedio` o null), `ritmo_absorcion` (objeto con `unidades_mes` y `criterio` o null).
-- FR-002: El bloque `market_context` DEBE seguir el patrón `{estado, dato, interpretation, source_trace}` de F3/F6/F7/F8.
+- FR-001: El reporte DEBE incluir un bloque `market_dynamics` con los campos: `precio_m2_referencia` (float o null), `estrato` (int 1-6 o null), `oferta_competidora` (lista de clústeres con `zona`, `conteo`, `precio_m2_promedio` o null), `ritmo_absorcion` (objeto con `unidades_mes` y `criterio` o null).
+- FR-002: El bloque `market_dynamics` DEBE seguir el patrón `{estado, dato, interpretation, source_trace}` de F3/F6/F7/F8.
 - FR-003: El bloque DEBE degradarse independientemente: si el corpus de mercado está vacío o es ilegible, el bloque se reporta como `no_encontrado` con warning `BLOQUE_SIN_DATO`; un fallo de scraping nunca es fatal para el informe.
 - FR-004: Los datos de mercado DEBEN provenir de un corpus local versionado (fuente de verdad), poblado por scraping de portales inmobiliarios (Finca Raíz, Metrocuadrado, portales de constructoras) y por seeds deterministas de respaldo.
 - FR-005: Los seeds deterministas DEBEN producir el mismo corpus ante la misma entrada (sin red, sin reloj), garantizando reproducibilidad y permitiendo tests sin red real.
@@ -83,14 +83,14 @@ Como operador del sistema, quiero un subcomando CLI `python -m app.ingesta.corpu
 - FR-009: El provider de mercado DEBE ser un provider nuevo en `app/providers/mercado.py` siguiendo el Principio II de la constitución (modularidad por providers).
 - FR-010: El bloque DEBE incluir `source_trace` con los 5 campos: `source_name`, `layer_id`, `service_url`, `data_vigencia`, `query_timestamp`. La fuente primaria es el corpus de mercado; la proveniencia por registro (portal origen) queda en `interpretation`/`dato`, no como trazas fabricadas.
 - FR-011: El `feasibility_score` DEBE extenderse con reglas nuevas: bonus +10 si hay precio de referencia y estrato disponibles (`r_contexto_mercado`), bonus +5 si hay oferta competidora (`r_oferta_competidora`), bonus +5 si hay ritmo de absorción (`r_absorcion_mercado`).
-- FR-012: El `confidence` del scoring DEBE considerar el bloque `market_context` como un bloque evaluable adicional; los umbrales absolutos se mantienen sin cambios (high ≥10, medium 5-9, low ≤4).
-- FR-013: El bloque `market_context` NO DEBE modificar los contratos de las 7 tools existentes ni los bloques de F3/F6/F7/F8/F9.
+- FR-012: El `confidence` del scoring DEBE considerar el bloque `market_dynamics` como un bloque evaluable adicional; los umbrales absolutos se mantienen sin cambios (high ≥10, medium 5-9, low ≤4).
+- FR-013: El bloque `market_dynamics` NO DEBE modificar los contratos de las 7 tools existentes ni los bloques de F3/F6/F7/F8/F9.
 - FR-014: Las interpretaciones del bloque DEBEN ser textos deterministas generados por reglas sobre los datos reales, sin LLM.
 - FR-015: El sistema NO DEBE inferir datos de mercado ausentes en el corpus; el bloque reporta solo datos reales (precio de referencia, estrato, oferta, absorción) del corpus.
 - FR-016: Cada fuente o registro sin datos DEBE generar un warning deduplicado con código `BLOQUE_SIN_DATO` o `BLOQUE_DEGRADADO` según la causa.
 - FR-017: El provider de mercado DEBE usar `httpx.AsyncClient` con timeout configurable (default 10s) para el scraping, y manejar errores de red/HTTP de forma consistente con los otros providers.
 - FR-018: La URL base de los portales y el directorio del corpus DEBEN ser constantes configurables, sin hardcodear en la lógica de consulta.
-- FR-019: El bloque `market_context` DEBE incluirse tanto en `get_feasibility_report` como en `get_lot_summary_by_chip` (consistencia con F7/F8).
+- FR-019: El bloque `market_dynamics` DEBE incluirse tanto en `get_feasibility_report` como en `get_lot_summary_by_chip` (consistencia con F7/F8).
 - FR-020: El corpus de mercado DEBE residir en `data/corpus/mercado/` (JSONL + huella) y versionarse en git como fuente de verdad (patrón FR-009/FR-013 de F4).
 
 ### Key Entities
@@ -105,11 +105,11 @@ Como operador del sistema, quiero un subcomando CLI `python -m app.ingesta.corpu
 ## Success Criteria
 
 - SC-001: El `feasibility_score` sigue siendo 100% determinístico: misma entrada (corpus + lote) → mismo score/confidence/reasons (SC-003 de F3 preservado).
-- SC-002: El bloque `market_context` incluye los 5 campos de trazabilidad (`source_trace`) en el 100% de los casos.
-- SC-003: El bloque `market_context` degrada independientemente: la ausencia o falla del corpus no afecta a otros bloques ni a los de F3/F6/F7/F8/F9.
+- SC-002: El bloque `market_dynamics` incluye los 5 campos de trazabilidad (`source_trace`) en el 100% de los casos.
+- SC-003: El bloque `market_dynamics` degrada independientemente: la ausencia o falla del corpus no afecta a otros bloques ni a los de F3/F6/F7/F8/F9.
 - SC-004: Las 7 tools existentes mantienen su contrato sin cambios (no-regresión F1-F9).
 - SC-005: Los seeds deterministas reproducen el mismo corpus ante la misma entrada, permitiendo tests sin red real ni Ollama.
-- SC-006: El tiempo de respuesta adicional del bloque `market_context` no supera 3 segundos sobre el tiempo base del reporte (consulta local al corpus, sin red en el camino principal).
+- SC-006: El tiempo de respuesta adicional del bloque `market_dynamics` no supera 3 segundos sobre el tiempo base del reporte (consulta local al corpus, sin red en el camino principal).
 - SC-007: El 100% de las `rules_applied` nuevas del scoring son trazables a los bloques evaluados.
 
 ---
