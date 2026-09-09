@@ -38,9 +38,9 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
   fallback downranked cuando los vigentes no llenan `top_k`, y jerarquía 555 > acto modificatorio en
   empates de score (desempates: fecha_vigencia más reciente, luego id). Tests:
   `tests/contract/test_rag_hibrido_vigencia.py`.
-- **Repositorio en `master`; HEAD `f200bb9` (feat(geocoder): fallback sin API a ArcGIS World Geocoder).**
-  La aplicación está implementada y probada: F1, F2, F3, F4, F5, F6, F7, F8 y Fase 3 completas,
-  **463 tests passing (smoke 6 + contract 457), 0 failed**, gate PASS, con las **7 tools**
+ - **Repositorio en `master`; HEAD `9641504` (feat(web): wizard prefactibilidad 3 pasos) + revisión feature-por-feature cerrada.**
+  La aplicación está implementada y probada: F1, F2, F3, F4, F5 (extendida wizard), F6, F7, F8 y Fase 3 completas,
+  **486 tests passing (smoke 6 + contract 480), 0 failed**, gate PASS, con las **7 tools**
   registradas (F4, F5, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
@@ -115,7 +115,8 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
     `CREDENCIAL_FALTANTE`→503, `FUENTE_5XX`→502, resto→500.
   - **Las 7 tools MCP permanecen SIN cambios** (no nuevas tools). La web NO comparte estado con el
     servidor MCP (construye su propio `ServidorLotes` con providers reales en lifespan).
-  - Commits: implementación completa + specs.
+   - Commits: implementación completa + specs.
+  - **Extensión wizard prefactibilidad (post-revisión feature-por-feature):** `POST /proyectos/preview` (preview lote ligero sin 23 bloques, chip/dirección/coordenadas + clic Leaflet 320px + fallback World geocode.arcgis.com sin API) + interrogación inversión (5 campos opcionales `uso_previsto/escala_m2/presupuesto_rango/horizonte_meses/aversion_riesgo` en `Proyecto` con migración `PRAGMA table_info` + `ALTER TABLE`) + validación inline + estados carga HTMX + corrección `proyecto.html` bloque `market_dynamics` (17 bloques loop → 23 totales, H-01). Validado: `py_compile` OK, ruff 4×E501 deuda pre-existente, `uv run pytest -q` 486 passed.
 
   **NOTA DE NAMING**: "Feature 5" (F5, specs/005) = interfaz web de prefactibilidad. "Fase 5"
   (sin spec, implementación directa post-F8) = caché LRU+TTL por CHIP + higiene de utilidades.
