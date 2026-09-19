@@ -449,3 +449,31 @@ cat data/corpus/decreto_555_2021.jsonl.sha256
   `get_access_context` del doc de visión NO se implementan: la geometría vive en
   `lot_identity.geometry` (+ `centroid`) y el acceso en `transit_access` +
   `road_network_context`.
+
+## 8. Catálogo extensible y wizard v2 (Feature 11)
+
+- **Catálogo declarativo**: `CATALOGO_CAPAS` (33 `CapaConfig` en
+  `app/providers/arcgis_utils.py`) centraliza URL del servicio, layer, `source_name`
+  y `data_vigencia` de cada capa temática; `ruta_consulta` deriva la URL completa de
+  query. Añadir una capa = 1 registro + 1 test (how-to de 3 pasos en el docstring del
+  módulo). Las capas SINUPOT/SDP quedan fuera (viven en `app/providers/sdp.py`,
+  EPSG:4686).
+- **Camino genérico F11**: `consultar_bloques_catalogo_adicionales` sirve toda entrada
+  nueva del catálogo como bloque con `source_traces` de 5 campos (`source_name`,
+  `layer_id`, `service_url`, `data_vigencia`, `query_timestamp`) y degradación por
+  bloque (`BLOQUE_DEGRADADO`, nunca `FUENTE_5XX` fatal). `BLOQUES_ESPECIALIZADOS`
+  (snapshot en import) excluye las 33 capas ya orquestadas, así que hoy el informe
+  cambia cero. Las 7 tools, los 23 bloques base y `BLOQUES_EVALUABLES` (19)
+  permanecen invariantes.
+- **Wizard v2 (web F5)**: `POST /proyectos/preview` localiza el lote
+  (chip/dirección/coordenadas) sin generar informe ni crear proyecto; los 5 campos de
+  interrogación (`uso_previsto`, `escala_m2` ≥ 36, `presupuesto_rango`,
+  `horizonte_meses` 6–120, `aversion_riesgo`) persisten en SQLite y reaparecen en
+  `GET /proyectos/{id}/json` bajo la clave aditiva `wizard`; `reevaluar` los conserva
+  y las filas antiguas leen `null` sin 500 (migración `PRAGMA`+`ALTER` en `db.py`).
+- **Desviaciones documentadas** (vs
+  `specs/011-catalogo-extensible-wizard-v2/contracts/wizard.md`): el preview persiste
+  mediante formulario único + `fetch` JS (no `hx-include` con campos ocultos — mismo
+  intento: sobrevive entre pasos sin sesión); el enum real de `presupuesto_rango` es
+  `{menos_1000M, 1000_5000M, 5000_10000M, mas_10000M}` (no `{bajo, medio, alto}`);
+  `docker build` no se re-ejecutó en T018 (sin cambios en la imagen).

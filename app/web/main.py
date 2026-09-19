@@ -459,9 +459,27 @@ def _registrar_rutas(app: FastAPI) -> None:
             codigo = (proyecto.error or {}).get("code")
             return JSONResponse(
                 status_code=_error_a_http(codigo),
-                content={"error": proyecto.error},
+                content={"error": proyecto.error, "wizard": _wizard_de_proyecto(proyecto)},
             )
-        return JSONResponse(content=proyecto.informe)
+        # F11 T012: el exportado incluye los 5 campos del wizard como metadata
+        # aditiva bajo la clave "wizard" (los bloques del informe no cambian).
+        return JSONResponse(
+            content={**(proyecto.informe or {}), "wizard": _wizard_de_proyecto(proyecto)}
+        )
+
+
+CAMPOS_WIZARD: tuple[str, ...] = (
+    "uso_previsto",
+    "escala_m2",
+    "presupuesto_rango",
+    "horizonte_meses",
+    "aversion_riesgo",
+)
+
+
+def _wizard_de_proyecto(proyecto: Proyecto) -> dict[str, Any]:
+    """Los 5 campos del wizard v2 como metadata aditiva del JSON exportado (F11 T012)."""
+    return {campo: getattr(proyecto, campo) for campo in CAMPOS_WIZARD}
 
 
 def _registrar_manejadores(app: FastAPI) -> None:

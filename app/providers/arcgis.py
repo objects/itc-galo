@@ -93,6 +93,7 @@ from app.providers.arcgis_utils import (
     RAIZ_ARCGIS,
     CapaConfig,
     construir_params_punto,
+    consultar_bloques_catalogo_adicionales,
     consultar_query,
 )
 
@@ -798,6 +799,12 @@ class ArcGISProvider:
             trazas_subfuente,
             fallos,
         )
+
+    async def consultar_bloques_catalogo(
+        self, lat: float, lng: float
+    ) -> dict[str, Any]:
+        """Camino genérico F11: bloques de catálogo sin bloque especializado."""
+        return await consultar_bloques_catalogo_adicionales(self._client, lat, lng)
 
     async def consultar_contexto_socioeconomico(
         self, lng: float, lat: float

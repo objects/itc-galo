@@ -1155,6 +1155,10 @@ class ServidorLotes:
         )
         score = calcular_score(bloques_evaluables)
 
+        bloques_catalogo = await self._arcgis.consultar_bloques_catalogo(
+            lote.centroid.lat, lote.centroid.lng
+        )
+
         return {
             "lot_identity": _lote_a_contrato(lote),
             "administrative_context": _contexto_administrativo_a_contrato(administrativo),
@@ -1177,6 +1181,7 @@ class ServidorLotes:
             "financial_analysis": _bloque_a_contrato(bloque_financiero),
             "technical_feasibility": _bloque_a_contrato(bloque_tecnico),
             "market_dynamics": _bloque_a_contrato(bloque_mercado),
+            **bloques_catalogo,
             "normative_evidence": evidencia.model_dump(),
             "feasibility_score": score.model_dump(),
             "warnings": warnings,

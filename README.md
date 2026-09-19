@@ -301,6 +301,32 @@ tiempo; se pueden re-evaluar conservando su id.
   (`aclose`); en pruebas se inyectan providers simulados y un repositorio
   temporal vía `crear_app_web(servidor_lotes=..., repositorio=...)`.
 
+## Catálogo extensible de capas y wizard v2 (Feature 11)
+
+`app/providers/arcgis_utils.py` mantiene el **catálogo declarativo** de capas ArcGIS
+(`CATALOGO_CAPAS: dict[str, CapaConfig]`, 33 entradas con URL del servicio, layer,
+`source_name` y `data_vigencia` por capa; las capas SINUPOT/SDP viven en
+`app/providers/sdp.py`). How-to para añadir una capa (3 pasos, documentado en el
+docstring del módulo):
+
+1. Añadir la entrada al `CATALOGO_CAPAS` con la vigencia real publicada por la fuente.
+2. Mapear la clave al bloque del informe en `app/main.py`, o dejar que la sirva el
+   camino genérico F11.
+3. Reutilizar `construir_params_punto` + `consultar_query` y validar con
+   `httpx.MockTransport` (`tests/contract/test_catalogo_extensible.py`).
+
+El camino genérico (`consultar_bloque_catalogo` / `consultar_bloques_catalogo_adicionales`)
+publica cada entrada no especializada como bloque con `source_traces` de 5 campos
+(`source_name`/`layer_id`/`service_url`/`data_vigencia`/`query_timestamp`) y degrada
+por bloque (`BLOQUE_DEGRADADO`, nunca `FUENTE_5XX` fatal). `get_feasibility_report`
+sigue orquestando los 23 bloques base y las 7 tools MCP permanecen sin cambios.
+
+La web (F5) suma el **wizard de prefactibilidad v2**: `POST /proyectos/preview`
+localiza el lote (chip/dirección/coordenadas) sin generar informe; la interrogación
+de 5 campos opcionales (`uso_previsto`/`escala_m2`/`presupuesto_rango`/
+`horizonte_meses`/`aversion_riesgo`) persiste en SQLite y reaparece en
+`GET /proyectos/{id}/json` bajo la clave aditiva `wizard`.
+
 ## Pruebas
 
 ```bash
