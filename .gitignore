@@ -28,3 +28,5 @@ htmlcov/
 chroma_db/
 models_cache/
 /opencode.json
+# Playwright CLI output (may contain credentials)
+.playwright-cli/

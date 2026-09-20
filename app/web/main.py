@@ -524,6 +524,19 @@ def crear_app_web(
       para las pruebas (providers simulados + base temporal). Por defecto usa
       los providers reales y `PROYECTOS_DB_PATH` (o .data/proyectos.db).
     - Rutas US1/US2 registradas y manejadores de error (HTML vs /json).
+    - (F12/US3, documentado SIN activar) el endpoint MCP puede coexistir en
+      este proceso montando la app de `app.servidor_http.construir_app_http`:
+      el lifespan del session manager debe PROPAGARSE explicitamente al
+      FastAPI padre (los lifespans de sub-apps montadas no se ejecutan solos):
+
+        app_mcp = construir_app_http(crear_servidor_mcp(servidor), config_http)
+        lifespan_hijo = app_mcp.router.lifespan_context
+        # en _lifespan: `async with lifespan_hijo(app_mcp):` rodeando el yield
+        app.mount("/", app_mcp)  # endpoint externo resultante: POST /mcp
+
+      Patron verificado en tests/contract/test_transporte_http.py
+      ::test_mount_asgi_fastapi_con_lifespan_propagado. Queda a decision del
+      operador activarlo (tambien vale contenedor separado MCP + web).
     """
     plantillas = Jinja2Templates(directory=str(RUTA_TEMPLATES))
     # Filtro para volcar JSON legible en <pre> (tojson escapa <>&' y queda feo).

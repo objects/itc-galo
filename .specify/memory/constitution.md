@@ -1,11 +1,17 @@
 <!--
 Sync Impact Report
-- Version change: N/A → 1.0.0 (ratificación inicial de la constitución)
+- Version change: 1.0.0 → 1.0.1 (PATCH: enmienda F12, clarificación de restricción
+  técnica de transporte; aprobado por el usuario el 2026-09-20)
 - Añadido: 5 principios fundamentales (I. Español primero, II. Modularidad por providers,
   III. Trazabilidad de fuentes (NON-NEGOTIABLE), IV. Contratos de error explícitos
   (Fail Fast, Fail Loud), V. Entrega incremental (MVP first)); secciones Restricciones
   técnicas, Flujo de desarrollo y Governance.
 - Removido: ninguna sección.
+- Enmendado (v1.0.1): cláusula de transporte — "Transporte MCP por stdio." pasa a
+  "Transporte MCP por stdio (por defecto) y modo Streamable HTTP opcional (F12), con
+  validación Origin y bind loopback por defecto." Justificación: FR-001…FR-005 de
+  specs/012-cloud-remote-mcp requieren exposición remota HTTPS sin romper stdio como
+  default (Dockerfile/CLI/tests intactos); ver plan.md §Constitution Check.
 - Deferred TODOs: ninguno.
 -->
 
@@ -50,7 +56,8 @@ feature activa.
 - Stack Python: dependencia `mcp>=1.0.0` (incluye FastMCP), `httpx`, `pydantic`;
   proyecto con `pyproject.toml`; estructura `app/` modular (`main.py` con FastMCP,
   `providers/`, `models.py`).
-- Transporte MCP por stdio.
+- Transporte MCP por stdio (por defecto) y modo Streamable HTTP opcional (F12), con
+  validación `Origin` y bind loopback por defecto.
 - Docker Python: imagen multi-etapa razonable; sin requisito de versión específica aún.
 - Sin credenciales embebidas en código: `MAPAS_BOGOTA_APIKEY` solo vía entorno (`.env`),
   opcional salvo geocodificación (`geocodificar` / `geocodificar_inverso`);
@@ -82,4 +89,4 @@ feature activa.
 - Las convenciones de runtime y datos del dominio se mantienen en `AGENTS.md`; referir
   a él para detalles operativos.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-10 | **Last Amended**: 2026-08-10
+**Version**: 1.0.1 | **Ratified**: 2026-08-10 | **Last Amended**: 2026-09-20

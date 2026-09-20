@@ -1,7 +1,8 @@
 """Servidor MCP mcp-bogota-factibilidad: registra 7 tools (4 F1 + 2 F2 + 1 F3).
 
-Transporte por stdio (constitucion, Restricciones tecnicas; research.md D8). Los
-providers son la frontera de parsing (Principio II); las tools aplican las
+Transporte por stdio por defecto (Constitucion v1.0.1: stdio por defecto y modo
+Streamable HTTP opcional via --transport http, F12, con validacion Origin y bind
+loopback). Los providers son la frontera de parsing (Principio II); las tools aplican las
 validaciones FR-012 en su limite (fail-fast) y toda salida lleva la trazabilidad
 de 5 campos por dato (Principio III, FR-006).
 
@@ -30,9 +31,11 @@ manualmente via servidor.aclose(); el lifespan solo corre cuando mcp.run() arran
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import re
+import sys
 from contextlib import asynccontextmanager
 from typing import Any, Callable
 
@@ -106,6 +109,7 @@ from app.providers.normativa import (
 from app.providers.sdp import SDPProvider
 from app.providers.upl import UPLProvider, VIGENCIA_UPL_DEFAULT
 from app.scoring import BloquesEvaluables, calcular_score
+from app.servidor_http import TRANSPORTES_VALIDOS, construir_app_http, resolver_config
 # Motor financiero (Fase 2) y técnico (Fase 3): funciones puras y deterministas (SC-003).
 from app.financiero import analisis_financiero as _analisis_financiero
 from app.tecnico import analisis_tecnico as _analisis_tecnico
@@ -2591,7 +2595,60 @@ mcp = crear_servidor_mcp(servidor_lotes)
 
 
 def main() -> None:
-    mcp.run()
+    """Punto de entrada CLI: stdio por defecto (F12 no lo cambia) o Streamable HTTP.
+
+    `--transport http` valida la config fail-fast ANTES de abrir sockets
+    (Principio IV) y sirve el endpoint `/mcp` en loopback por defecto
+    (FR-001/FR-002); la app ASGI se construye con el lifespan encadenado de
+    `crear_servidor_mcp` (cierre de providers, FR-004).
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m app.main",
+        description=(
+            "Servidor MCP mcp-bogota-factibilidad: 7 tools por stdio (default) "
+            "o por Streamable HTTP en /mcp (F12)."
+        ),
+    )
+    parser.add_argument(
+        "--transport",
+        choices=list(TRANSPORTES_VALIDOS),
+        default=None,
+        help="Transporte MCP (default: stdio; env MCP_TRANSPORT).",
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="Bind en modo http (default: 127.0.0.1; env MCP_HOST).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Puerto en modo http (default: 8000; env MCP_PORT).",
+    )
+    args = parser.parse_args()
+
+    config = resolver_config(args.transport, args.host, args.port)
+    if config.transporte == "stdio":
+        mcp.run()
+        return
+
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "[arranque] el modo --transport http requiere 'uvicorn': "
+            "instale el extra web con `uv sync --extra web`.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    app = construir_app_http(mcp, config)
+    print(
+        f"[arranque] servidor MCP Streamable HTTP en http://{config.host}:{config.puerto}/mcp "
+        f"(validacion Origin activa; stdio sigue disponible con --transport stdio).",
+        flush=True,
+    )
+    uvicorn.run(app, host=config.host, port=config.puerto)
 
 
 if __name__ == "__main__":

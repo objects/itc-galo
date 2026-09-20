@@ -7,6 +7,29 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
 
 ## Estado actual
 
+- **F12 — `specs/012-cloud-remote-mcp/`**: FASE 1 IMPLEMENTADA (feature activa).
+  Transporte **Streamable HTTP opcional** conviviendo con stdio (default intacto,
+  Dockerfile CMD sin cambio): `python -m app.main --transport http [--host --port]`
+  sirve `/mcp` (JSON-RPC, `json_response=True`) con validación `Origin`
+  anti DNS-rebinding vía `TransportSecuritySettings` del SDK (sin Origin →
+  permitido; Origin no allowlisted → 403; Host no permitido → 421), bind default
+  `127.0.0.1` (FR-002), allowlist por `MCP_ALLOWED_ORIGINS` (CSV; de cada origen
+  se deriva el Host permitido — patrón túnel), config inválida → SystemExit(2)
+  con mensaje claro. Lifespan encadenado verificado: `session_manager.run()` del
+  SDK entra el `_lifespan_cerrar_providers` del constructor (FR-004) — providers
+  httpx cierran al apagar la app. **Las 7 tools responden el mismo payload por
+  HTTP que por stdio** (SC-002; contract test de paridad name/inputSchema) y la
+  taxonomía de 10 códigos permanece invariable. Cero dependencias nuevas (uvicorn
+  del extra `web`). Archivos: `app/servidor_http.py` (ConfigTransporte +
+  resolver_config + construir_app_http), `tests/contract/test_transporte_http.py`
+  (14 tests), `.env.example` (+4 variables), `contracts/transporte-http.md`,
+  `produccion-oauth.md` (guía Fase 3: AS gestionado D-01, RFC 9728/8414/7591 +
+  PKCE + RFC 8707, Docker/TLS, Ollama co-local D-04; US2/US3 son documentación
+  operativa + patrón Mount documentado sin activar, verificado en el mismo
+  archivo de tests). Demo público: `cloudflared tunnel` auth none/bearer solo
+  demo (FR-006, en README). **Constitución enmendada a v1.0.1 (PATCH)** con
+  aprobación del usuario: stdio por defecto + HTTP opcional. Validado: suite
+  526 passed (512 baseline + 14), ruff 199 = baseline, quickstart §§1–5 verificado.
 - **Fase 5 — cierre: re-indexado v3, caché por lote con TTL e higiene general** (post-Fase 4):
   - **Índice real en esquema v3**: `python -m app.ingesta.corpus indexar` reconstruyó `.data/chroma`
     con metadata `tema`/`estado` por chunk (`esquema_metadatos=3` en la colección); el CLI debug
@@ -205,7 +228,9 @@ Notas:
   (gitignored, local a la máquina); se fuerza con `SPECIFY_FEATURE_DIRECTORY=<path>`. En monorepos: `SPECIFY_INIT_DIR`.
 - `/speckit.implement` exige `plan.md` y `tasks.md` existentes y checklists completos en
   `specs/<feature>/checklists/`; si faltan, pregunta antes de continuar.
-- `speckit.plan` y `speckit.tasks` leen `.specify/memory/constitution.md` (ratificada, v1.0.0).
+- `speckit.plan` y `speckit.tasks` leen `.specify/memory/constitution.md` (ratificada
+  2026-08-10, v1.0.1 — enmienda PATCH F12: stdio por defecto + HTTP opcional,
+  aprobada por el usuario 2026-09-20).
   Enmiéndala con `/speckit.constitution` si cambian los principios.
 - Hooks de extensiones se leen de `.specify/extensions.yml` (no existe hoy).
 - Comandos auxiliares: `/speckit.clarify`, `/speckit.checklist`, `/speckit.converge`, `/speckit.analyze`, `/speckit.taskstoissues`.
@@ -233,7 +258,8 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
 
 ## Datos del dominio (costosos de reconstruir)
 
-- App objetivo: Python (`mcp>=1.0.0` que incluye FastMCP, `httpx`, `pydantic`); MCP por stdio;
+- App objetivo: Python (`mcp>=1.0.0` que incluye FastMCP, `httpx`, `pydantic`); MCP por
+  stdio (default) y modo Streamable HTTP opcional (`--transport http`, F12);
   Docker Python; la ingesta del corpus POT se ejecuta de forma explícita (CLI), no automática al iniciar.
   Paquete `mcp-bogota-factibilidad` v0.1.0 (`pyproject.toml`), requires-python `>=3.11`.
 - Herramientas MCP: **7 implementadas** (`resolve_lot_by_chip`, `resolve_lot_by_address`,
@@ -241,7 +267,8 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   `get_feasibility_report`) registradas por `crear_servidor_mcp()` en `app/main.py`.
   `get_feasibility_report` (F3) orquesta el informe en 23 bloques con scoring heurístico determinístico
   (`calcular_score`) y degrada UPL/RAG con warnings en lugar de errores. FastMCP (mcp>=1.x) con fallback
-  a MCPServer (mcp 2.x); transporte stdio;
+  a MCPServer (mcp 2.x); transporte stdio por defecto — Streamable HTTP opcional con
+  validación `Origin`/`Host` (TransportSecuritySettings del SDK) y bind loopback (F12);
   lifespan cierra providers (httpx.AsyncClient); validaciones fail-fast (FR-012/FR-013).
 - API de búsqueda: `https://catalogopmb.catastrobogota.gov.co/PMBWeb/web/buscar` con
   `cmd=direccion_chip&query=<CHIP>&spatialReference=102100`. Geocodificar/geocodificar_inverso
@@ -295,7 +322,9 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   `errores.py` (taxonomía), `scoring.py` (F3+F6+F7+F8+Fase 3+F10, función
   pura `calcular_score`, determinista, sin LLM), `cache.py` (Fase 5: caché en
   memoria LRU+TTL para resolución de lote por CHIP, TTL via
-  `CACHE_TTL_SEGUNDOS`) y `utilidades.py` (Fase 5: helpers compartidos —
+  `CACHE_TTL_SEGUNDOS`), `servidor_http.py` (F12: transporte HTTP opcional —
+  `ConfigTransporte`/`resolver_config` fail-fast + `construir_app_http` con
+  validación Origin/Host del SDK y lifespan encadenado) y `utilidades.py` (Fase 5: helpers compartidos —
   `PATRON_CHIP`, parsing defensivo de atributos, `_ahora_iso`,
   `_formatear_numero`, `_clave_sin_tildes`).
 - `app/providers/`: un provider por fuente (Principio II): `arcgis.py` (Lote, contexto temático,
@@ -314,7 +343,9 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   test_ingesta_actos, test_corpus_consolidado, test_precedencia + extensiones aditivas de
   test_consultar_normativa y test_get_feasibility_report + test_urbanistic_parameters.py F8 +
   test_bloques_tematicos_fase3.py (Fase 3: espacio público, malla vial, equipamientos,
-  llm_ready_summary) + test_web_informe.py (F9, 21 tareas) + test_mercado.py + test_ingesta_mercado.py (F10, 28 tareas).
+  llm_ready_summary) + test_web_informe.py (F9, 21 tareas) + test_mercado.py + test_ingesta_mercado.py (F10, 28 tareas)
+  + test_transporte_http.py (F12, 14 tests: paridad stdio↔HTTP, Origin 403/permitido,
+  config fail-fast, lifespan encadenado, mount ASGI US3 — todo hermético vía TestClient).
   Fixtures con `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
 - `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/005-*`, `specs/006-*`,
   `specs/007-*`, `specs/008-*`, `specs/009-ux-web-informe-completo` (F9, 21 tareas), `specs/010-motor-mercado` (F10, 28 tareas): features Spec Kit (ver "Estado actual").

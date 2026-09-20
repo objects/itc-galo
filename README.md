@@ -206,6 +206,53 @@ O bien, con la entrada de consola instalada:
 mcp-bogota-factibilidad
 ```
 
+### Modo remoto: Streamable HTTP (Feature 12)
+
+Además del stdio histórico, el servidor puede exponerse por HTTPS con el
+transporte estándar **Streamable HTTP** en el endpoint `/mcp`. El default sigue
+siendo stdio (el `CMD` del Dockerfile no cambia); el modo HTTP es opt-in:
+
+```bash
+uv sync --extra web                                  # uvicorn (ya en el extra web)
+uv run python -m app.main --transport http           # http://127.0.0.1:8000/mcp
+uv run python -m app.main --transport http --host 127.0.0.1 --port 8000
+```
+
+- **Bind loopback por defecto** (`127.0.0.1`); abrir a la red (`--host 0.0.0.0`)
+  es decisión explícita del operador.
+- **Validación `Origin`** anti DNS-rebinding: peticiones sin `Origin` (curl,
+  `mcp-remote`, Inspector, Claude Code) se permiten; un `Origin` de navegador
+  solo pasa si está en `MCP_ALLOWED_ORIGINS` (CSV), si no → 403.
+- Las 7 tools responden **el mismo payload JSON** por HTTP que por stdio; el
+  cierre de providers (httpx) queda encadenado al apagado de la app.
+- Variables: `MCP_TRANSPORT` / `MCP_HOST` / `MCP_PORT` / `MCP_ALLOWED_ORIGINS`
+  (ver `.env.example`). Config inválida → arranque abortado con mensaje claro.
+
+Consumo desde clientes locales:
+
+```bash
+npx mcp-remote http://127.0.0.1:8000/mcp             # puente para Claude Desktop
+npx @modelcontextprotocol/inspector                  # transport: Streamable HTTP
+```
+
+#### Demo pública con Cloudflare Tunnel (solo demo/piloto)
+
+Para compartir el servidor sin abrir puertos ni TLS manual:
+
+```bash
+cloudflared tunnel --url http://localhost:8000
+# URL temporal: https://<random>.trycloudflare.com/mcp
+```
+
+Añade esa URL como *custom connector* en Claude (o conéctala con
+`npx mcp-remote <url>`) y las 7 tools responden igual que en local. Autenticación
+`none`/bearer estático **solo es aceptable en demo**: las tools son read-only
+sobre datos públicos del catastro/POT de Bogotá y no exponen datos personales.
+Si el túnel cambia de hostname, actualiza `MCP_ALLOWED_ORIGINS` con el origen
+público (de él se deriva también el `Host` permitido). Para producción con OAuth
+2.1 (requisito del connector de ChatGPT), ver
+`specs/012-cloud-remote-mcp/produccion-oauth.md`.
+
 ### Tools expuestas (7)
 
 | Tool | Descripción |
