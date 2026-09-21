@@ -1,0 +1,98 @@
+flowchart TD
+
+subgraph group_interfaces["Interfaces"]
+  node_mcp_server["MCP Server<br/>[main.py]"]
+  node_web_app["Web App<br/>[main.py]"]
+  node_web_templates["Web Templates"]
+  node_project_db[("Project Database<br/>[db.py]")]
+end
+
+subgraph group_orchestration["Orchestration"]
+  node_report_runtime["Report Runtime<br/>[main.py]"]
+  node_domain_models["Domain Models<br/>[models.py]"]
+end
+
+subgraph group_providers["Data Providers"]
+  node_lot_lookup["Lot Resolution<br/>[mapas_bogota.py]"]
+  node_arcgis_provider["ArcGIS Enrichment<br/>[arcgis.py]"]
+  node_upl_provider["UPL Provider<br/>[upl.py]"]
+  node_market_provider["Market Provider<br/>[mercado.py]"]
+  node_normative_provider["Normative RAG<br/>[normativa.py]"]
+end
+
+subgraph group_analysis["Analysis"]
+  node_scoring["Feasibility Scoring<br/>[scoring.py]"]
+  node_financial_engine["Financial Engine<br/>[financiero.py]"]
+  node_technical_engine["Technical Engine<br/>[tecnico.py]"]
+end
+
+subgraph group_knowledge["Knowledge Base"]
+  node_market_corpus["Market Corpus"]
+  node_corpus_pipeline["Corpus Pipeline<br/>[corpus.py]"]
+  node_acts_ingestion["Acts Ingestion<br/>[actos.py]"]
+  node_normative_corpus["Normative Corpus"]
+  node_vector_index[("Vector Index")]
+end
+
+node_user(("User"))
+node_mapas_service["Mapas Bogotá"]
+node_arcgis_service["ArcGIS Services"]
+node_ollama["Ollama"]
+
+node_user -->|"submits query"| node_mcp_server
+node_user -->|"uses interface"| node_web_app
+node_mcp_server -->|"dispatches tools"| node_report_runtime
+node_web_app -->|"calls runtime"| node_report_runtime
+node_web_app -->|"reads/writes projects"| node_project_db
+node_web_app -->|"renders views"| node_web_templates
+node_report_runtime -->|"builds results"| node_domain_models
+node_report_runtime -->|"resolves lot"| node_lot_lookup
+node_report_runtime -->|"enriches context"| node_arcgis_provider
+node_report_runtime -->|"resolves UPL"| node_upl_provider
+node_report_runtime -->|"queries regulations"| node_normative_provider
+node_report_runtime -->|"loads market data"| node_market_provider
+node_report_runtime -->|"calculates finance"| node_financial_engine
+node_report_runtime -->|"calculates capacity"| node_technical_engine
+node_report_runtime -->|"calculates score"| node_scoring
+node_lot_lookup -->|"queries locations"| node_mapas_service
+node_lot_lookup -.->|"falls back geocoding"| node_arcgis_service
+node_arcgis_provider -->|"queries layers"| node_arcgis_service
+node_upl_provider -->|"queries UPL"| node_arcgis_service
+node_market_provider -->|"reads corpus"| node_market_corpus
+node_corpus_pipeline -->|"writes corpus"| node_normative_corpus
+node_corpus_pipeline -->|"indexes chunks"| node_vector_index
+node_acts_ingestion -->|"adds acts"| node_normative_corpus
+node_normative_provider -->|"retrieves evidence"| node_vector_index
+node_normative_provider -->|"embeds/generates"| node_ollama
+
+click node_mcp_server "https://github.com/objects/itc-galo/blob/master/app/main.py"
+click node_web_app "https://github.com/objects/itc-galo/blob/master/app/web/main.py"
+click node_web_templates "https://github.com/objects/itc-galo/tree/master/app/web/templates"
+click node_project_db "https://github.com/objects/itc-galo/blob/master/app/web/db.py"
+click node_report_runtime "https://github.com/objects/itc-galo/blob/master/app/main.py"
+click node_domain_models "https://github.com/objects/itc-galo/blob/master/app/models.py"
+click node_lot_lookup "https://github.com/objects/itc-galo/blob/master/app/providers/mapas_bogota.py"
+click node_arcgis_provider "https://github.com/objects/itc-galo/blob/master/app/providers/arcgis.py"
+click node_upl_provider "https://github.com/objects/itc-galo/blob/master/app/providers/upl.py"
+click node_market_provider "https://github.com/objects/itc-galo/blob/master/app/providers/mercado.py"
+click node_normative_provider "https://github.com/objects/itc-galo/blob/master/app/providers/normativa.py"
+click node_market_corpus "https://github.com/objects/itc-galo/tree/master/data/corpus/mercado"
+click node_scoring "https://github.com/objects/itc-galo/blob/master/app/scoring.py"
+click node_financial_engine "https://github.com/objects/itc-galo/blob/master/app/financiero.py"
+click node_technical_engine "https://github.com/objects/itc-galo/blob/master/app/tecnico.py"
+click node_corpus_pipeline "https://github.com/objects/itc-galo/blob/master/app/ingesta/corpus.py"
+click node_acts_ingestion "https://github.com/objects/itc-galo/blob/master/app/ingesta/actos.py"
+click node_normative_corpus "https://github.com/objects/itc-galo/tree/master/data/corpus"
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+class node_mcp_server,node_web_app,node_web_templates,node_project_db,node_user toneBlue
+class node_report_runtime,node_domain_models toneAmber
+class node_lot_lookup,node_arcgis_provider,node_upl_provider,node_market_provider,node_normative_provider toneMint
+class node_scoring,node_financial_engine,node_technical_engine toneRose
+class node_market_corpus,node_corpus_pipeline,node_acts_ingestion,node_normative_corpus,node_vector_index,node_mapas_service,node_arcgis_service,node_ollama toneIndigo

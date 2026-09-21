@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>mcp-bogotá-factibilidad — Arquitectura v23 bloques | MCP · Web · RAG</title>
+<meta name="description" content="Arquitectura showcase de mcp-bogota-factibilidad: 7 tools MCP stdio, 23 bloques de factibilidad, RAG híbrido POT Decreto 555/2021, providers aislados, caché LRU+TTL y wizard web 3 pasos."/>
+<style>
+:root{--bg:#0a0f1e;--bg2:#111827;--panel:#131b2e;--panel2:#1a2442;--line:#24324d;--text:#e6eefc;--muted:#8ea0c2;--accent:#4f9cf0;--accent2:#34d399;--accent3:#f59e0b;--warn:#facc15;--ok:#22c55e;--border:1px solid #263554}
+[data-theme=light]{--bg:#f6f8fc;--bg2:#ffffff;--panel:#ffffff;--panel2:#f1f5f9;--line:#dbe4f3;--text:#0f172a;--muted:#64748b;--accent:#2563eb;--accent2:#059669;--accent3:#d97706;--border:1px solid #e2e8f0}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+a{color:var(--accent)}
+.header{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:var(--border);padding:14px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.badge{font:600 11px/1 Inter;letter-spacing:.08em;text-transform:uppercase;padding:6px 8px;border-radius:999px;border:var(--border);color:var(--muted);background:var(--panel2)}
+.title{font:800 18px/1.1 Fraunces,serif;letter-spacing:-.02em}
+.subtitle{font:400 12px/1.3 Inter;color:var(--muted);max-width:720px}
+.toolbar{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{appearance:none;border:var(--border);background:var(--panel);color:var(--text);padding:8px 10px;border-radius:10px;font:600 12px Inter;cursor:pointer}
+.btn:hover{border-color:var(--accent)} .btn.primary{background:var(--accent);color:white;border-color:transparent}
+.kpi{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.kpi span{padding:6px 10px;border-radius:999px;background:var(--panel2);border:var(--border);font:600 11px Inter;color:var(--muted)}
+.kpi b{color:var(--text)}
+.wrap{max-width:1280px;margin:0 auto;padding:18px 20px 40px}
+.card{background:var(--panel);border:var(--border);border-radius:16px;padding:14px}
+.grid2{display:grid;grid-template-columns:1.15fr .85fr;gap:16px}
+@media(max-width:980px){.grid2{grid-template-columns:1fr}}
+.h2{font:800 13px Inter;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.h3{font:700 14px Inter;margin:0}
+.small{font:12px Inter;color:var(--muted)}
+.svg-wrap{background:var(--panel);border:var(--border);border-radius:16px;overflow:hidden;position:relative}
+.svg-toolbar{position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:2}
+.svg-toolbar .btn{padding:6px 8px;border-radius:8px}
+#stage{width:100%;height:760px;display:block;background:
+ radial-gradient(900px 500px at 18% -8%, color-mix(in srgb,var(--accent) 18%,transparent), transparent 60%),
+ radial-gradient(700px 400px at 88% 0%, color-mix(in srgb,var(--accent2) 14%,transparent), transparent 60%),
+ linear-gradient(180deg, var(--bg2), var(--bg))}
+.legend{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.table{width:100%;border-collapse:collapse;font:12px Inter}
+.table th{font:700 11px Inter;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px;border-bottom:var(--border)}
+.table td{padding:9px 8px;border-bottom:var(--border);vertical-align:top}
+.table tr:last-child td{border-bottom:none}
+.pill{padding:3px 7px;border-radius:999px;font:700 10px Inter;letter-spacing:.06em;text-transform:uppercase;border:var(--border);background:var(--panel2);color:var(--muted);white-space:nowrap}
+.pill.ok{color:#065f46;background:#ecfdf5;border-color:#a7f3d0} [data-theme=dark] .pill.ok{color:#a7f3d0;background:#052e1f;border-color:#0f5b3a}
+.tabs{display:flex;gap:6px;margin:10px 0}
+.tab{padding:7px 10px;border-radius:10px;border:var(--border);background:var(--panel2);font:600 12px Inter;cursor:pointer;color:var(--muted)}
+.tab.active{background:var(--accent);color:white;border-color:transparent}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:980px){.cards{grid-template-columns:1fr}}
+.mini{padding:12px;border-radius:12px;background:var(--panel2);border:var(--border)}
+.mini h4{margin:0 0 6px;font:700 12px Inter}
+.mini p{margin:0;font:12px/1.5 Inter;color:var(--muted)}
+.callout{padding:10px 12px;border-radius:12px;border:var(--border);background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 10%,var(--panel)),var(--panel2));display:flex;gap:10px;align-items:flex-start}
+.dot{width:8px;height:8px;border-radius:999px;background:var(--ok);margin-top:6px;flex:none;box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 20%,transparent)}
+svg text{font-family:Inter,system-ui,sans-serif}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span class="badge">archify · architecture · showcase</span>
+      <span class="badge" style="color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,transparent)">spec-kit v0.16.1 · 486 tests ✓</span>
+      <span class="badge">7 tools MCP · sin cambios F4-F10</span>
+    </div>
+    <div class="title" style="margin-top:8px">mcp-bogotá-factibilidad — Arquitectura 23 bloques</div>
+    <div class="subtitle">Servidor MCP Python (FastMCP · stdio) que resuelve lotes de Bogotá (CHIP / dirección / coordenadas) y orquesta <b>23 bloques</b> de factibilidad con trazabilidad por fuente, degradación por bloque y scoring heurístico determinista. Fuentes: Mapas Bogotá PMBWeb · ArcGIS REST (serviciosgis.catastrobogota / SINUPOT) · RAG híbrido POT Decreto 555/2021 (Chroma + Ollama local) · Mercado local. Wizard web de 3 pasos (FastAPI + Jinja2 + HTMX 2.0.4).</div>
+    <div class="kpi">
+      <span><b>23</b> bloques (19 evaluables)</span>
+      <span><b>7</b> tools MCP</span>
+      <span><b>608</b> arts. Decreto 555 + actos</span>
+      <span><b>100%</b> RAG local bge-m3/qwen3:8b</span>
+      <span>Cache CHIP LRU 128 · TTL 3600s</span>
+      <span>Docker non-root · stdio</span>
+    </div>
+  </div>
+  <div class="toolbar">
+    <button class="btn" onclick="toggleTheme()">◐ Tema</button>
+    <button class="btn" onclick="fitSvg()">⊡ Ajustar</button>
+    <button class="btn" onclick="exportSVG()">⬇ SVG</button>
+    <button class="btn primary" onclick="exportPNG()">⬇ PNG</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="svg-wrap" id="svgWrap">
+    <div class="svg-toolbar">
+      <button class="btn" onclick="zoom(-0.12)">−</button>
+      <button class="btn" onclick="zoom(0.12)">+</button>
+      <button class="btn" onclick="resetView()">Reset</button>
+    </div>
+    <svg id="stage" viewBox="0 0 1260 760" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Arquitectura mcp-bogota-factibilidad">
+      <defs>
+        <linearGradient id="gAccent" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4f9cf0"/><stop offset="100%" stop-color="#34d399"/></linearGradient>
+        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0b1224" flood-opacity="0.35"/></filter>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6b8a"/></marker>
+        <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4f9cf0"/></marker>
+        <marker id="arrow-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#22c55e"/></marker>
+      </defs>
+      <g id="b-host">
+        <rect x="12" y="10" rx="16" ry="16" width="1236" height="740" fill="none" stroke="#2a3a5a" stroke-width="1.2" stroke-dasharray="10 7" opacity="0.9"/>
+        <g transform="translate(22,18)">
+          <rect x="0" y="0" width="132" height="22" rx="8" fill="#1a2442" stroke="#2a3a5a"/><text x="66" y="14.5" text-anchor="middle" font-size="10" font-weight="800" letter-spacing="0.08em" fill="#8ea0c2">HOST · DOCKER</text>
+        </g>
+        <text x="18" y="46" font-size="10" fill="#6b7fa3" font-weight="600">python -m app.main (stdio)  ·  web-mcp-bogota-factibilidad (uvicorn)  ·  .data/chroma (gitignored)  ·  data/corpus (versionado)</text>
+      </g>
+      <g id="b-client">
+        <rect x="24" y="62" rx="14" ry="14" width="260" height="92" fill="#0e1a33" stroke="#2a4a7a" stroke-width="1.1" opacity="0.95"/>
+        <text x="36" y="80" font-size="10" font-weight="800" letter-spacing="0.08em" fill="#7aa8ff">EXTERNO · MCP CLIENT</text>
+        <text x="36" y="94" font-size="9" fill="#6b7fa3">Claude Desktop / MCP Host · JSON-RPC 2.0</text>
+      </g>
+      <g id="b-web">
+        <rect x="24" y="170" rx="14" ry="14" width="260" height="190" fill="#0e1a33" stroke="#2a4a7a" stroke-width="1.1"/>
+        <text x="36" y="188" font-size="10" font-weight="800" letter-spacing="0.08em" fill="#7aa8ff">INTERFAZ WEB · WIZARD 3 PASOS</text>
+      </g>
+      <g id="b-core">
+        <rect x="312" y="62" rx="14" ry="14" width="640" height="300" fill="#0f1d36" stroke="#2e4a7a" stroke-width="1.1"/>
+        <text x="324" y="80" font-size="10" font-weight="800" letter-spacing="0.08em" fill="#7aa8ff">NÚCLEO MCP · ORQUESTACIÓN</text>
+        <text x="324" y="96" font-size="9" fill="#6b7fa3">crear_servidor_mcp() · ServidorLotes · lifespan httpx.AsyncClient</text>
+      </g>
+      <g id="b-providers">
+        <rect x="312" y="378" rx="14" ry="14" width="640" height="252" fill="#0f1d36" stroke="#2e4a7a" stroke-width="1.1"/>
+        <text x="324" y="396" font-size="10" font-weight="800" letter-spacing="0.08em" fill="#7aa8ff">PROVIDERS AISLADOS · PRINCIPIO II</text>
+        <text x="324" y="412" font-size="9" fill="#6b7fa3">Un provider por fuente · modelos Pydantic tipados · nunca mezclan responsabilidades</text>
+      </g>
+      <g id="b-data">
+        <rect x="978" y="62" rx="14" ry="14" width="258" height="568" fill="#0e1a33" stroke="#2a4a7a" stroke-width="1.1"/>
+        <text x="990" y="80" font-size="10" font-weight="800" letter-spacing="0.08em" fill="#7aa8ff">DATOS · RAG · CORPUS</text>
+      </g>
+      <g id="b-ext">
+        <rect x="24" y="644" rx="14" ry="14" width="1212" height="98" fill="#0e1a33" stroke="#2a4a7a" stroke-width="1.1"/>
+        <text x="36" y="662" font-size="10" font-weight="800" letter-spacing="0.08em" fill="#7aa8ff">FUENTES EXTERNAS · TRAZABILIDAD POR CAPA</text>
+        <text x="36" y="678" font-size="9" fill="#6b7fa3">Toda salida expone source_name · layer_id · service_url · data_vigencia · query_timestamp · Nunca mezclar vigencias · source_traces por sub-fuente</text>
+      </g>
+      <g filter="url(#shadow)" transform="translate(32,102)">
+        <rect width="244" height="44" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="12" y="16" font-size="11" font-weight="800" fill="#dbeafe">MCP Client</text><text x="12" y="30" font-size="9" fill="#93b4ff">Claude / Host · 7 tools discovery</text>
+        <g transform="translate(212,8)"><rect width="22" height="18" rx="4" fill="#1e3a5e" stroke="#2e5bb5"/><g transform="translate(4,3)" fill="none" stroke="#60a5fa" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="2" width="12" height="8" rx="1.5"/><path d="M1 5 H13"/><circle cx="4" cy="8" r="0.9" fill="#60a5fa" stroke="none"/><circle cx="10" cy="8" r="0.9" fill="#60a5fa" stroke="none"/></g></g>
+      </g>
+      <g filter="url(#shadow)" transform="translate(32,202)">
+        <rect width="244" height="52" rx="10" fill="#1a2746" stroke="#2e5bb5"/><text x="12" y="16" font-size="11" font-weight="800" fill="#dbeafe">FastAPI + Jinja2 + HTMX 2.0.4</text><text x="12" y="30" font-size="9" fill="#93b4ff">GET / · POST /proyectos · /{id} · /json</text><text x="12" y="42" font-size="8" fill="#6b7fa3">Fraunces · Leaflet 320px · PRG 303 · SQLite</text>
+      </g>
+      <g transform="translate(32,262)">
+        <rect width="118" height="34" rx="8" fill="#13203d" stroke="#263a5e"/><text x="10" y="14" font-size="9" font-weight="700" fill="#cbd5e1">ProyectoRepositorio</text><text x="10" y="25" font-size="8" fill="#8ea0c2">db.py · SQLite · 5 campos inversión</text>
+      </g>
+      <g transform="translate(158,262)">
+        <rect width="118" height="34" rx="8" fill="#13203d" stroke="#263a5e"/><text x="10" y="14" font-size="9" font-weight="700" fill="#cbd5e1">Preview lote</text><text x="10" y="25" font-size="8" fill="#8ea0c2">POST /preview · chip/dir/coords</text>
+      </g>
+      <g transform="translate(32,304)">
+        <rect width="244" height="30" rx="8" fill="#0f1d36" stroke="#263a5e" stroke-dasharray="4 4"/><text x="10" y="14" font-size="8" font-weight="700" fill="#94a3b8">Wizard: lote → inversión → informe</text><text x="10" y="24" font-size="7" fill="#64748b">uso/escala/presupuesto/horizonte/aversion · inline validation</text>
+      </g>
+      <g filter="url(#shadow)" transform="translate(324,110)">
+        <rect width="300" height="58" rx="10" fill="#19306a" stroke="#3b6fe0"/><text x="12" y="16" font-size="11" font-weight="800" fill="white">ServidorLotes · crear_servidor_mcp()</text><text x="12" y="30" font-size="9" fill="#c7d7ff">app/main.py · 7 tools · lifespan cierra httpx</text><text x="12" y="44" font-size="8" fill="#93b4ff">resolve_lot_{chip|address|coords} · get_lot_summary · get_upl · consultar_normativa · get_feasibility_report</text>
+        <g transform="translate(272,14)"><rect width="20" height="16" rx="3" fill="#243b6b" stroke="#5b8def"/><g transform="translate(3,2)" fill="none" stroke="white" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="1.5" width="10" height="7" rx="1.2"/><path d="M1 4 H11"/><circle cx="3.5" cy="6.8" r="0.7" fill="white" stroke="none"/><circle cx="8.5" cy="6.8" r="0.7" fill="white" stroke="none"/></g></g>
+      </g>
+      <g transform="translate(636,110)">
+        <rect width="150" height="58" rx="10" fill="#13203d" stroke="#2e5bb5"/><text x="10" y="16" font-size="10" font-weight="700" fill="#dbeafe">Cache CHIP</text><text x="10" y="30" font-size="8" fill="#8ea0c2">app/cache.py LRU128</text><text x="10" y="42" font-size="8" fill="#6b7fa3">TTL 3600s · solo éxitos · reloj iny.</text>
+      </g>
+      <g transform="translate(798,110)">
+        <rect width="142" height="58" rx="10" fill="#13203d" stroke="#2e5bb5"/><text x="10" y="16" font-size="10" font-weight="700" fill="#dbeafe">Scoring puro</text><text x="10" y="30" font-size="8" fill="#8ea0c2">app/scoring.py</text><text x="10" y="42" font-size="8" fill="#6b7fa3">calcular_score() determinista</text>
+      </g>
+      <g transform="translate(324,180)">
+        <rect width="300" height="56" rx="10" fill="#13203d" stroke="#2e4a7a"/><text x="12" y="16" font-size="10" font-weight="700" fill="#cbd5e1">Orquestación 23 bloques · 2 fases</text><text x="12" y="30" font-size="8" fill="#8ea0c2">Fase A paralela (lote→centroide→UPL+ArcGIS+SDP+catastro) · Fase B (RAG+mercado)</text><text x="12" y="44" font-size="8" fill="#6b7fa3">_construir_consulta_automatica · _construir_llm_ready_summary · degradación por bloque</text>
+      </g>
+      <g transform="translate(636,180)">
+        <rect width="304" height="56" rx="10" fill="#0f1d36" stroke="#263a5e" stroke-dasharray="4 4"/><text x="10" y="16" font-size="9" font-weight="700" fill="#94a3b8">23 bloques → 19 evaluables · confidence high≥10 med5-9 low≤4</text><text x="10" y="30" font-size="7" fill="#6b7fa3">+5/+10 o −5/−10/−15 por bloque · clamp [0,100] base 50 · SIN LLM</text><text x="10" y="44" font-size="7" fill="#64748b">5xx nunca es no_encontrado · warnings BLOQUE_DEGRADADO · llm_ready_summary determinista</text>
+      </g>
+      <g transform="translate(324,250)">
+        <rect width="616" height="46" rx="10" fill="#0e1a33" stroke="#263a5e"/><text x="12" y="16" font-size="9" font-weight="700" fill="#cbd5e1">Bloques 23: lot_identity · context_thematic(6) · geotechnical(4) · socioeconomic(4) · regulatory(2) · cultural(2) · transit(3) · catastro_data(5) · urbanistic_parameters(SDP) · public_space · road_network · nearby_facilities(3) · normative_evidence · market · feasibility</text><text x="12" y="32" font-size="7" fill="#64748b">Cada bloque= source_trace + vigencia propia · multifuente publica source_traces[] · fallo aislado no aborta informe</text>
+      </g>
+      <g transform="translate(324,426)">
+        <rect width="148" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">Mapas Bogotá</text><text x="10" y="28" font-size="8" fill="#8ea0c2">mapas_bogota.py</text><text x="10" y="38" font-size="7" fill="#6b7fa3">PMBWeb buscar · geocode/inverso · 102100→WGS84</text>
+      </g>
+      <g transform="translate(482,426)">
+        <rect width="148" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">ArcGIS Lote</text><text x="10" y="28" font-size="8" fill="#8ea0c2">arcgis.py · capa 38 LOTCODIGO</text><text x="10" y="38" font-size="7" fill="#6b7fa3">+ Predio 3 PRECHIP · buffer 500m obras</text>
+      </g>
+      <g transform="translate(640,426)">
+        <rect width="148" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">UPL · Localidad</text><text x="10" y="28" font-size="8" fill="#8ea0c2">upl.py · layer 0 · 33 UPLs</text><text x="10" y="38" font-size="7" fill="#6b7fa3">$or vocación|mención artículo · PARTES_POR_UPL</text>
+      </g>
+      <g transform="translate(798,426)">
+        <rect width="142" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">SINUPOT SDP</text><text x="10" y="28" font-size="8" fill="#8ea0c2">sdp.py · layer2 trat. · layer14 edif.</text><text x="10" y="38" font-size="7" fill="#6b7fa3">EPSG:4686 inSR4326→out4686 · desempate</text>
+      </g>
+      <g transform="translate(324,482)">
+        <rect width="230" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">RAG Normativo híbrido</text><text x="10" y="28" font-size="8" fill="#8ea0c2">normativa.py · vector Chroma + BM25 · RRF k60</text><text x="10" y="38" font-size="7" fill="#6b7fa3">filtro territorial · vigencia 555>acto · derogados downranked</text>
+      </g>
+      <g transform="translate(564,482)">
+        <rect width="150" height="46" rx="10" fill="#1a2746" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">ArcGIS Temático</text><text x="10" y="28" font-size="8" fill="#8ea0c2">arcgis_utils · 15+ capas</text><text x="10" y="38" font-size="7" fill="#6b7fa3">geotecnia[4] socio[4] cult[2] movilidad[3]</text>
+      </g>
+      <g transform="translate(724,482)">
+        <rect width="108" height="46" rx="10" fill="#1a2746" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">Catastro+</text><text x="10" y="28" font-size="8" fill="#8ea0c2">F7 · 5 capas</text><text x="10" y="38" font-size="7" fill="#6b7fa3">constr/manz/dens/var/sector</text>
+      </g>
+      <g transform="translate(842,482)">
+        <rect width="98" height="46" rx="10" fill="#13203d" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">Técnico</text><text x="10" y="28" font-size="8" fill="#8ea0c2">tecnico.py</text><text x="10" y="38" font-size="7" fill="#6b7fa3">HV haversine · buffer</text>
+      </g>
+      <g transform="translate(324,538)">
+        <rect width="200" height="36" rx="10" fill="#13203d" stroke="#263a5e"/><text x="10" y="15" font-size="9" font-weight="700" fill="#cbd5e1">Financiero puro</text><text x="10" y="27" font-size="8" fill="#8ea0c2">financiero.py · sin LLM ni reloj</text>
+      </g>
+      <g transform="translate(534,538)">
+        <rect width="150" height="36" rx="10" fill="#13203d" stroke="#263a5e"/><text x="10" y="15" font-size="9" font-weight="700" fill="#cbd5e1">Geom · shapely</text><text x="10" y="27" font-size="8" fill="#8ea0c2">geom.py · centroid · 4326</text>
+      </g>
+      <g transform="translate(694,538)">
+        <rect width="120" height="36" rx="10" fill="#13203d" stroke="#263a5e"/><text x="10" y="15" font-size="9" font-weight="700" fill="#cbd5e1">Mercado local</text><text x="10" y="27" font-size="8" fill="#8ea0c2">mercado.py · corpus local</text>
+      </g>
+      <g transform="translate(824,538)">
+        <rect width="116" height="36" rx="10" fill="#0f1d36" stroke="#263a5e" stroke-dasharray="4 4"/><text x="10" y="15" font-size="9" font-weight="700" fill="#94a3b8">03 / 08 / 0123… UPLs</text><text x="10" y="27" font-size="8" fill="#64748b">filtrado por territorio exacto</text>
+      </g>
+      <g filter="url(#shadow)" transform="translate(990,102)">
+        <rect width="234" height="48" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="16" font-size="10" font-weight="800" fill="#dbeafe">ChromaDB · decreto_555_2021</text><text x="10" y="30" font-size="8" fill="#8ea0c2">.data/chroma · 845 chunks · v3 metadata</text><text x="10" y="40" font-size="7" fill="#6b7fa3">tema/estado/fecha_vigencia/norma/upls[]</text>
+      </g>
+      <g transform="translate(990,160)">
+        <rect width="234" height="48" rx="10" fill="#13203d" stroke="#2e5bb5"/><text x="10" y="16" font-size="10" font-weight="700" fill="#cbd5e1">Ollama local 100%</text><text x="10" y="30" font-size="8" fill="#8ea0c2">bge-m3 1024d embeddings · qwen3:8b chat</text><text x="10" y="40" font-size="7" fill="#6b7fa3">GET /api/tags healthcheck · citation forcing</text>
+      </g>
+      <g transform="translate(990,218)">
+        <rect width="234" height="56" rx="10" fill="#13203d" stroke="#2e5bb5"/><text x="10" y="16" font-size="10" font-weight="700" fill="#cbd5e1">Corpus versionado git</text><text x="10" y="30" font-size="8" fill="#8ea0c2">data/corpus/decreto_555_2021.jsonl (608 arts)</text><text x="10" y="40" font-size="7" fill="#6b7fa3">+ actos_modificatorios/ · mercado/ · .sha256</text><text x="10" y="50" font-size="7" fill="#64748b">ingesta CLI: descargar→indexar→full→acto→consultar</text>
+      </g>
+      <g transform="translate(990,284)">
+        <rect width="234" height="46" rx="10" fill="#13203d" stroke="#263a5e"/><text x="10" y="15" font-size="9" font-weight="700" fill="#cbd5e1">Modelos / caché</text><text x="10" y="27" font-size="8" fill="#8ea0c2">models_cache huggingface · utilidades PATRON_CHIP</text><text x="10" y="37" font-size="7" fill="#6b7fa3">_ahora_iso · _formatear_numero · _clave_sin_tildes</text>
+      </g>
+      <g transform="translate(990,340)">
+        <rect width="234" height="56" rx="10" fill="#1a2746" stroke="#2e5bb5" stroke-dasharray="4 4"/><text x="10" y="16" font-size="9" font-weight="700" fill="#93b4ff">Errores tipados · 10 códigos</text><text x="10" y="30" font-size="8" fill="#8ea0c2">app/errores.py · CodigoError · construir_error</text><text x="10" y="40" font-size="7" fill="#6b7fa3">PARAMETROS_INVALIDOS→400 · NO_ENCONTRADO→404 · 5xx→502/503</text><text x="10" y="50" font-size="7" fill="#64748b">Retry 3× backoff 0.5s solo GET idempotente 5xx</text>
+      </g>
+      <g transform="translate(990,406)">
+        <rect width="234" height="62" rx="10" fill="#1a2746" stroke="#2e5bb5"/><text x="10" y="16" font-size="9" font-weight="700" fill="#93b4ff">Ingesta actos F4 · 5 formatos</text><text x="10" y="30" font-size="8" fill="#8ea0c2">sisjur_html · pdf · docx · md · txt · SHA256 dedup</text><text x="10" y="42" font-size="7" fill="#6b7fa3">FR-014 fecha &lt;2021-12-30 rechazo · .corpus_consolidado.json</text><text x="10" y="52" font-size="7" fill="#64748b">re-indexación aditiva · huellas multi-doc</text>
+      </g>
+      <g transform="translate(990,478)">
+        <rect width="234" height="56" rx="10" fill="#13203d" stroke="#263a5e"/><text x="10" y="16" font-size="9" font-weight="700" fill="#cbd5e1">Espacio · Vial · Equipamientos</text><text x="10" y="30" font-size="8" fill="#8ea0c2">Fase 3: EPT m²/hab · MVI* jerarquía derivada</text><text x="10" y="42" font-size="7" fill="#6b7fa3">IPS 800m · colegios 500m · cultura 800m · haversine</text><text x="10" y="52" font-size="7" fill="#64748b">+5 si EPT≥15 · +5 avenida · +5 salud/educación cerca</text>
+      </g>
+      <g transform="translate(990,544)">
+        <rect width="234" height="46" rx="10" fill="#13203d" stroke="#263a5e" stroke-dasharray="4 4"/><text x="10" y="15" font-size="9" font-weight="700" fill="#94a3b8">Traces & observabilidad</text><text x="10" y="27" font-size="8" fill="#8ea0c2">source_trace por bloque · source_traces[] multifuente</text><text x="10" y="37" font-size="7" fill="#64748b">FalloCapa / BLOQUE_DEGRADADO · llm_ready_summary</text>
+      </g>
+      <g transform="translate(32,690)">
+        <rect width="220" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">catastrobogota PMBWeb</text><text x="10" y="28" font-size="8" fill="#8ea0c2">catalogopmb.catastrobogota.gov.co</text><text x="10" y="38" font-size="7" fill="#6b7fa3">/PMBWeb/web/buscar?cmd=direccion_chip · spatialRef 102100</text>
+      </g>
+      <g transform="translate(262,690)">
+        <rect width="220" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">ArcGIS REST Catastro</text><text x="10" y="28" font-size="8" fill="#8ea0c2">serviciosgis.catastrobogota.gov.co</text><text x="10" y="38" font-size="7" fill="#6b7fa3">Mapa_Referencia 38:Lote · catastro/* · gestionpublica</text>
+      </g>
+      <g transform="translate(492,690)">
+        <rect width="210" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">Ordenamiento · UPL</text><text x="10" y="28" font-size="8" fill="#8ea0c2">unidadplaneamientolocal MapServer/0</text><text x="10" y="38" font-size="7" fill="#6b7fa3">33 UPLs · NOMBRE→localidad estática</text>
+      </g>
+      <g transform="translate(712,690)">
+        <rect width="200" height="46" rx="10" fill="#162a55" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">SINUPOT SDP</text><text x="10" y="28" font-size="8" fill="#8ea0c2">sinu.sdp.gov.co · POT555 MapServer</text><text x="10" y="38" font-size="7" fill="#6b7fa3">layer2 tratamiento · layer14 edificabilidad</text>
+      </g>
+      <g transform="translate(922,690)">
+        <rect width="150" height="46" rx="10" fill="#1a2746" stroke="#2e5bb5"/><text x="10" y="15" font-size="9" font-weight="800" fill="#dbeafe">Espacio público</text><text x="10" y="28" font-size="8" fill="#8ea0c2">indicadorespaciopublico/8</text><text x="10" y="38" font-size="7" fill="#6b7fa3">EPT por UPL · vial 13 · salud/edu/cult</text>
+      </g>
+      <g transform="translate(1082,690)">
+        <rect width="142" height="46" rx="10" fill="#13203d" stroke="#263a5e" stroke-dasharray="4 4"/><text x="10" y="15" font-size="9" font-weight="700" fill="#94a3b8">World Geocode</text><text x="10" y="28" font-size="8" fill="#8ea0c2">geocode.arcgis.com (fallback)</text><text x="10" y="38" font-size="7" fill="#64748b">preview wizard sin MAPAS_BOGOTA_APIKEY</text>
+      </g>
+      <path d="M 276 124 L 324 139" fill="none" stroke="url(#gAccent)" stroke-width="2.2" marker-end="url(#arrow-accent)"/>
+      <text x="286" y="118" font-size="7" font-weight="700" fill="#60a5fa">stdio JSON-RPC</text>
+      <path d="M 472 168 L 636 138" fill="none" stroke="#3b5fa7" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+      <path d="M 510 168 L 798 140" fill="none" stroke="#3b5fa7" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+      <path d="M 154 252 L 390 250" fill="none" stroke="#6b7fa3" stroke-width="1.2" stroke-dasharray="8 6" opacity="0.7" marker-end="url(#arrow)"/>
+      <text x="210" y="268" font-size="7" fill="#6b7fa3">web construye su propio ServidorLotes (lifespan aislado)</text>
+      <path d="M 474 296 L 398 426" fill="none" stroke="#2e5bb5" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M 520 296 L 556 426" fill="none" stroke="#2e5bb5" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M 620 296 L 714 426" fill="none" stroke="#2e5bb5" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M 660 296 L 870 426" fill="none" stroke="#2e5bb5" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M 500 296 L 438 482" fill="none" stroke="#2e5bb5" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <path d="M 620 296 L 996 134" fill="none" stroke="#22c55e" stroke-width="1.4" marker-end="url(#arrow-ok)"/>
+      <text x="680" y="320" font-size="7" font-weight="700" fill="#22c55e">RAG híbrido → Chroma→Ollama</text>
+      <path d="M 398 472 L 142 690" fill="none" stroke="#2e5bb5" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 550 472 L 372 690" fill="none" stroke="#2e5bb5" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 714 472 L 598 690" fill="none" stroke="#2e5bb5" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 870 472 L 812 690" fill="none" stroke="#2e5bb5" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 990 262 L 1042 246" fill="none" stroke="#3b5fa7" stroke-width="1.2" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+      <g transform="translate(614,648)">
+        <rect x="0" y="0" width="92" height="18" rx="6" fill="#0f1d36" stroke="#2a3a5a"/><text x="46" y="12" text-anchor="middle" font-size="7" fill="#8ea0c2">102100 → WGS84</text>
+      </g>
+    </svg>
+  </div>
+  <div class="legend">
+    <span class="small"><i style="background:#4f9cf0"></i> flujo primario MCP stdio</span>
+    <span class="small"><i style="background:#22c55e"></i> RAG local (sin red)</span>
+    <span class="small"><i style="background:#6b7fa3;border:1px dashed #6b7fa3"></i> aislado / degradable</span>
+    <span class="small"><i style="background:#2e5bb5"></i> provider → fuente externa</span>
+    <span class="small">Flecha continua = sincrónico tipado · Discontinua = async httpx · Amarillo = scoring determinista</span>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="h2">Flujo de orquestación — get_feasibility_report (23 bloques)</div>
+      <div class="tabs"><button class="tab active" onclick="switchTab(0)">Fase A — Identidad & contexto</button><button class="tab" onclick="switchTab(1)">Fase B — Evidencia & scoring</button></div>
+      <div id="tab0">
+        <table class="table">
+          <tr><th>#</th><th>Bloque</th><th>Fuente / capa</th><th>Trazabilidad</th></tr>
+          <tr><td>1</td><td><b>lot_identity</b> + geometry/centroid</td><td>ArcGIS 38 LOTCODIGO / PMB chip</td><td><span class="pill">f=geojson · 4326</span></td></tr>
+          <tr><td>2-7</td><td>context_thematic (6 temáticas)</td><td>valorreferencia · reservavial · obraspublicas …</td><td><span class="pill">layer_id + vigencia</span></td></tr>
+          <tr><td>8-11</td><td>geotechnical_risks (4) · socioeconomic (4)</td><td>gestión riesgos · estratificación/uso/altura/avalúo</td><td><span class="pill">source_traces[]</span></td></tr>
+          <tr><td>12-13</td><td>regulatory · cultural_heritage</td><td>licencias + plusvalía · BIC + arqueológico</td><td><span class="pill">F6 · 15→11 evaluables</span></td></tr>
+          <tr><td>14</td><td>transit_access</td><td>TransMi 800m · SITP 500m · Metro 800m</td><td><span class="pill">+5 movilidad</span></td></tr>
+          <tr><td>15</td><td>catastro_data (F7)</td><td>construccion/manzana/densidad/var/sector</td><td><span class="pill">gather(exceptions)</span></td></tr>
+          <tr><td>16</td><td>urbanistic_parameters (F8)</td><td>SINUPOT layer2 trat. · layer14 edificabilidad</td><td><span class="pill ok">SDL 14 precede RAG</span></td></tr>
+        </table>
+        <div class="callout" style="margin-top:10px"><div class="dot"></div><div><div class="h3" style="font-size:12px">Paralelismo con asyncio.gather</div><div class="small">Fase A resuelve CHIP→geometría (cache LRU) → centroide → UPL + ArcGIS + SDP + catastro en paralelo. Cada capa falla aislada: 5xx → <code>BLOQUE_DEGRADADO</code> con warning, nunca fatal, nunca “no_encontrado”. RAG usa <code>asyncio.to_thread</code> para Chroma/embeds síncronos.</div></div></div>
+      </div>
+      <div id="tab1" style="display:none">
+        <table class="table">
+          <tr><th>#</th><th>Bloque</th><th>Fuente / capa</th><th>Scoring</th></tr>
+          <tr><td>17</td><td>public_space_context</td><td>indicadorespaciopublico/8 EPT por UPL</td><td><span class="pill ok">+5 si EPT ≥15 m²/hab</span></td></tr>
+          <tr><td>18</td><td>road_network_context</td><td>Mapa_Referencia/13 Malla Vial 100m MVITIPO→jerarquía</td><td><span class="pill ok">+5 avenida alta</span></td></tr>
+          <tr><td>19</td><td>nearby_facilities</td><td>salud 7 (800m) + educación 0 (500m) + cultura 1-3 (800m)</td><td><span class="pill ok">+5 salud/educ cerca</span></td></tr>
+          <tr><td>20</td><td>normative_evidence</td><td>RAG híbrido vector+BM25 RRF k60 + filtros vigencia/territorial</td><td><span class="pill">jerarquía 555 &gt; acto</span></td></tr>
+          <tr><td>21</td><td>market_context</td><td>corpus mercado local · seeds.jsonl</td><td><span class="pill">F10</span></td></tr>
+          <tr><td>22</td><td>feasibility (score+confidence)</td><td>scoring.py puro · base 50 clamp [0,100]</td><td><span class="pill ok">high≥10 med5-9 low≤4</span></td></tr>
+          <tr><td>23</td><td>llm_ready_summary</td><td>determinista sin LLM · SC-003</td><td><span class="pill">párrafo ES para pegar en LLM</span></td></tr>
+        </table>
+        <div class="callout" style="margin-top:10px"><div class="dot" style="background:var(--accent)"></div><div><div class="h3" style="font-size:12px">Scoring determinista · sin LLM · sin reloj</div><div class="small"><code>calcular_score</code>: +5 contexto socio · +5 movilidad · −10 riesgo geotécnico alto · −10 patrimonio · +10 parámetros urbanísticos · +5 estacionamientos · −15 Conservación · +5 EPT/avenida/equipamientos · −5 no_encontrado genérico. Trazas <code>r_*</code> con motivo y bloque origen.</div></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="h2">7 tools MCP · contrato estable F4-F10</div>
+      <table class="table">
+        <tr><th>Tool</th><th>Entrada</th><th>Salida clave</th></tr>
+        <tr><td><code>resolve_lot_by_chip</code></td><td>CHIP AAA0072LRYN</td><td>Lote + geometría + source_trace</td></tr>
+        <tr><td><code>resolve_lot_by_address</code></td><td>dirección ≤DIRECCION_MAX_CHARS</td><td>requiere MAPAS_BOGOTA_APIKEY</td></tr>
+        <tr><td><code>resolve_lot_by_coordinates</code></td><td>lng,lat 4326</td><td>intersect esriSpatialRelIntersects</td></tr>
+        <tr><td><code>get_lot_summary_by_chip</code></td><td>CHIP</td><td>resumen 16 bloques degradables</td></tr>
+        <tr><td><code>get_upl</code></td><td>lng,lat</td><td>UPL · localidad derivada · filtrado territorial</td></tr>
+        <tr><td><code>consultar_normativa</code></td><td>consulta + upl opcional</td><td>RAG híbrido + score_hibrido + tema/estado</td></tr>
+        <tr><td><code>get_feasibility_report</code></td><td>chip/address/coords + upl</td><td>Informe 23 bloques + warnings + score</td></tr>
+      </table>
+      <div class="h2" style="margin-top:14px">Convenciones transversales</div>
+      <div class="cards" style="grid-template-columns:1fr 1fr">
+        <div class="mini"><h4>I/O en español, contrato en inglés</h4><p>Dominio ES (lote, UPL, vigencia) · JSON keys EN (<code>source_name, layer_id</code>) Constitución I.</p></div>
+        <div class="mini"><h4>Taxonomía 10 códigos</h4><p><code>PARAMETROS_INVALIDOS→400 · LOTE_NO_ENCONTRADO→404 · FUENTE_5XX→502 · CREDENCIAL_FALTANTE→503</code> Nunca 5xx como “no encontrado”.</p></div>
+      </div>
+      <div class="callout" style="margin-top:10px"><div class="dot" style="background:var(--accent3)"></div><div><div class="h3" style="font-size:12px">Web no comparte estado con MCP</div><div class="small">FastAPI construye su propio <code>ServidorLotes</code> en <code>lifespan</code> con providers reales; mapeo taxonomía→HTTP: 400/404/502/503. SQLite &lt; 5MB, HTMX vendorizado, Fraunces vendorizada, anillo score SVG.</div></div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="h2">RAG híbrido + vigencia/jerarquía + filtro territorial — esquema v3</div>
+    <div class="grid2">
+      <div>
+        <table class="table">
+          <tr><th>Pata</th><th>Mecanismo</th><th>Metadata v3</th></tr>
+          <tr><td>Vectorial</td><td>Chroma bge-m3 1024d · cosine</td><td><code>tema, estado, fecha_vigencia</code></td></tr>
+          <tr><td>Léxica</td><td>BM25 local sobre filtro territorial</td><td><code>norma, source_name, upls[]</code></td></tr>
+          <tr><td>Fusión</td><td>RRF k=60 determinista</td><td><code>score_hibrido</code> aditivo</td></tr>
+          <tr><td>Reglas</td><td>derogados excluidos salvo fallback downranked</td><td>555 &gt; acto, fecha más reciente, id</td></tr>
+          <tr><td>Territorial</td><td><code>construir_filtro_territorial</code> $or exacto list[str]</td><td>PARTE por vocación UPL O mención UPL01-33</td></tr>
+        </table>
+        <div class="small" style="margin-top:8px">CLI debug <code>consultar</code> muestra <code>tema/estado</code> por chunk. Healthcheck barato <code>GET /api/tags</code> verifica modelo chat. Parsing RAG acepta “0,5”. Comparación Conservación sin tildes.</div>
+      </div>
+      <div>
+        <div class="h3" style="font-size:12px;margin-bottom:6px">Corpus consolidado · huellas SHA256</div>
+        <div class="mini"><h4>data/corpus/decreto_555_2021.jsonl — 608 arts · .sha256 versionado</h4><p>Extraído sisjur HTML H7 banner + Datos Abiertos. Chunks con libro/parte, menciones UPL01-33, vocación.</p></div>
+        <div class="mini" style="margin-top:8px"><h4>actos_modificatorios/ · Decreto_122_2023 (derogado, 13 arts)</h4><p>JSONL por acto + .sha256 + .corpus_consolidado.json · misma colección <code>decreto_555_2021</code> con <code>norma_id, fecha_vigencia, titulo_norma</code>. Re-index aditivo con huella multi-doc; FR-014 rechaza fecha &lt;2021-12-30.</p></div>
+        <div class="mini" style="margin-top:8px"><h4>Esquema v2→v3 · rebuild automático</h4><p><code>VERSION_ESQUEMA_METADATOS=3</code> · <code>upls:list[str]</code> membership exacta (nunca CSV $contains) · <code>esquema_metadatos=3</code> en colección.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="h2">Capas & servicios · trazabilidad quirúrgica</div>
+    <table class="table">
+      <tr><th>Capa / servicio</th><th>ID</th><th>Campos clave</th><th>Bloque</th><th>Nota operativa</th></tr>
+      <tr><td>Mapa_Referencia — Lote</td><td>38</td><td>LOTCODIGO, MANZCODIGO</td><td>lot_identity</td><td>f=geojson · geometry point 4326</td></tr>
+      <tr><td>catastro — Predio (tabular)</td><td>Mapa llot 3</td><td>PRECHIP, BARMANPRE, PREAUSO, PREVACTUAL</td><td>destino_económico</td><td>f=pjson nunca geojson (400) · fila mayor PREAUSO</td></tr>
+      <tr><td>UPL</td><td>0</td><td>NOMBRE, CODIGO_UPL</td><td>get_upl · filtro RAG</td><td>Localidad derivada estática; 33 UPLs</td></tr>
+      <tr><td>SINUPOT tratamiento / edificabilidad</td><td>2 / 14</td><td>tratamiento, edificabilidad</td><td>urbanistic_parameters</td><td>EPSG:4686 inSR4326→out4686 · layer14 complementaria</td></tr>
+      <tr><td>PMBWeb buscar / geocode</td><td>—</td><td>direccion_chip, geocodificar_inverso</td><td>resolve por CHIP/dir</td><td>MAPAS_BOGOTA_APIKEY solo dir · retry 3× 0.5s backoff</td></tr>
+      <tr><td>Gestión riesgos / socioeconómico / cultural / movilidad</td><td>4+4+2+3</td><td>—</td><td>F6</td><td>source_traces por sub-fuente · FalloCapa aislado</td></tr>
+      <tr><td>Catastro construido/manzana/densidad/var/sector</td><td>0/0/0/1/0</td><td>—</td><td>catastro_data F7</td><td>gather return_exceptions</td></tr>
+      <tr><td>Espacio público / Malla Vial / Salud-Educ-Cultura</td><td>8 / 13 / 7-0-1..3</td><td>CODIGO_UPL,EPT · MVITIPO · IPS/colegios/cultura</td><td>Fase 3</td><td>EPT≥15 +5 · MVITIPO→alta AC/AK · layer museos 6 =400 excluido</td></tr>
+    </table>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card">
+      <div class="h2">Decisiones arquitectónicas (ADRs implícitos)</div>
+      <div class="mini"><h4>Providers aislados + modelos Pydantic</h4><p>Principio II: cada fuente es un boundary. <code>arcgis_utils.CapaConfig</code> centraliza params/consulta; errores nunca se silencian (Fail Loud).</p></div>
+      <div class="mini" style="margin-top:8px"><h4>Caché solo éxitos · TTL inyectable</h4><p>CHIP→lote+geometría cacheado; errores y “no encontrado” nunca. LRU128 + reloj inyectable para tests contractuales.</p></div>
+      <div class="mini" style="margin-top:8px"><h4>Degradación por bloque, no fatal</h4><p>UPL null + warning; RAG vacío + causa; 5xx → BLOQUE_DEGRADADO. El informe siempre retorna 23 bloques aunque fallen 5 fuentes.</p></div>
+    </div>
+    <div class="card">
+      <div class="h2">Operación & entrega</div>
+      <table class="table">
+        <tr><th>Dimensión</th><th>Estado</th></tr>
+        <tr><td>Stack</td><td>Python 3.11+ · mcp≥1.0 + httpx + pydantic + chromadb + beautifulsoup4 + ollama + shapely</td></tr>
+        <tr><td>Transporte</td><td>stdio (FastMCP ≥1.x fallback MCPServer 2.x) · lifespan cierra httpx</td></tr>
+        <tr><td>Docker</td><td>multi-etapa · usuario no privilegiado <code>mcp</code> · CMD python -m app.main</td></tr>
+        <tr><td>Tests</td><td>486 passing (smoke 6 + contract 480) · httpx.MockTransport CHIP_VALIDO AAA0072LRYN · sin red ni Ollama</td></tr>
+        <tr><td>Ingesta</td><td><code>python -m app.ingesta.corpus {descargar|indexar|full|consultar|acto}</code> · descargar sin Ollama · indexar reconstruye si cambia modelo</td></tr>
+        <tr><td>Env</td><td>MAPAS_BOGOTA_APIKEY (solo dir) · CACHE_TTL_SEGUNDOS (0 desactiva) · OLLAMA_* (chat bge-m3/qwen3:8b)</td></tr>
+        <tr><td>Web</td><td>uvicorn · Jinja2 · HTMX 2.0.4 vendorizado · Leaflet 320px · World geocode fallback sin API · validación inline</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="small" style="margin-top:16px;text-align:center;color:var(--muted)">Generado archify showcase · evidencia: app/main.py · app/providers/* · app/scoring.py · app/cache.py · specs/001-010 · 20260809-01-perplexity.md · Constitución v1.0.0 · pyproject.toml · Docker. Para exportar: PNG/JPEG/WebP/SVG/WebM desde el header. Tema claro/oscuro persistente. Diagramas hijos sugeridos: <b>Secuencia 23 bloques</b> (timeline 2 fases) · <b>Flujo RAG híbrido</b> (vector+BM25→RRF→vigencia) · <b>Ingesta corpus</b> (descargar→actos→Chroma).</div>
+</div>
+
+<script>
+const stage=document.getElementById('stage');
+let scale=1, tx=0, ty=0, dragging=false, sx=0, sy=0;
+function apply(){ stage.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; stage.style.transformOrigin='0 0'; }
+function zoom(d){ scale=Math.min(2.2,Math.max(0.6, scale+d)); apply(); }
+function resetView(){ scale=1; tx=0; ty=0; apply(); }
+function fitSvg(){ resetView(); document.getElementById('svgWrap').scrollIntoView({behavior:'smooth',block:'start'}); }
+function toggleTheme(){ const h=document.documentElement; h.setAttribute('data-theme', h.getAttribute('data-theme')==='dark'?'light':'dark'); }
+function switchTab(n){
+  document.getElementById('tab0').style.display=n===0?'block':'none';
+  document.getElementById('tab1').style.display=n===1?'block':'none';
+  document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',i===n));
+}
+stage.addEventListener('wheel', e=>{ e.preventDefault(); zoom(e.deltaY>0?-0.08:0.08); },{passive:false});
+stage.addEventListener('mousedown', e=>{ dragging=true; sx=e.clientX - tx; sy=e.clientY - ty; });
+window.addEventListener('mouseup', ()=> dragging=false);
+window.addEventListener('mousemove', e=>{ if(!dragging) return; tx=e.clientX - sx; ty=e.clientY - sy; apply(); });
+function exportSVG(){
+  const s=new XMLSerializer().serializeToString(stage);
+  const blob=new Blob([s],{type:'image/svg+xml'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='mcp-bogota-arquitectura.svg'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+async function exportPNG(){
+  const s=new XMLSerializer().serializeToString(stage);
+  const svgBlob=new Blob([s],{type:'image/svg+xml;charset=utf-8'});
+  const url=URL.createObjectURL(svgBlob);
+  const img=new Image(); img.onload=()=>{
+    const c=document.createElement('canvas'); c.width=1260*2; c.height=760*2;
+    const ctx=c.getContext('2d'); ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--bg'); ctx.fillRect(0,0,c.width,c.height);
+    ctx.drawImage(img,0,0,c.width,c.height);
+    c.toBlob(b=>{ const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download='mcp-bogota-arquitectura.png'; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1500); URL.revokeObjectURL(url); },'image/png');
+  }; img.src=url;
+}
+</script>
+</body>
+</html>

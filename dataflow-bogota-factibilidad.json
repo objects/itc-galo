@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "mcp-bogota — Dataflow RAG hibrido v3 (ingesta → retrieval → informe)",
+    "subtitle": "Corpus 555 + actos · Chroma v3 · hibrido vector+BM25 RRF k=60 · vigencia/jerarquia",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      720
+    ]
+  },
+  "stages": [
+    {
+      "label": "Origenes"
+    },
+    {
+      "label": "Corpus"
+    },
+    {
+      "label": "Indexado"
+    },
+    {
+      "label": "Retrieval"
+    },
+    {
+      "label": "Informe"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "sisjur",
+      "type": "external",
+      "label": "SisJur / POT",
+      "sublabel": "555 + actos",
+      "stage": 0,
+      "row": 0,
+      "tag": "sisjur"
+    },
+    {
+      "id": "cli",
+      "type": "backend",
+      "label": "CLI ingesta",
+      "sublabel": "5 formatos",
+      "stage": 1,
+      "row": 0,
+      "tag": "SHA-256"
+    },
+    {
+      "id": "corpus",
+      "type": "database",
+      "label": "Corpus",
+      "sublabel": "JSONL .sha256",
+      "stage": 1,
+      "row": 1,
+      "tag": "git verdad"
+    },
+    {
+      "id": "chunk",
+      "type": "backend",
+      "label": "Chunker UPL",
+      "sublabel": "tema estado upls",
+      "stage": 2,
+      "row": 0,
+      "tag": "v3"
+    },
+    {
+      "id": "indices",
+      "type": "database",
+      "label": "Indices hibridos",
+      "sublabel": "Chroma 845 + BM25",
+      "stage": 2,
+      "row": 1,
+      "tag": "bge-m3 1024d"
+    },
+    {
+      "id": "rrf",
+      "type": "backend",
+      "label": "RRF k=60",
+      "sublabel": "fusion hibrida",
+      "stage": 3,
+      "row": 0,
+      "tag": "score_hibrido"
+    },
+    {
+      "id": "reglas",
+      "type": "backend",
+      "label": "Reglas",
+      "sublabel": "vigencia jerarquia",
+      "stage": 3,
+      "row": 1,
+      "tag": "555>acto"
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "qwen3:8b",
+      "sublabel": "citation forcing",
+      "stage": 3,
+      "row": 2,
+      "tag": "Ollama"
+    },
+    {
+      "id": "informe",
+      "type": "backend",
+      "label": "Informe 23b",
+      "sublabel": "scoring puro",
+      "stage": 4,
+      "row": 0,
+      "tag": "llm_ready"
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web",
+      "sublabel": "FastAPI HTMX",
+      "stage": 4,
+      "row": 1,
+      "tag": "SQLite"
+    }
+  ],
+  "flows": [
+    {
+      "from": "sisjur",
+      "to": "cli",
+      "label": "descargar acto",
+      "variant": "default"
+    },
+    {
+      "from": "cli",
+      "to": "corpus",
+      "label": "FR-014 dedup",
+      "variant": "emphasis",
+      "labelDy": 30
+    },
+    {
+      "from": "corpus",
+      "to": "chunk",
+      "label": "JSONL -> chunks v3",
+      "variant": "default",
+      "labelDy": -28
+    },
+    {
+      "from": "chunk",
+      "to": "indices",
+      "label": "vector + lexico $or UPL",
+      "variant": "emphasis",
+      "labelDy": 28
+    },
+    {
+      "from": "indices",
+      "to": "rrf",
+      "label": "top-k hibrido",
+      "variant": "emphasis"
+    },
+    {
+      "from": "rrf",
+      "to": "reglas",
+      "label": "score hibrido",
+      "variant": "default",
+      "labelDy": 54
+    },
+    {
+      "from": "reglas",
+      "to": "llm",
+      "label": "contexto vigente",
+      "variant": "default",
+      "labelDy": 28
+    },
+    {
+      "from": "llm",
+      "to": "informe",
+      "label": "evidencia",
+      "variant": "emphasis",
+      "labelDy": 28
+    },
+    {
+      "from": "informe",
+      "to": "web",
+      "label": "llm_ready_summary",
+      "variant": "security",
+      "labelDy": 28
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Esquema v3 — metadata aditiva",
+      "items": [
+        "Cada chunk: tema (titulo/seccion), estado (vigente/derogado banner H7), fecha_vigencia, upls list[str] membresia exacta, norma/source_name",
+        "Filtro territorial $or: parte aplicable por vocacion O mencion explicita UPL (33 UPLs); Chroma gitignored, corpus JSONL+.sha256 versionado"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Hibrido + RRF + reglas deterministas",
+      "items": [
+        "Vector Chroma + lexico BM25 local sobre filtro territorial, fusion RRF k=60 determinista con score_hibrido",
+        "Reglas post-fusion: derogados excluidos salvo fallback downranked, jerarquia 555 > acto, desempate fecha_vigencia reciente -> id",
+        "Precedencia temporal en prompt + citation forcing verifica citas literales antes del LLM"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Informe sin alucinar",
+      "items": [
+        "23 bloques (19 evaluables) scoring puro calcular_score sin LLM: base50 clamps [0,100], high>=10 med5-9 low<=4",
+        "Cada bloque con 5 campos trazabilidad + source_traces por capa + FalloCapa; degradacion por bloque nunca fatal",
+        "llm_ready_summary determinista en espanol sin LLM"
+      ]
+    }
+  ]
+}
