@@ -39,24 +39,28 @@ seguridad crítica y mantenida; el valor del producto está en las 7 tools.
 - [ ] El 401 del `/mcp` incluye `WWW-Authenticate: ... resource_metadata="..."`
       (probe lazy de Claude: "Required when the server asks").
 
-### Soporte en el SDK (mcp ≥ 2.x, ya instalado)
+### Implementado en el repo (Fase 3, código listo)
 
-`MCPServer.__init__` acepta `auth=AuthSettings(...)` + `token_verifier`:
-el `streamable_http_app()` monta entonces `AuthenticationMiddleware`
-(Bearer), publica las rutas `/.well-known/*` y responde 401 con
-`resource_metadata`. Falta solo un verificador JWT concreto del AS elegido:
+El lado *resource server* está implementado y testeado — solo falta el AS real:
 
-```python
-# Esbozo Fase 3 (NO incluido en Fase 1): app/servidor_http.py ampliada
-from mcp.server.auth.settings import AuthSettings
-# auth = AuthSettings(issuer_url="https://<AS>/<tenant>",
-#                     resource_server_url="https://mcp.<dominio>",
-#                     required_scopes=["mcp:tools"])
-# + token_verifier=JWTVerifier(jsks del AS) — verificar contra la docs del AS
-# crear_servidor_mcp(..., auth=auth, token_verifier=...) y re-exportar auth en
-# streamable_http_app(). Requiere un pequeño cambio en crear_servidor_mcp():
-# pasar auth/token_verificador al constructor del MCPServer.
+| Pieza | Archivo |
+|-------|---------|
+| Verificador JWT (RS256, JWKS cacheado, `iss`/`aud` RFC 8707/exp/sub, fail-closed) | `app/verificador_jwt.py` |
+| Config por entorno: `MCP_AUTH_ISSUER_URL` + `MCP_AUTH_RESOURCE_URL` + `MCP_AUTH_JWKS_URL` (+`MCP_AUTH_SCOPES` CSV, opcional) — viajan juntas o nada (fail-fast) | `app/servidor_http.py` (`_resolver_auth_desde_entorno`) |
+| Cableado al SDK: `AuthSettings` + `token_verifier` al constructor del MCPServer → middleware Bearer, 401 con `resource_metadata`, ruta `/.well-known/oauth-protected-resource` | `crear_servidor_mcp(..., auth, token_verifier)` en `app/main.py` + `construir_componentes_auth` |
+
+Arranque producción (VPS/túnel con dominio):
+
+```bash
+MCP_ALLOWED_ORIGINS=https://mcp.midominio.co \
+MCP_AUTH_ISSUER_URL=https://<tenant>.auth0.com/ \
+MCP_AUTH_RESOURCE_URL=https://mcp.midominio.co \
+MCP_AUTH_JWKS_URL=https://<tenant>.auth0.com/.well-known/jwks.json \
+MCP_AUTH_SCOPES=mcp:tools \
+python -m app.main --transport http --host 0.0.0.0 --port 8000
 ```
+
+El SDK se encarga de: 401 `Bearer error="invalid_token", resource_metadata="…/.well-known/oauth-protected-resource"` para probe lazy de Claude; 403 `insufficient_scope`; metadata RFC 9728 pública. En el AS (Auth0) falta solo tu tenant: habilitar DCR + resource indicators y allowlist del redirect de ChatGPT (`https://chatgpt.com/connector/oauth/{callback_id}`) — ver `conectores-clientes.md` §3a.
 
 Para Claude, OAuth no es estrictamente necesario (admite `none`/`static_headers`
 beta con bearer estático); para ChatGPT sí lo es. Decide el alcance de tu

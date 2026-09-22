@@ -249,9 +249,23 @@ Añade esa URL como *custom connector* en Claude (o conéctala con
 `none`/bearer estático **solo es aceptable en demo**: las tools son read-only
 sobre datos públicos del catastro/POT de Bogotá y no exponen datos personales.
 Si el túnel cambia de hostname, actualiza `MCP_ALLOWED_ORIGINS` con el origen
-público (de él se deriva también el `Host` permitido). Para producción con OAuth
-2.1 (requisito del connector de ChatGPT), ver
-`specs/012-cloud-remote-mcp/produccion-oauth.md`.
+público (de él se deriva también el `Host` permitido).
+
+### OAuth 2.1 (Fase 3 — resource server implementado)
+
+Para producción (y requisito del custom connector de ChatGPT), activa la
+verificación Bearer JWT con `MCP_AUTH_ISSUER_URL` + `MCP_AUTH_RESOURCE_URL` +
+`MCP_AUTH_JWKS_URL` (viajan juntas o nada; ver `.env.example`). El AS es
+gestionado (Auth0/Okta/Cognito — decisión D-01): el repo solo **verifica**
+tokens con `app/verificador_jwt.py` (RS256 vía JWKS, `iss`/`aud` RFC 8707 /
+exp / sub, fail-closed → 401) y publica la metadata RFC 9728 en
+`/.well-known/oauth-protected-resource`. Sin esas variables el modo http se
+comporta exactamente como en Fases 1-2.
+
+Guías: [`specs/012-cloud-remote-mcp/produccion-oauth.md`](./specs/012-cloud-remote-mcp/produccion-oauth.md)
+(VPS + TLS + AS gestionado) y [`specs/012-cloud-remote-mcp/conectores-clientes.md`](./specs/012-cloud-remote-mcp/conectores-clientes.md)
+(Claude Desktop/ai/Code, **OpenAI**: Responses API, Agents SDK y connector
+ChatGPT con OAuth — con la verificación de la demo ejecutada el 2026-09-22).
 
 ### Tools expuestas (7)
 

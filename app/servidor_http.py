@@ -81,6 +81,15 @@ class ConfigTransporte:
     host: str = "127.0.0.1"
     puerto: int = 8000
     origines_permitidos: tuple[str, ...] = ()
+    # Fase 3 (OAuth 2.1 resource server, D-01): los tres viajan juntos o ninguno.
+    emisor_url: str | None = None  # MCP_AUTH_ISSUER_URL (AS gestionado)
+    recurso_url: str | None = None  # MCP_AUTH_RESOURCE_URL (URL pública del /mcp)
+    jwks_url: str | None = None  # MCP_AUTH_JWKS_URL (JWKS del AS)
+    scopes_requeridos: tuple[str, ...] = ()  # MCP_AUTH_SCOPES (CSV)
+
+    @property
+    def auth_activa(self) -> bool:
+        return bool(self.emisor_url and self.recurso_url)
 
 
 def _parsear_origines(valor_env: str | None) -> tuple[str, ...]:
@@ -147,7 +156,59 @@ def resolver_config(
         host=host,
         puerto=puerto,
         origines_permitidos=_parsear_origines(os.environ.get("MCP_ALLOWED_ORIGINS")),
+        **_resolver_auth_desde_entorno(),
     )
+
+
+def _resolver_auth_desde_entorno() -> dict[str, Any]:
+    """Campos OAuth de `ConfigTransporte` desde el entorno, validados fail-fast.
+
+    Regla: `MCP_AUTH_ISSUER_URL` y `MCP_AUTH_RESOURCE_URL` viajan OBLIGATORIAMENTE
+    juntos (resource server sin emisor verificable es una configuración rota); si
+    se activa el par, `MCP_AUTH_JWKS_URL` es requerido — la URL del JWKS no se
+    deduce para no hacer red al arrancar. `MCP_AUTH_SCOPES` es opcional (CSV;
+    vacío = cualquier token válido del emisor, sin exigencia de scope).
+    """
+    emisor = (os.environ.get("MCP_AUTH_ISSUER_URL") or "").strip()
+    recurso = (os.environ.get("MCP_AUTH_RESOURCE_URL") or "").strip()
+    jwks = (os.environ.get("MCP_AUTH_JWKS_URL") or "").strip()
+    scopes_bruto = (os.environ.get("MCP_AUTH_SCOPES") or "").strip()
+    if not emisor and not recurso:
+        if scopes_bruto or jwks:
+            raise ErrorConfigTransporte(
+                "MCP_AUTH_SCOPES/MCP_AUTH_JWKS_URL requieren autenticación activa "
+                "(MCP_AUTH_ISSUER_URL y MCP_AUTH_RESOURCE_URL)."
+            )
+        return {}
+    if not (emisor and recurso):
+        raise ErrorConfigTransporte(
+            "la autenticación OAuth requiere MCP_AUTH_ISSUER_URL y "
+            "MCP_AUTH_RESOURCE_URL configurados a la vez."
+        )
+    _validar_url(emisor, "MCP_AUTH_ISSUER_URL")
+    _validar_url(recurso, "MCP_AUTH_RESOURCE_URL")
+    if not jwks:
+        raise ErrorConfigTransporte(
+            "falta MCP_AUTH_JWKS_URL (URL del JWKS del AS, p. ej. "
+            "https://<tenant>.auth0.com/.well-known/jwks.json)."
+        )
+    _validar_url(jwks, "MCP_AUTH_JWKS_URL")
+    scopes = tuple(s.strip() for s in scopes_bruto.split(",") if s.strip())
+    return {
+        "emisor_url": emisor,
+        "recurso_url": recurso,
+        "jwks_url": jwks,
+        "scopes_requeridos": scopes,
+    }
+
+
+def _validar_url(valor: str, nombre: str) -> None:
+    """URL absoluta http(s):// (https es responsabilidad del TLS del borde)."""
+    partes = urlsplit(valor)
+    if partes.scheme not in ("http", "https") or not partes.netloc:
+        raise ErrorConfigTransporte(
+            f"{nombre} debe ser una URL absoluta http(s)://..., recibido: {valor!r}."
+        )
 
 
 def _hosts_permitidos(config: ConfigTransporte) -> list[str]:
@@ -199,3 +260,34 @@ def construir_app_http(servidor: Any, config: ConfigTransporte) -> Starlette:
         json_response=True,
         transport_security=seguridad,
     )
+
+
+def construir_componentes_auth(
+    config: ConfigTransporte,
+) -> tuple[Any, Any] | tuple[None, None]:
+    """(AuthSettings, VerificadorJWT) si el modo resource server OAuth está activo.
+
+    Sin emisión de tokens (D-01): solo se configura la verificación del Bearer JWT
+    que aplicará el middleware del SDK sobre `/mcp`, y la metadata RFC 9728 que
+    publica la ruta `/.well-known/oauth-protected-resource`. Con OAuth inactivo
+    devuelve (None, None) — el comportamiento de Fase 1/2 queda intacto.
+    """
+    if not config.auth_activa:
+        return None, None
+    # Import local: mantiene el arranque stdio ligero y evita exigir pyjwt/aiohttp
+    # a entornos mínimos del SDK (Fase 3 es opt-in por variables MCP_AUTH_*).
+    from mcp.server.auth.settings import AuthSettings
+
+    from app.verificador_jwt import VerificadorJWT
+
+    auth = AuthSettings(
+        issuer_url=config.emisor_url,
+        resource_server_url=config.recurso_url,
+        required_scopes=list(config.scopes_requeridos) or None,
+    )
+    verificador = VerificadorJWT(
+        jwks_url=config.jwks_url or "",
+        emisor_url=config.emisor_url or "",
+        audiencia=config.recurso_url or "",
+    )
+    return auth, verificador

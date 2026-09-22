@@ -109,7 +109,12 @@ from app.providers.normativa import (
 from app.providers.sdp import SDPProvider
 from app.providers.upl import UPLProvider, VIGENCIA_UPL_DEFAULT
 from app.scoring import BloquesEvaluables, calcular_score
-from app.servidor_http import TRANSPORTES_VALIDOS, construir_app_http, resolver_config
+from app.servidor_http import (
+    TRANSPORTES_VALIDOS,
+    construir_app_http,
+    construir_componentes_auth,
+    resolver_config,
+)
 # Motor financiero (Fase 2) y técnico (Fase 3): funciones puras y deterministas (SC-003).
 from app.financiero import analisis_financiero as _analisis_financiero
 from app.tecnico import analisis_tecnico as _analisis_tecnico
@@ -2562,13 +2567,24 @@ def _construir_servidor_lotes() -> ServidorLotes:
         SDPProvider(),
     )
 
-def crear_servidor_mcp(servidor_lotes: ServidorLotes | None = None) -> _ClaseServidorMCP:
+def crear_servidor_mcp(
+    servidor_lotes: ServidorLotes | None = None,
+    *,
+    auth: Any | None = None,
+    token_verifier: Any | None = None,
+) -> _ClaseServidorMCP:
     """Construye el servidor MCP registrando EXACTAMENTE las 7 tools del contrato (4 F1 + 2 F2 + 1 F3).
 
     Registra un lifespan que cierra los providers (httpx.AsyncClient) al terminar
     el ciclo de vida del servidor MCP (decision A1 punto 3). El lifespan solo
-    corre cuando el servidor arranca (mcp.run()); los tests construyen servidores
-    con MockTransport y los cierran manualmente via servidor.aclose().
+    corre cuando el servidor arranca (mcp.run() o el session manager del modo
+    HTTP, F12); los tests construyen servidores con MockTransport y los cierran
+    manualmente via servidor.aclose().
+
+    `auth`/`token_verifier` (F12 Fase 3): los pasa al constructor del SDK para
+    que el transporte HTTP actue como resource server OAuth 2.1 (verificar Bearer
+    JWT + publicar metadata RFC 9728). Sin auth (stdio o Fases 1-2) el
+    comportamiento es identico al historico.
     """
     servidor_lotes = servidor_lotes or _construir_servidor_lotes()
 
@@ -2579,7 +2595,11 @@ def crear_servidor_mcp(servidor_lotes: ServidorLotes | None = None) -> _ClaseSer
         finally:
             await servidor_lotes.aclose()
 
-    mcp = _ClaseServidorMCP(NOMBRE_SERVIDOR, lifespan=_lifespan_cerrar_providers)
+    kwargs: dict[str, Any] = {}
+    if auth is not None:
+        kwargs["auth"] = auth
+        kwargs["token_verifier"] = token_verifier
+    mcp = _ClaseServidorMCP(NOMBRE_SERVIDOR, lifespan=_lifespan_cerrar_providers, **kwargs)
     mcp.tool()(servidor_lotes.resolve_lot_by_chip)
     mcp.tool()(servidor_lotes.resolve_lot_by_address)
     mcp.tool()(servidor_lotes.resolve_lot_by_coordinates)
@@ -2642,7 +2662,19 @@ def main() -> None:
             file=sys.stderr,
         )
         raise SystemExit(2)
-    app = construir_app_http(mcp, config)
+    auth, verificador = construir_componentes_auth(config)
+    if auth is not None:
+        # F12 Fase 3: resource server OAuth — servidor dedicado con verificacion
+        # JWT del AS gestionado sobre /mcp (el mcp de modulo es sin auth).
+        servidor_http = crear_servidor_mcp(servidor_lotes, auth=auth, token_verifier=verificador)
+        print(
+            f"[arranque] OAuth 2.1 activo: emisor {config.emisor_url} "
+            f"(recurso {config.recurso_url}).",
+            flush=True,
+        )
+    else:
+        servidor_http = mcp
+    app = construir_app_http(servidor_http, config)
     print(
         f"[arranque] servidor MCP Streamable HTTP en http://{config.host}:{config.puerto}/mcp "
         f"(validacion Origin activa; stdio sigue disponible con --transport stdio).",
