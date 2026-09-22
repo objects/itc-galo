@@ -61,10 +61,12 @@ con evidencia normativa del POT (RAG sobre el Decreto 555 de 2021).
   fallback downranked cuando los vigentes no llenan `top_k`, y jerarquía 555 > acto modificatorio en
   empates de score (desempates: fecha_vigencia más reciente, luego id). Tests:
   `tests/contract/test_rag_hibrido_vigencia.py`.
- - **Repositorio en `master`; HEAD `9641504` (feat(web): wizard prefactibilidad 3 pasos) + revisión feature-por-feature cerrada.**
-  La aplicación está implementada y probada: F1, F2, F3, F4, F5 (extendida wizard), F6, F7, F8 y Fase 3 completas,
-  **486 tests passing (smoke 6 + contract 480), 0 failed**, gate PASS, con las **7 tools**
-  registradas (F4, F5, F6, F7 y F8 no añaden tools MCP). **SC-001 verificado** con la
+ - **Repositorio en `master`; HEAD `a94db6b` (chore: recursos y config) sobre `04bf4d8` (F12 implementada) + revisión feature-por-feature cerrada.**
+  La aplicación está implementada y probada: F1–F8, Fase 3, F9 (UX web informe), F10 (motor
+  mercado), F11 (catálogo extensible + wizard v2), Fase 5 (caché TTL + higiene) y **F12
+  (transporte Streamable HTTP opcional)** completas,
+  **526 tests passing (smoke 6 + contract 520), 0 failed**, gate PASS, con las **7 tools**
+  registradas (F4–F12 no añaden tools MCP). **SC-001 verificado** con la
   ingesta real del Decreto 122 de 2023: banner de derogación capturado, corpus indexado y RAG con
   precedencia temporal del acto sobre el 555.
 - **Filtro territorial FR-002 funcional + enriquecimiento UPL del corpus** (post-F8): la metadata
@@ -348,7 +350,8 @@ Para actualizar el CLI y regenerar el tooling del repo (`.specify/`, `.opencode/
   config fail-fast, lifespan encadenado, mount ASGI US3 — todo hermético vía TestClient).
   Fixtures con `httpx.MockTransport` en `tests/conftest.py` (sin red real ni Ollama).
 - `specs/001-*`, `specs/002-*`, `specs/003-*`, `specs/004-*`, `specs/005-*`, `specs/006-*`,
-  `specs/007-*`, `specs/008-*`, `specs/009-ux-web-informe-completo` (F9, 21 tareas), `specs/010-motor-mercado` (F10, 28 tareas): features Spec Kit (ver "Estado actual").
+  `specs/007-*`, `specs/008-*`, `specs/009-ux-web-informe-completo` (F9, 21 tareas), `specs/010-motor-mercado` (F10, 28 tareas),
+  `specs/011-catalogo-extensible-wizard-v2` (F11) y `specs/012-cloud-remote-mcp` (F12, 20 tareas): features Spec Kit (ver "Estado actual").
 - `.specify/`: feature.json (feature activa), integration.json (opencode, separador `.`),
   memory/constitution.md, scripts/, templates/, workflows/.
 - `.opencode/`: commands/ (comandos `speckit.*`), opencode.json, package.json (plugin).
